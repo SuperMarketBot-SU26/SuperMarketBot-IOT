@@ -12,18 +12,20 @@
  *    - NewPing by Tim Eckel
  *    - WebSockets by Markus Sattler (Links2004/arduinoWebSockets)
  *    - ArduinoJson by Benoit Blanchon
+ *    - Adafruit NeoPixel (WS2812 onboard)
  * =====================================================================*/
 
 #include "Config.h"
 #include "Motors.h"
 #include "Sensors.h"
 #include "Odometry.h"
+#include "StatusRGB.h"
 #include "WebUI.h"
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 RobotState g_state = {
-  .usFront = 300, .usBack = 300, .usLeft = 300, .usRight = 300,
-  .lidarFront = 300, .lidarBack = 300,
+  .usFront = US_PING_MAX_CM, .usBack = US_PING_MAX_CM, .usLeft = US_PING_MAX_CM, .usRight = US_PING_MAX_CM,
+  .lidarFront = LIDAR_MAX_CM, .lidarBack = LIDAR_MAX_CM,
   .rpmFL = 0, .rpmRL = 0, .rpmFR = 0, .rpmRR = 0,
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
   .cmdX = 0, .cmdY = 0,
@@ -142,12 +144,19 @@ static void taskWebIO(void *pvParams) {
   const TickType_t broadcastPeriod = pdMS_TO_TICKS(100); // 10 Hz telemetry
   TickType_t lastBroadcast = xTaskGetTickCount();
 
+  static uint32_t lastRgbMs = 0;
+  const uint32_t rgbPeriod = 35; // ~28 Hz, du mượt cho breathing
+
   while (true) {
     webUILoop();  // handleClient + ws.loop()
 
     if ((xTaskGetTickCount() - lastBroadcast) >= broadcastPeriod) {
       webUIBroadcast();
       lastBroadcast = xTaskGetTickCount();
+    }
+    if (millis() - lastRgbMs >= rgbPeriod) {
+      lastRgbMs = millis();
+      statusRgbUpdate();
     }
     vTaskDelay(pdMS_TO_TICKS(2)); // nhường CPU ngắn
   }
@@ -158,12 +167,22 @@ static void taskWebIO(void *pvParams) {
  * =================================================================== */
 void setup() {
   Serial.begin(115200);
-  Serial.println(F("\n== SmartMarketBot booting =="));
+  // USB CDC trên S3 xuất hiện sau vài trăm ms — delay giúp log app không lẫn với boot ROM
+  delay(300);
+  Serial.println();
+  Serial.println(F("== SmartMarketBot booting =="));
 
   // ── Phần cứng ────────────────────────────────────────────────────
   motorsInit();
   sensorsInit();
   odomInit();
+
+  // LED RGB onboard (sau odom: tránh cấu hình GPIO 48 trùng)
+  statusRgbInit();
+#if SMB_ONBOARD_RGB && (SMB_NEOPIXEL_PIN == ENC_RR)
+  Serial.println(F("[LED] Onboard RGB on GPIO48: rear-right encoder ISR disabled."));
+  Serial.println(F("      Set SMB_ONBOARD_RGB=0 in Config.h to use 4 encoders (no board LED)."));
+#endif
 
   // ── WiFi + Web ───────────────────────────────────────────────────
   webUIInit();

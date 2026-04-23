@@ -15,10 +15,10 @@
 #include <NewPing.h>
 
 // 4 cảm biến siêu âm dùng cùng 1 chân TRIG (GPIO14)
-static NewPing g_sonarF(US_TRIG, US_ECHO_F, US_MAX_CM);
-static NewPing g_sonarB(US_TRIG, US_ECHO_B, US_MAX_CM);
-static NewPing g_sonarL(US_TRIG, US_ECHO_L, US_MAX_CM);
-static NewPing g_sonarR(US_TRIG, US_ECHO_R, US_MAX_CM);
+static NewPing g_sonarF(US_TRIG, US_ECHO_F, US_PING_MAX_CM);
+static NewPing g_sonarB(US_TRIG, US_ECHO_B, US_PING_MAX_CM);
+static NewPing g_sonarL(US_TRIG, US_ECHO_L, US_PING_MAX_CM);
+static NewPing g_sonarR(US_TRIG, US_ECHO_R, US_PING_MAX_CM);
 
 inline void sensorsInit() {
   // UART LiDAR trước & sau — TF-Luna mặc định 115200 8N1
@@ -29,18 +29,18 @@ inline void sensorsInit() {
 /**
  * Quét 4 siêu âm tuần tự vì dùng chung TRIG (GPIO14).
  * Ghi kết quả trực tiếp vào g_state. Giá trị 0 cm = ngoài tầm.
- * NewPing.ping_cm() là blocking tối đa ~20ms cho 3m.
+ * (Blocking ~3–4ms mỗi hướng với US_PING_MAX_CM=200)
  */
 inline void sensorsPollUS() {
   g_state.usFront = g_sonarF.ping_cm();  delay(5);
   g_state.usBack  = g_sonarB.ping_cm();  delay(5);
   g_state.usLeft  = g_sonarL.ping_cm();  delay(5);
   g_state.usRight = g_sonarR.ping_cm();
-  // NewPing trả về 0 khi không có echo → coi như rất xa
-  if (g_state.usFront == 0) g_state.usFront = US_MAX_CM;
-  if (g_state.usBack  == 0) g_state.usBack  = US_MAX_CM;
-  if (g_state.usLeft  == 0) g_state.usLeft  = US_MAX_CM;
-  if (g_state.usRight == 0) g_state.usRight = US_MAX_CM;
+  // 0 = không echo trong cửa sổ → coi như tầm tối đa ước tính (hành lang trống)
+  if (g_state.usFront == 0) g_state.usFront = US_PING_MAX_CM;
+  if (g_state.usBack  == 0) g_state.usBack  = US_PING_MAX_CM;
+  if (g_state.usLeft  == 0) g_state.usLeft  = US_PING_MAX_CM;
+  if (g_state.usRight == 0) g_state.usRight = US_PING_MAX_CM;
 }
 
 /* ---------------------------------------------------------------
@@ -79,8 +79,16 @@ inline bool readTfLuna(HardwareSerial &ser, int16_t &distCm) {
 
 inline void sensorsPollLidar() {
   int16_t d;
-  if (readTfLuna(Serial1, d)) g_state.lidarFront = d;
-  if (readTfLuna(Serial2, d)) g_state.lidarBack  = d;
+  if (readTfLuna(Serial1, d)) {
+    if (d < 0) d = 0;
+    if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
+    g_state.lidarFront = d;
+  }
+  if (readTfLuna(Serial2, d)) {
+    if (d < 0) d = 0;
+    if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
+    g_state.lidarBack = d;
+  }
 }
 
 #endif // SENSORS_H

@@ -40,6 +40,8 @@
 #define LIDAR_B_RX    2
 
 #define LIDAR_BAUD    115200
+// Góc đo TF-Luna thường 2,3°/step; tầm datasheet ~0,2m–8m (phụ thuộc vật liệu, ánh sáng)
+#define LIDAR_MAX_CM  800
 
 /* -------------------- SIÊU ÂM (4x HC-SR04) ------------------------- */
 #define US_TRIG       14    // Trigger dùng chung
@@ -47,7 +49,10 @@
 #define US_ECHO_B     11    // Echo sau
 #define US_ECHO_L     12    // Echo trái
 #define US_ECHO_R     13    // Echo phải
-#define US_MAX_CM     300   // Khoảng cách tối đa khi ping
+// NewPing: tham số tối đa (ms chờ) ~ tương ứng ~2m — đủ thực tế, ping không quá lâu
+#define US_PING_MAX_CM  200
+// Trong hành lang / siêu thị: HC-SR04 ổn định thường ~1,2–1,8m; dùng 1,6m cho HMI + coi như "xa"
+#define US_DISPLAY_MAX_CM 160
 
 /* -------------------- ENCODER (4x FC-03) --------------------------- */
 #define ENC_FL        15    // Front-Left
@@ -66,9 +71,11 @@
 #define PWM_RES_BITS  10    // 0..1023
 #define PWM_MAX       ((1 << PWM_RES_BITS) - 1)
 
-/* -------------------- AN TOÀN NÉ VẬT CẢN --------------------------- */
-#define SAFE_STOP_CM    15    // Dừng khẩn cấp < 15cm
-#define SAFE_SLOW_CM    100   // Bắt đầu giảm tốc khi < 100cm
+/* -------------------- AN TOÀN NÉ VẬT CẢN (không gian mở: siêu thị / hành lang) - */
+// Dừng khẩn cấp: cận tường/đùi người (LiDAR + siêu âm) — 20cm an toàn hơn 15 khi tốc độ tăng
+#define SAFE_STOP_CM    20
+// Giảm tốc từ từ theo tầm LiDAR/ US khi tới < 2m (phù hợp tầm 8m)
+#define SAFE_SLOW_CM    200
 #define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
 
 /* -------------------- WIFI SOFTAP ---------------------------------- */
@@ -76,6 +83,14 @@
 #define AP_PASS       "12345678"
 #define WEB_PORT      80
 #define WS_PORT       81
+
+/* -------------------- LED RGB onboard (WS2812, thường GPIO 48 trên DevKitC) -- */
+// Trùng với ENC_RR nếu cùng GPIO 48: bật LED = tắt đếm encoder bánh sau phải (ISR).
+// Để dùng đủ 4 encoder, đặt SMB_ONBOARD_RGB = 0.
+#define SMB_ONBOARD_RGB     1
+#define SMB_NEOPIXEL_PIN    48
+#define SMB_NEOPIXEL_COUNT  1
+#define SMB_RGB_BRIGHTNESS  40  // 0–255, giảm nếu chói mắt
 
 /* -------------------- LƯU TRỮ -------------------------------------- */
 #define NVS_NAMESPACE "smb"

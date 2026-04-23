@@ -28,15 +28,26 @@ void IRAM_ATTR isrRL() { g_ticksRL++; }
 void IRAM_ATTR isrFR() { g_ticksFR++; }
 void IRAM_ATTR isrRR() { g_ticksRR++; }
 
+/* NeoPixel board dùng GPIO 48 (thường) — trùng ENC_RR thì bỏ ISR bánh sau phải */
+#if !SMB_ONBOARD_RGB || (SMB_NEOPIXEL_PIN != ENC_RR)
+#define ODOM_HAS_ENC_RR 1
+#else
+#define ODOM_HAS_ENC_RR 0
+#endif
+
 inline void odomInit() {
   pinMode(ENC_FL, INPUT_PULLUP);
   pinMode(ENC_RL, INPUT_PULLUP);
   pinMode(ENC_FR, INPUT_PULLUP);
+#if ODOM_HAS_ENC_RR
   pinMode(ENC_RR, INPUT_PULLUP);
+#endif
   attachInterrupt(digitalPinToInterrupt(ENC_FL), isrFL, RISING);
   attachInterrupt(digitalPinToInterrupt(ENC_RL), isrRL, RISING);
   attachInterrupt(digitalPinToInterrupt(ENC_FR), isrFR, RISING);
+#if ODOM_HAS_ENC_RR
   attachInterrupt(digitalPinToInterrupt(ENC_RR), isrRR, RISING);
+#endif
 }
 
 /**
