@@ -21,6 +21,26 @@
 #include "Odometry.h"
 #include "StatusRGB.h"
 #include "WebUI.h"
+#include "esp_heap_caps.h"
+
+// ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
+static void printMemInfo() {
+  Serial.println(F("--- Bộ nhớ (ESP, runtime) ---"));
+  Serial.printf("Flash chip (tong tren VDK): %u B (~%.2f MB)\n",
+                ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1048576.0f);
+  Serial.printf("SRAM heap con trong:  %u B  |  khoi lon nhat: %u B\n",
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  if (psramFound()) {
+    Serial.printf("PSRAM: con %u / tong %u B  |  khoi lon: %u B\n",
+                  (unsigned)ESP.getFreePsram(), (unsigned)ESP.getPsramSize(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+  } else {
+    Serial.println(F("PSRAM: chua dung (bat OPI PSRAM + psram o menu Board neu can)"));
+  }
+  Serial.println(F("Dung luong 'Sketch' khi compile = kich thuoc firmware trong partition app."));
+  Serial.println();
+}
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 RobotState g_state = {
@@ -207,6 +227,7 @@ void setup() {
   Serial.println(F("[Boot] Tasks created. Robot ready!"));
   Serial.printf("[Boot] Dashboard: http://%s\n",
                 WiFi.softAPIP().toString().c_str());
+  printMemInfo();
 }
 
 /* =====================================================================
