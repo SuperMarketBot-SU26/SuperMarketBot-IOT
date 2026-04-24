@@ -1,8 +1,7 @@
 /* =====================================================================
- *  StatusRGB.h — Đèn WS2812 trên board (SmartMarketBot: teal / cyan)
- *  Thư viện: Adafruit NeoPixel (Library Manager)
- *  Chú ý: cùng GPIO 48 với ENC_RR trên nhiều board → khi SMB_ONBOARD_RGB=1
- *         firmware không gắn ISR encoder bánh sau phải.
+ *  StatusRGB.h — Chỉ LED RGB zin trên bo ESP32-S3-DevKit (GPIO 38), không LED ngoài
+ *  Thư viện: Adafruit NeoPixel.
+ *  ENC_RR=48, Neo=38 → không trùng chân, odom 4 bánh vẫn dùng đủ.
  * =====================================================================*/
 #ifndef STATUS_RGB_H
 #define STATUS_RGB_H

@@ -28,7 +28,7 @@ void IRAM_ATTR isrRL() { g_ticksRL++; }
 void IRAM_ATTR isrFR() { g_ticksFR++; }
 void IRAM_ATTR isrRR() { g_ticksRR++; }
 
-/* NeoPixel board dùng GPIO 48 (thường) — trùng ENC_RR thì bỏ ISR bánh sau phải */
+/* Chỉ tắt ISR nếu cùng chân LED và encoder (ví dụ tùy chỉnh pin) */
 #if !SMB_ONBOARD_RGB || (SMB_NEOPIXEL_PIN != ENC_RR)
 #define ODOM_HAS_ENC_RR 1
 #else

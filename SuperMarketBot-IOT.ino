@@ -177,11 +177,10 @@ void setup() {
   sensorsInit();
   odomInit();
 
-  // LED RGB onboard (sau odom: tránh cấu hình GPIO 48 trùng)
+  // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();
 #if SMB_ONBOARD_RGB && (SMB_NEOPIXEL_PIN == ENC_RR)
-  Serial.println(F("[LED] Onboard RGB on GPIO48: rear-right encoder ISR disabled."));
-  Serial.println(F("      Set SMB_ONBOARD_RGB=0 in Config.h to use 4 encoders (no board LED)."));
+  Serial.println(F("[LED] NeoPixel and ENC_RR same pin: RR encoder ISR disabled."));
 #endif
 
   // ── WiFi + Web ───────────────────────────────────────────────────
