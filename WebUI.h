@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <cstdio>
+#include <esp_wifi.h>
 #include "esp_heap_caps.h"
 
 /** Đọc nhiệt độ chip (°C). Trả về NAN nếu không đọc được. */
@@ -28,6 +29,37 @@ inline int computeHealthLevel(float tempC, uint32_t heapIntFree) {
   if (tempC == tempC && tempC >= 80.f) return 1;
   return 0;
 }
+
+#if BAT_MONITOR_ENABLE
+inline void batteryMonitorInit() {
+  pinMode(BAT_ADC_PIN, INPUT);
+  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
+}
+inline void batteryRead(float &voltsOut, int &pctOut) {
+  const float ratio = (BAT_DIV_R1_KOHM + BAT_DIV_R2_KOHM) / BAT_DIV_R2_KOHM;
+  uint32_t sum = 0;
+  const int n = 8;
+  for (int i = 0; i < n; i++) {
+    sum += (uint32_t)analogReadMilliVolts(BAT_ADC_PIN);
+    delayMicroseconds(250);
+  }
+  float vPin = (sum / (float)n) / 1000.0f;
+  voltsOut = vPin * ratio;
+  const float den = (BAT_V_FULL - BAT_V_EMPTY);
+  int p = (den > 0.01f)
+              ? (int)((voltsOut - BAT_V_EMPTY) / den * 100.0f)
+              : 0;
+  if (p < 0) p = 0;
+  if (p > 100) p = 100;
+  pctOut = p;
+}
+#else
+inline void batteryMonitorInit() {}
+inline void batteryRead(float &voltsOut, int &pctOut) {
+  voltsOut = -1.f;
+  pctOut = -1;
+}
+#endif
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -368,6 +400,7 @@ details pre{
           <div>PSRAM: <b id="hiPsram">--</b></div>
           <div>Uptime: <b id="hiUp">--</b></div>
           <div>Client Wi‑Fi: <b id="hiAp">--</b></div>
+          <div class="mac-row">Pin (ước lượng): <b id="hiBatV">Tắt</b> V · <b id="hiBatPct">—</b>%</div>
         </div>
         <div id="hiLine"><span id="hiMsg">Đang chờ dữ liệu…</span></div>
         <canvas id="spark" width="300" height="52" aria-hidden="true"></canvas>
@@ -493,6 +526,13 @@ function connectWS(){
       const ms=d.upMs??0, s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60);
       document.getElementById('hiUp').textContent= h>0? (h+'h '+(m%60)+'m') : (m>0? (m+'m '+(s%60)+'s') : (s+'s'));
       document.getElementById('hiAp').textContent= d.apCli??0;
+      if(d.batPct!=null && d.batPct>=0){
+        document.getElementById('hiBatV').textContent=(Math.round((d.batV??0)*10)/10).toFixed(1);
+        document.getElementById('hiBatPct').textContent=String(d.batPct);
+      }else{
+        document.getElementById('hiBatV').textContent='Tắt';
+        document.getElementById('hiBatPct').textContent='—';
+      }
       const hl=document.getElementById('hiLine'), hm=document.getElementById('hiMsg');
       hl.className=''; hm.className='';
       if(d.health===2){
@@ -695,7 +735,18 @@ inline void webUIBroadcast() {
     doc["usAge"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
   }
 
-  char buf[1200];
+  float batVolts = -1.f;
+  int batPct = -1;
+  batteryRead(batVolts, batPct);
+  if (batPct >= 0 && batVolts >= 0.f) {
+    doc["batV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
+    doc["batPct"] = batPct;
+  } else {
+    doc["batV"] = -1.0;
+    doc["batPct"] = -1;
+  }
+
+  char buf[1280];
   serializeJson(doc, buf, sizeof(buf));
   g_wsServer.broadcastTXT(buf);
 }
@@ -704,10 +755,24 @@ inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
   g_prefs.end();
+
+  batteryMonitorInit();
+
+  WiFi.persistent(false);
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  Serial.printf("[WiFi] SoftAP '%s'  IP: %s\n",
-                AP_SSID, WiFi.softAPIP().toString().c_str());
+  WiFi.setSleep(false);
+
+  bool apOk = WiFi.softAP(AP_SSID, AP_PASS, AP_WIFI_CHANNEL, 0, AP_MAX_CLIENTS);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  if (!apOk) {
+    Serial.println(F("[WiFi] softAP() tra ve false — thu tat mo nguon / kiem tra core Arduino"));
+  }
+  Serial.printf("[WiFi] SoftAP: \"%s\"  IP: %s  kenh: %d  MAC: %s\n",
+                AP_SSID, WiFi.softAPIP().toString().c_str(), (int)WiFi.channel(),
+                WiFi.softAPmacAddress().c_str());
+  Serial.println(
+      F("[WiFi] Dien thoai ket noi VAO mang do robot phat (khong phai WiFi nha). Mat khau: AP_PASS trong Config.h"));
+
   g_httpServer.on("/", HTTP_GET, []() {
     g_httpServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     g_httpServer.sendHeader("Pragma", "no-cache");

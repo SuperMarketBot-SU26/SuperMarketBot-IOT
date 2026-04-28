@@ -56,6 +56,7 @@
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
+// GPIO3 (ENC_FR): trên S3 là MTCK/JTAG — trong Arduino chọn USB JTAG disabled / peripheral JTAG off nếu encoder không đếm xung.
 #define ENC_FL        15    // Trước trái
 #define ENC_RL        16    // Sau trái
 #define ENC_FR        3     // Trước phải (JTAG, chỉ dùng input)
@@ -80,10 +81,30 @@
 #define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
 
 /* -------------------- WIFI SOFTAP ---------------------------------- */
-#define AP_SSID       "SmartMarketBot"
-#define AP_PASS       "12345678"
-#define WEB_PORT      80
-#define WS_PORT       81
+#define AP_SSID         "SmartMarketBot"
+#define AP_PASS         "12345678"
+/** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */
+#define AP_WIFI_CHANNEL 6
+#define AP_MAX_CLIENTS  4
+#define WEB_PORT        80
+#define WS_PORT         81
+
+/* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
+ *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
+ *  muốn theo dõi (khuyến nghị: điểm 12 V trước / sau pin, GND chung với ESP).
+ *  Không nên chỉ đo 5 V sau XL4015 để suy % pin: buck ổn định 5 V trong khi 12 V
+ *  vẫn sụt — % trên web sẽ không đúng.
+ *
+ *  Ví dụ: 12V → R1(68k) → chân ADC → R2(10k) → GND
+ *         Vadc = Vbat * R2/(R1+R2)  (đặt BAT_DIV_* khớp R thật của bạn)
+ *  Bật BAT_MONITOR_ENABLE 1 và đặt BAT_ADC_PIN trùng chân còn trống + hỗ trợ ADC. */
+#define BAT_MONITOR_ENABLE  0
+#define BAT_ADC_PIN         39
+#define BAT_DIV_R1_KOHM     68.0f
+#define BAT_DIV_R2_KOHM     10.0f
+/** Ngưỡng V pin (tại điểm đo) — chỉnh theo loại pin (3S Li-ion, 12V SLA, …). */
+#define BAT_V_FULL          12.6f
+#define BAT_V_EMPTY         10.2f
 
 /* -------------------- LED: chỉ RGB zin sẵn trên bo DevKit (WS2812, GPIO 38) --- */
 // Không dùng thêm bóng / dải LED ngoài — ngoài linh kiện robot chỉ: 2 LiDAR, 4 US, 4 enc, 2 driver.

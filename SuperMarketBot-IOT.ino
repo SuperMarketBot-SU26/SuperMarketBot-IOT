@@ -197,6 +197,7 @@ void setup() {
   // ── Phần cứng ────────────────────────────────────────────────────
   motorsInit();
   sensorsInit();
+  sensorsLogBootSample();
   odomInit();
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
