@@ -10,6 +10,24 @@
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <cstdio>
+#include "esp_heap_caps.h"
+
+/** Đọc nhiệt độ chip (°C). Trả về NAN nếu không đọc được. */
+inline float readChipTempCelsius() {
+  float t = temperatureRead();
+  if (t < -40.f || t > 125.f) return NAN;
+  return t;
+}
+
+/** 0 = OK, 1 = cảnh báo, 2 = nghiêm trọng (nhiệt + heap SRAM nội bộ). */
+inline int computeHealthLevel(float tempC, uint32_t heapIntFree) {
+  if (heapIntFree < 20000u) return 2;
+  if (tempC == tempC && tempC >= 90.f) return 2;
+  if (heapIntFree < 45000u) return 1;
+  if (tempC == tempC && tempC >= 80.f) return 1;
+  return 0;
+}
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -111,7 +129,10 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 }
 .slam h3{font-size:.78rem;font-weight:600;color:var(--muted);text-align:center;max-width:20rem}
 .slam p{font-size:.7rem;color:var(--muted);text-align:center;opacity:.85;max-width:24rem}
-/* Joystick */
+.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:.78rem;color:var(--muted)}
+.health-grid b{color:var(--accent2);font-weight:600}
+.h-ok{color:var(--ok)!important}.h-war{color:var(--war)!important}.h-bad{color:var(--bad)!important}
+#hiLine{margin-top:8px;font-size:.76rem;padding:6px 8px;border-radius:8px;background:#0c1016;border:1px solid var(--line2)}
 #jsZone{
   width:150px;height:150px;border-radius:50%;
   background:radial-gradient(circle at 40% 35%,#1a2638,#0a0d12 70%);
@@ -149,6 +170,12 @@ input[type=range]{width:100%;accent-color:var(--accent);margin-top:10px}
   background:rgba(239,68,68,.2);color:#fecaca;border:1px solid rgba(239,68,68,.4);
 }
 .badge-estop.on{display:inline}
+#spark{display:block;width:100%;max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:10px;background:#0c1016}
+details summary{user-select:none}
+details pre{
+  margin-top:8px;padding:10px;background:#0c1016;border:1px solid var(--line);border-radius:8px;
+  overflow:auto;max-height:240px;font-size:.65rem;color:var(--text);white-space:pre-wrap;word-break:break-word
+}
 </style>
 </head>
 <body>
@@ -205,6 +232,40 @@ input[type=range]{width:100%;accent-color:var(--accent);margin-top:10px}
 
     <div>
       <div class="card" style="margin-bottom:12px">
+        <h2><span class="dot"></span> ESP – nhiệt &amp; sức khỏe</h2>
+        <div class="health-grid">
+          <div>Nhiệt chip: <b id="hiTemp">--</b> °C</div>
+          <div>CPU: <b id="hiCpu">--</b> MHz</div>
+          <div>Heap (nội bộ): <b id="hiHeap">--</b> KB</div>
+          <div>PSRAM: <b id="hiPsram">--</b></div>
+          <div>Uptime: <b id="hiUp">--</b></div>
+          <div>Client Wi‑Fi: <b id="hiAp">--</b></div>
+        </div>
+        <div id="hiLine"><span id="hiMsg">Đang chờ dữ liệu…</span></div>
+        <canvas id="spark" width="300" height="52"></canvas>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <h2><span class="dot"></span> Giám sát sâu</h2>
+        <div class="health-grid">
+          <div>Chip: <b id="dvChip">--</b></div>
+          <div>Flash: <b id="dvFlash">--</b></div>
+          <div>Build: <b id="dvBuild">--</b></div>
+          <div>Kênh AP: <b id="dvCh">--</b></div>
+          <div style="grid-column:1/-1">MAC AP: <b id="dvMac" style="font-size:.68rem;font-weight:500">--</b></div>
+          <div>Heap min (nội): <b id="dvHmin">--</b> KB</div>
+          <div>Joy X / Y: <b id="dvJoy">--</b></div>
+          <div>Tốc độ nền: <b id="dvSpd">--</b>%</div>
+          <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
+          <div>Tuổi siêu âm: <b id="dvUsAge">--</b></div>
+        </div>
+        <details style="margin-top:12px;font-size:.72rem;color:var(--muted)">
+          <summary style="cursor:pointer;color:var(--accent2)">Payload JSON thô (debug)</summary>
+          <pre id="rawJ">—</pre>
+        </details>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
         <h2>Điều khiển</h2>
         <div id="jsZone"><div id="jsKnob"></div></div>
         <div class="toggle-row">
@@ -244,6 +305,31 @@ const WS_URL='ws://'+location.hostname+':81';
 let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=160;
 const B=[{k:'F',i:'dUF'},{k:'B',i:'dUB'},{k:'L',i:'dUL'},{k:'P',i:'dUR'}];
+const spark=[]; const SPARK_N=48;
+function fmtAge(ms){
+  if(ms==null||ms<0)return 'chưa có dữ liệu';
+  if(ms<1000)return ms+' ms';
+  if(ms<60000)return (ms/1000).toFixed(1)+' s';
+  const m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000);
+  return m+' ph '+s+' s';
+}
+function pushSpark(v){
+  if(!(v>=0)||!isFinite(v))return;
+  spark.push(v); if(spark.length>SPARK_N)spark.shift();
+  const c=document.getElementById('spark'); if(!c)return;
+  const x=c.getContext('2d'), w=c.width, h=c.height;
+  x.fillStyle='#0c1016'; x.fillRect(0,0,w,h);
+  if(spark.length<2)return;
+  let mn=Math.min(...spark), mx=Math.max(...spark);
+  if(mx<=mn)mx=mn+1;
+  const sc=t=>(h-4)-((t-mn)/(mx-mn))*(h-8);
+  x.strokeStyle='#2dd4bf'; x.lineWidth=1.5; x.beginPath();
+  spark.forEach((t,i)=>{
+    const px=i/(spark.length-1)*(w-2)+1, py=sc(t);
+    i?x.lineTo(px,py):x.moveTo(px,py);
+  });
+  x.stroke();
+}
 function buildBump(){
   document.getElementById('bumpBox').innerHTML=B.map(b=>`
     <div class="b-item">
@@ -293,6 +379,47 @@ function connectWS(){
       document.getElementById('modeLabel').textContent=(d.mode===1)?'Tự hành (demo)':'Lái tay';
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
+      if(d.tempC!=null && d.tempC>=0){
+        const te=document.getElementById('hiTemp');
+        te.textContent=(Math.round(d.tempC*10)/10).toFixed(1);
+        te.className= d.tempC>=80?'h-bad':(d.tempC>=70?'h-war':'h-ok');
+      }else{
+        const te=document.getElementById('hiTemp');
+        te.textContent='N/A'; te.className='';
+      }
+      if(d.cpuMHz!=null) document.getElementById('hiCpu').textContent=d.cpuMHz;
+      if(d.heapIn!=null) document.getElementById('hiHeap').textContent=(d.heapIn/1024).toFixed(1);
+      const pt=d.psTot??0, pf=d.psFree??0;
+      document.getElementById('hiPsram').textContent= pt>0
+        ? ( (pf/1048576).toFixed(2)+' / '+(pt/1048576).toFixed(2)+' MB' )
+        : 'Tắt';
+      const ms=d.upMs??0, s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60);
+      document.getElementById('hiUp').textContent= h>0? (h+'h '+(m%60)+'m') : (m>0? (m+'m '+(s%60)+'s') : (s+'s'));
+      document.getElementById('hiAp').textContent= d.apCli??0;
+      const hl=document.getElementById('hiLine'), hm=document.getElementById('hiMsg');
+      hl.className=''; hm.className='';
+      if(d.health===2){
+        hl.style.borderColor='#ef4444'; hm.textContent='Cảnh báo: nhiệt cao hoặc RAM nội bộ thấp — giảm tải / tản nhiệt.';
+        hm.className='h-bad';
+      }else if(d.health===1){
+        hl.style.borderColor='#f59e0b'; hm.textContent='Chú ý: theo dõi nhiệt hoặc heap.';
+        hm.className='h-war';
+      }else{
+        hl.style.borderColor='var(--line2)'; hm.textContent='Trạng thái: bình thường.';
+        hm.className='h-ok';
+      }
+      if(d.tempC!=null && d.tempC>=0) pushSpark(d.tempC);
+      if(d.chip!=null) document.getElementById('dvChip').textContent=String(d.chip);
+      if(d.flashKB!=null) document.getElementById('dvFlash').textContent=d.flashKB+' KB';
+      if(d.build!=null) document.getElementById('dvBuild').textContent=String(d.build);
+      if(d.mac!=null) document.getElementById('dvMac').textContent=String(d.mac);
+      if(d.ch!=null) document.getElementById('dvCh').textContent=String(d.ch);
+      if(d.hMin!=null) document.getElementById('dvHmin').textContent=(d.hMin/1024).toFixed(1);
+      document.getElementById('dvJoy').textContent=(d.cx??0)+' / '+(d.cy??0);
+      if(d.spdPct!=null) document.getElementById('dvSpd').textContent=String(d.spdPct);
+      document.getElementById('dvLfAge').textContent=fmtAge(d.lfAge);
+      document.getElementById('dvUsAge').textContent=fmtAge(d.usAge);
+      document.getElementById('rawJ').textContent=JSON.stringify(d,null,2);
     }catch(x){}
   };
 }
@@ -382,7 +509,60 @@ inline void webUIBroadcast() {
   doc["dRR"]  = g_state.distRR;
   doc["mode"] = (uint8_t)g_state.mode;
   doc["estop"]= g_state.estop;
-  char buf[512];
+
+  float tC = readChipTempCelsius();
+  if (tC == tC && tC >= -40.f && tC <= 125.f) {
+    doc["tempC"] = (double)((int)(tC * 10.f + 0.5f)) / 10.0;
+  } else {
+    doc["tempC"] = -1.0;
+  }
+  uint32_t heapInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  doc["heap"]   = (uint32_t)ESP.getFreeHeap();
+  doc["heapIn"] = heapInt;
+  if (psramFound()) {
+    doc["psFree"] = (uint32_t)ESP.getFreePsram();
+    doc["psTot"]  = (uint32_t)ESP.getPsramSize();
+  } else {
+    doc["psFree"] = 0;
+    doc["psTot"]  = 0;
+  }
+  doc["upMs"]  = (uint32_t)millis();
+  doc["apCli"] = WiFi.softAPgetStationNum();
+  doc["cpuMHz"] = ESP.getCpuFreqMHz();
+  doc["health"] = computeHealthLevel(tC, heapInt);
+
+  doc["chip"]    = ESP.getChipModel();
+  doc["flashKB"] = (uint32_t)(ESP.getFlashChipSize() / 1024u);
+  char buildBuf[48];
+  snprintf(buildBuf, sizeof(buildBuf), "%s %s", __DATE__, __TIME__);
+  doc["build"] = buildBuf;
+  doc["mac"]   = WiFi.softAPmacAddress();
+  doc["ch"]    = (int)WiFi.channel();
+
+  doc["hMin"] = (uint32_t)heap_caps_get_minimum_free_size(
+      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+  doc["cx"] = (int)g_state.cmdX;
+  doc["cy"] = (int)g_state.cmdY;
+  uint32_t spdPct =
+      (g_state.baseSpeed * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
+  doc["spdPct"] = spdPct;
+
+  const uint32_t nowMs = (uint32_t)millis();
+  if (g_state.lidarLastUpdateMs == 0u) {
+    doc["lfAge"] = -1;
+  } else {
+    uint32_t age = nowMs - g_state.lidarLastUpdateMs;
+    doc["lfAge"] = (int32_t)(age > 86400000u ? 86400000 : age);
+  }
+  if (g_state.usLastUpdateMs == 0u) {
+    doc["usAge"] = -1;
+  } else {
+    uint32_t ageU = nowMs - g_state.usLastUpdateMs;
+    doc["usAge"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
+  }
+
+  char buf[1200];
   serializeJson(doc, buf, sizeof(buf));
   g_wsServer.broadcastTXT(buf);
 }
@@ -411,4 +591,4 @@ inline void webUILoop() {
   g_wsServer.loop();
 }
 
-#endif
+#endif // WEBUI_H

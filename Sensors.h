@@ -41,6 +41,7 @@ inline void sensorsPollUS() {
   if (g_state.usBack  == 0) g_state.usBack  = US_PING_MAX_CM;
   if (g_state.usLeft  == 0) g_state.usLeft  = US_PING_MAX_CM;
   if (g_state.usRight == 0) g_state.usRight = US_PING_MAX_CM;
+  g_state.usLastUpdateMs = millis();
 }
 
 /* ---------------------------------------------------------------
@@ -83,11 +84,13 @@ inline void sensorsPollLidar() {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
     g_state.lidarFront = d;
+    g_state.lidarLastUpdateMs = millis();
   }
   if (readTfLuna(Serial2, d)) {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
     g_state.lidarBack = d;
+    g_state.lidarLastUpdateMs = millis();
   }
 }
 

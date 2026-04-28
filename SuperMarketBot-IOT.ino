@@ -51,7 +51,9 @@ RobotState g_state = {
   .cmdX = 0, .cmdY = 0,
   .baseSpeed = 0,
   .mode = MODE_MANUAL,
-  .estop = false
+  .estop = false,
+  .lidarLastUpdateMs = 0,
+  .usLastUpdateMs = 0
 };
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────

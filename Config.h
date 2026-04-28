@@ -117,6 +117,9 @@ struct RobotState {
   volatile uint16_t baseSpeed; // 0..PWM_MAX tốc độ nền
   volatile RobotMode mode;
   volatile bool estop;        // Cờ dừng khẩn cấp
+  // Millis lần cuối có frame LiDAR hợp lệ / sau 1 vòng quét US (giám sát “tươi”)
+  volatile uint32_t lidarLastUpdateMs;
+  volatile uint32_t usLastUpdateMs;
 };
 
 extern RobotState g_state;
