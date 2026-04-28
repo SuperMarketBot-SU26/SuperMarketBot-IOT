@@ -47,44 +47,101 @@ static const char HTML_PAGE[] PROGMEM = R"rawhtml(
   --bg0:#080b0f;--bg1:#0d1219;--card:#111820;--line:#1e2836;--line2:#2a3545;
   --text:#e8edf4;--muted:#8a97ab;--accent:#2dd4bf;--accent2:#38bdf8;--amber:#fbbf24;--ok:#22c55e;--war:#f59e0b;--bad:#ef4444;
   --glow:0 0 40px rgba(45,212,191,.12);
+  --gap:12px;--nav-h:48px;
+  --safe-t:max(12px, env(safe-area-inset-top, 0px));
+  --safe-b:max(16px, env(safe-area-inset-bottom, 0px));
+  --safe-x:max(14px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
 }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 *{box-sizing:border-box;margin:0;padding:0}
 body{
   min-height:100dvh;background:radial-gradient(1200px 600px at 50% -20%,#12202e 0%,var(--bg0) 55%,#050608 100%);
-  color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;padding:12px 14px 24px;
+  color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  padding:var(--safe-t) var(--safe-x) var(--safe-b);
 }
-.wrap{max-width:1000px;margin:0 auto}
+.wrap{max-width:1100px;margin:0 auto}
 .brand{
-  text-align:center;padding:18px 8px 22px;
+  text-align:center;padding:clamp(14px,3vw,20px) 8px clamp(16px,3vw,22px);
   background:linear-gradient(180deg,rgba(17,24,32,.6),transparent);border-bottom:1px solid var(--line);border-radius:0 0 20px 20px;
   box-shadow:var(--glow);
 }
 .brand h1{
-  font-size:clamp(1.25rem,4vw,1.65rem);font-weight:700;letter-spacing:.12em;
+  font-size:clamp(1.2rem,3.8vw,1.65rem);font-weight:700;letter-spacing:.12em;
   background:linear-gradient(90deg,var(--accent),var(--accent2),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
 }
-.brand p{margin-top:6px;font-size:.78rem;color:var(--muted);line-height:1.45;max-width:36rem;margin-left:auto;margin-right:auto}
+.brand .desc{margin-top:6px;font-size:clamp(.72rem,2.8vw,.8rem);color:var(--muted);line-height:1.5;max-width:36rem;margin-left:auto;margin-right:auto}
 .pillrow{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}
 .pill{
-  font-size:.65rem;letter-spacing:.04em;padding:4px 10px;border-radius:99px;
+  font-size:.65rem;letter-spacing:.04em;padding:5px 11px;border-radius:99px;
   background:rgba(45,212,191,.1);color:var(--accent);border:1px solid rgba(45,212,191,.25);
 }
 .pill.safety{background:rgba(245,158,11,.1);color:var(--amber);border-color:rgba(245,158,11,.3)}
-.appgrid{display:grid;grid-template-columns:1.1fr 0.9fr;gap:12px;margin-top:14px}
-@media(max-width:900px){.appgrid{grid-template-columns:1fr}}
+.secnav{
+  position:sticky;top:0;z-index:50;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;
+  padding:10px 4px 12px;margin-top:4px;
+  background:linear-gradient(180deg,rgba(8,11,15,.92) 60%,rgba(8,11,15,.75) 100%);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(30,40,54,.6);
+}
+.secnav a{
+  text-decoration:none;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  padding:10px 14px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);background:rgba(17,24,32,.85);
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:color .15s,border-color .15s,background .15s;
+  min-height:44px;display:inline-flex;align-items:center;justify-content:center;
+}
+.secnav a:hover,.secnav a:focus-visible{color:var(--text);border-color:rgba(45,212,191,.45);outline:none}
+.secnav a:focus-visible{box-shadow:0 0 0 2px rgba(56,189,248,.5)}
+.secnav a.active{color:var(--accent);border-color:rgba(45,212,191,.45);background:rgba(45,212,191,.1)}
+.appgrid{
+  display:grid;gap:var(--gap);margin-top:6px;
+  grid-template-columns:1fr;
+  grid-template-areas:"drive" "sense" "monitor";
+}
+.col{scroll-margin-top:calc(var(--nav-h) + 8px);display:flex;flex-direction:column;gap:var(--gap)}
+.col-sense{grid-area:sense}
+.col-drive{grid-area:drive}
+.col-monitor{grid-area:monitor}
+.rail-title{
+  font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);
+  margin:2px 0 0 2px;opacity:.92;
+}
+@media (min-width:900px){
+  .appgrid{grid-template-columns:1.05fr minmax(272px,.95fr) 1fr;grid-template-areas:"sense drive monitor";align-items:start}
+}
+@media (orientation:landscape) and (max-height:520px) and (max-width:899px){
+  .appgrid{grid-template-columns:1fr 1fr;grid-template-areas:"sense drive" "monitor monitor"}
+  .brand .desc{display:none}
+  .brand{padding:10px 8px 12px}
+  .pillrow{display:none}
+  .lidar-in{min-height:140px;padding:12px 10px}
+  .lidar-arc{width:clamp(96px,26vw,118px);height:clamp(96px,26vw,118px)}
+  .lidar-num{font-size:clamp(1.35rem,4vw,1.65rem)}
+  .slam{min-height:88px;padding:12px;gap:6px}
+  .slam p{display:none}
+  .secnav{padding:6px 4px 8px}
+  .bump-grid{grid-template-columns:repeat(4,1fr);gap:6px}
+  .b-item{padding:6px 8px}
+  .b-item .val{font-size:.9rem}
+}
+@media (orientation:landscape) and (max-height:400px) and (max-width:899px){
+  .rail-title{display:none}
+  .card{padding:12px 12px 14px}
+}
 .card{
   background:linear-gradient(160deg,rgba(20,28,40,.9),rgba(8,12,18,.95));
-  border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 4px 24px rgba(0,0,0,.35);
+  border:1px solid var(--line);border-radius:16px;padding:clamp(14px,3.5vw,18px);box-shadow:0 4px 24px rgba(0,0,0,.35);
 }
 .card h2{
-  font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:12px;
-  display:flex;align-items:center;gap:8px
+  font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;line-height:1.25
 }
-h2 .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+h2 .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);flex-shrink:0}
 h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
-/* LiDAR hero */
 .lidar2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:520px){.lidar2{grid-template-columns:1fr}}
+@media (max-width:520px) and (orientation:portrait){.lidar2{grid-template-columns:1fr}}
 .lidar{
   position:relative;border-radius:20px;padding:4px;
   background:conic-gradient(from 200deg,rgba(45,212,191,.4),rgba(56,189,248,.2),rgba(167,139,250,.3),rgba(45,212,191,.2));
@@ -92,11 +149,11 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 }
 .lidar-in{
   background:var(--card);border-radius:16px;padding:16px 12px 14px;
-  min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:clamp(158px,36vw,200px);display:flex;flex-direction:column;align-items:center;justify-content:center;
   border:1px solid var(--line2);
 }
 .lidar-arc{
-  --p:.35;width:120px;height:120px;border-radius:50%;
+  --p:.35;width:clamp(104px,32vw,126px);height:clamp(104px,32vw,126px);border-radius:50%;aspect-ratio:1;
   background:conic-gradient(var(--accent) calc(var(--p) * 1turn),#1a2330 0);
   padding:4px;
 }
@@ -105,93 +162,123 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
   display:flex;flex-direction:column;align-items:center;justify-content:center;
 }
 .lidar-num{
-  font-family:ui-monospace,"Cascadia Mono","Segoe UI Mono",Consolas,monospace;font-size:1.75rem;font-weight:700;letter-spacing:-.02em;
+  font-family:ui-monospace,"Cascadia Mono","Segoe UI Mono",Consolas,monospace;font-size:clamp(1.45rem,5vw,1.85rem);font-weight:700;letter-spacing:-.02em;
   line-height:1.1;
 }
 .lidar-unit{font-size:.7rem;color:var(--muted);font-weight:500}
-.lidar-ax{font-size:.68rem;font-weight:600;letter-spacing:.12em;margin-top:10px;color:var(--accent2)}
+.lidar-ax{font-size:.65rem;font-weight:600;letter-spacing:.1em;margin-top:10px;color:var(--accent2);text-align:center}
 .lidar-ax b{color:var(--text);font-weight:600}
-/* Bumpers */
 .bump-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .b-item{
-  background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:8px 10px;
+  background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:10px 10px;
   border-left:3px solid var(--amber);
 }
-.b-item .bn{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.b-item .val{font-family:ui-monospace,Consolas,monospace;font-size:1rem;font-weight:600;margin-top:2px}
-.b-bar{height:5px;border-radius:3px;background:#1a2330;margin-top:6px;overflow:hidden}
-.b-fill{height:100%;border-radius:3px;transition:width .2s,background .2s}
-/* Map placeholder */
+.b-item .bn{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.b-item .val{font-family:ui-monospace,Consolas,monospace;font-size:.95rem;font-weight:600;margin-top:3px}
+.b-bar{height:6px;border-radius:3px;background:#1a2330;margin-top:8px;overflow:hidden}
+.b-fill{height:100%;border-radius:3px;transition:width .2s,background .15s}
 .slam{
-  min-height:120px;border:1px dashed var(--line2);border-radius:12px;
+  min-height:112px;border:1px dashed var(--line2);border-radius:12px;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;
   background:repeating-linear-gradient(-12deg,transparent,transparent 8px,rgba(255,255,255,.02) 8px,rgba(255,255,255,.02) 9px);
 }
-.slam h3{font-size:.78rem;font-weight:600;color:var(--muted);text-align:center;max-width:20rem}
-.slam p{font-size:.7rem;color:var(--muted);text-align:center;opacity:.85;max-width:24rem}
-.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:.78rem;color:var(--muted)}
-.health-grid b{color:var(--accent2);font-weight:600}
+.slam h3{font-size:.76rem;font-weight:600;color:var(--muted);text-align:center;max-width:22rem;line-height:1.35}
+.slam p{font-size:.68rem;color:var(--muted);text-align:center;opacity:.88;max-width:26rem;line-height:1.45}
+.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;font-size:.76rem;color:var(--muted)}
+@media (min-width:380px){.health-grid.cols-3{grid-template-columns:repeat(3,1fr)}}
+.health-grid b{color:var(--accent2);font-weight:600;word-break:break-word}
 .h-ok{color:var(--ok)!important}.h-war{color:var(--war)!important}.h-bad{color:var(--bad)!important}
-#hiLine{margin-top:8px;font-size:.76rem;padding:6px 8px;border-radius:8px;background:#0c1016;border:1px solid var(--line2)}
+#hiLine{margin-top:10px;font-size:.74rem;line-height:1.35;padding:8px 10px;border-radius:8px;background:#0c1016;border:1px solid var(--line2)}
+.ctrl-stack{display:flex;flex-direction:column;align-items:stretch;gap:12px}
 #jsZone{
-  width:150px;height:150px;border-radius:50%;
+  width:min(172px,44vw);height:min(172px,44vw);max-width:188px;max-height:188px;border-radius:50%;
   background:radial-gradient(circle at 40% 35%,#1a2638,#0a0d12 70%);
   border:2px solid var(--line2);position:relative;touch-action:none;margin:0 auto;cursor:crosshair;box-shadow:0 0 0 1px rgba(0,0,0,.4) inset;
+  flex-shrink:0;
 }
 #jsKnob{
-  width:48px;height:48px;border-radius:50%;
+  width:clamp(44px,30%,56px);height:clamp(44px,30%,56px);border-radius:50%;
   background:linear-gradient(160deg,#5eead4,#22d3ee);
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  box-shadow:0 4px 20px rgba(45,212,191,.4);pointer-events:none;transition:top .04s,left .04s;
+  box-shadow:0 4px 20px rgba(45,212,191,.4);pointer-events:none;transition:top .04s linear,left .04s linear;
 }
-.toggle-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.range-wrap{margin-top:4px;padding:8px 0;min-height:48px;display:flex;align-items:center}
+input[type=range]{width:100%;accent-color:var(--accent);height:8px;-webkit-appearance:none;appearance:none;background:transparent}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0)}
+.toggle-row{display:flex;align-items:stretch;gap:10px;justify-content:center;margin-top:4px;flex-wrap:wrap}
 .mode-btn{
-  padding:8px 18px;border:none;border-radius:10px;font-size:.78rem;cursor:pointer;font-weight:600;
-  font-family:inherit;transition:transform .1s,box-shadow .15s,background .15s
+  flex:1;min-width:min(100%,140px);min-height:46px;padding:10px 16px;border:none;border-radius:12px;font-size:.78rem;cursor:pointer;font-weight:600;
+  font-family:inherit;transition:transform .1s,box-shadow .15s,background .15s;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
 }
 .mode-btn:hover{transform:translateY(-1px)}
 .mode-btn.active{background:linear-gradient(135deg,#2dd4bf,#22d3ee);color:#041016;box-shadow:0 4px 16px rgba(34,211,238,.3)}
 .mode-btn:not(.active){background:var(--line);color:var(--text);border:1px solid var(--line2)}
-input[type=range]{width:100%;accent-color:var(--accent);margin-top:10px}
 .estop{
-  width:100%;padding:12px;border:none;border-radius:12px;margin-top:10px;cursor:pointer;font-weight:700;letter-spacing:.04em;
-  font-family:inherit;font-size:.92rem;
+  width:100%;padding:14px 16px;border:none;border-radius:12px;margin-top:4px;cursor:pointer;font-weight:700;letter-spacing:.04em;
+  font-family:inherit;font-size:.95rem;
   background:linear-gradient(135deg,#f87171,#ef4444);color:#1a0505;box-shadow:0 4px 20px rgba(239,68,68,.3);
+  min-height:52px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;
 }
+.btn-ghost{
+  margin-top:8px;padding:10px 16px;border:1px solid var(--line2);background:rgba(12,16,22,.6);color:var(--text);
+  border-radius:10px;cursor:pointer;font-size:.78rem;font-family:inherit;width:100%;min-height:44px;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+}
+.btn-ghost:active{background:var(--line)}
 .rpm-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.rpm-item{background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center}
-.rpm-val{font-family:ui-monospace,Consolas,monospace;font-size:1.15rem;font-weight:700;color:var(--accent2)}
-.rpm-lbl{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
-.status-line{font-size:.8rem;margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.sdot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);animation:bl 1.2s ease infinite}
+.rpm-item{background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:11px 8px;text-align:center}
+.rpm-val{font-family:ui-monospace,Consolas,monospace;font-size:clamp(1rem,3.5vw,1.2rem);font-weight:700;color:var(--accent2)}
+.rpm-lbl{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px}
+.status-line{font-size:.8rem;margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sdot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);animation:bl 1.2s ease infinite;flex-shrink:0}
 @keyframes bl{0%,100%{opacity:1}50%{opacity:.25}}
 .badge-estop{
-  display:none;padding:3px 8px;border-radius:6px;font-size:.65rem;font-weight:700;
+  display:none;padding:4px 9px;border-radius:6px;font-size:.65rem;font-weight:700;
   background:rgba(239,68,68,.2);color:#fecaca;border:1px solid rgba(239,68,68,.4);
 }
 .badge-estop.on{display:inline}
-#spark{display:block;width:100%;max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:10px;background:#0c1016}
-details summary{user-select:none}
+.stat-row{font-size:.8rem;margin-top:10px;color:var(--muted);line-height:1.45}
+.stat-row b{color:var(--text);font-weight:600}
+.stat-row+.stat-row{margin-top:6px}
+#spark{display:block;width:100%;max-width:100%;height:52px;border-radius:8px;border:1px solid var(--line);margin-top:10px;background:#0c1016}
+details{font-size:.72rem;color:var(--muted)}
+details summary{cursor:pointer;user-select:none;color:var(--accent2);padding:6px 0;min-height:44px;display:flex;align-items:center;-webkit-tap-highlight-color:transparent}
 details pre{
-  margin-top:8px;padding:10px;background:#0c1016;border:1px solid var(--line);border-radius:8px;
-  overflow:auto;max-height:240px;font-size:.65rem;color:var(--text);white-space:pre-wrap;word-break:break-word
+  margin-top:6px;padding:10px;background:#0c1016;border:1px solid var(--line);border-radius:8px;
+  overflow:auto;max-height:min(42vh,280px);font-size:.62rem;color:var(--text);white-space:pre-wrap;word-break:break-word;
+  -webkit-overflow-scrolling:touch;
 }
+.hint{font-size:.68rem;color:var(--muted);margin-bottom:10px;line-height:1.45;opacity:.92}
+.spd-label{text-align:center;font-size:.76rem;color:var(--muted);margin-top:4px}
+.health-grid .mac-row{grid-column:1/-1}
+.details-block{margin-top:4px}
+.mode-manual{color:var(--accent2)!important;font-weight:600}
+.mode-auto{color:var(--amber)!important;font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="brand">
     <h1>SMARTMARKETBOT</h1>
-    <p>IoT Edge HMI &mdash; lớp định vị chính: <strong>LiDAR</strong> (khoảng cách, nền tảng bản đồ / SLAM). <strong>HC-SR04</strong> chỉ phục vụ dừng cận cảnh, không dùng để lập bản đồ.</p>
+    <p class="desc">IoT Edge HMI &mdash; lớp định vị chính: <strong>LiDAR</strong> (khoảng cách, nền tảng bản đồ / SLAM). <strong>HC-SR04</strong> chỉ phục vụ dừng cận cảnh, không dùng để lập bản đồ.</p>
     <div class="pillrow">
       <span class="pill">TF-Luna &middot; quét 2 hướng</span>
       <span class="pill safety">HC-SR04 &middot; vùng an toàn</span>
     </div>
   </header>
 
+  <nav class="secnav" aria-label="Mục chính">
+    <a href="#sec-sense">Cảm biến</a>
+    <a href="#sec-drive">Điều khiển</a>
+    <a href="#sec-monitor">Giám sát</a>
+  </nav>
+
   <div class="appgrid">
-    <div>
-      <div class="card" style="margin-bottom:12px">
+    <div class="col col-sense" id="sec-sense">
+      <p class="rail-title">Khoảng cách &amp; an toàn</p>
+      <div class="card">
         <h2><span class="dot"></span> LiDAR &mdash; tầm nhìn chính</h2>
         <div class="lidar2">
           <div class="lidar">
@@ -215,69 +302,40 @@ details pre{
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:12px">
+      <div class="card">
         <h2><span class="dot safety"></span> Bumper (HC-SR04) &mdash; dừng cận cảnh</h2>
-        <p style="font-size:.68rem;color:var(--muted);margin-bottom:8px;opacity:.9">Khi vật cản rất gần (&lt;~50cm): giảm tốc / dừng. Không thay thế LiDAR để lập bản đồ.</p>
+        <p class="hint">Khi vật cản rất gần (&lt;~50&nbsp;cm): giảm tốc / dừng. Không thay thế LiDAR để lập bản đồ.</p>
         <div class="bump-grid" id="bumpBox"></div>
       </div>
 
       <div class="card">
         <h2><span class="dot"></span> Bản đồ / SLAM (giai đoạn tích hợp)</h2>
         <div class="slam">
-          <h3>Khu vực sẽ hiển thị bản đồ &amp; tuyến đường khi tích hợp Back-end (MQTT, ROS2, ...)</h3>
-          <p>Quét bản đồ và điều hướng: module lớn &mdash; ESP32 có thể đẩy scan 2D, pose, odometry; server/edge xử lý SLAM và lập kế hoạch đường đi.</p>
+          <h3>Khu vực sẽ hiển thị bản đồ &amp; tuyến đường khi tích hợp Back-end (MQTT, ROS2, …)</h3>
+          <p>ESP32 đẩy scan / pose / odometry; server xử lý SLAM và lập kế hoạch đường đi.</p>
         </div>
       </div>
     </div>
 
-    <div>
-      <div class="card" style="margin-bottom:12px">
-        <h2><span class="dot"></span> ESP – nhiệt &amp; sức khỏe</h2>
-        <div class="health-grid">
-          <div>Nhiệt chip: <b id="hiTemp">--</b> °C</div>
-          <div>CPU: <b id="hiCpu">--</b> MHz</div>
-          <div>Heap (nội bộ): <b id="hiHeap">--</b> KB</div>
-          <div>PSRAM: <b id="hiPsram">--</b></div>
-          <div>Uptime: <b id="hiUp">--</b></div>
-          <div>Client Wi‑Fi: <b id="hiAp">--</b></div>
-        </div>
-        <div id="hiLine"><span id="hiMsg">Đang chờ dữ liệu…</span></div>
-        <canvas id="spark" width="300" height="52"></canvas>
-      </div>
-
-      <div class="card" style="margin-bottom:12px">
-        <h2><span class="dot"></span> Giám sát sâu</h2>
-        <div class="health-grid">
-          <div>Chip: <b id="dvChip">--</b></div>
-          <div>Flash: <b id="dvFlash">--</b></div>
-          <div>Build: <b id="dvBuild">--</b></div>
-          <div>Kênh AP: <b id="dvCh">--</b></div>
-          <div style="grid-column:1/-1">MAC AP: <b id="dvMac" style="font-size:.68rem;font-weight:500">--</b></div>
-          <div>Heap min (nội): <b id="dvHmin">--</b> KB</div>
-          <div>Joy X / Y: <b id="dvJoy">--</b></div>
-          <div>Tốc độ nền: <b id="dvSpd">--</b>%</div>
-          <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
-          <div>Tuổi siêu âm: <b id="dvUsAge">--</b></div>
-        </div>
-        <details style="margin-top:12px;font-size:.72rem;color:var(--muted)">
-          <summary style="cursor:pointer;color:var(--accent2)">Payload JSON thô (debug)</summary>
-          <pre id="rawJ">—</pre>
-        </details>
-      </div>
-
-      <div class="card" style="margin-bottom:12px">
+    <div class="col col-drive" id="sec-drive">
+      <p class="rail-title">Vận hành</p>
+      <div class="card">
         <h2>Điều khiển</h2>
-        <div id="jsZone"><div id="jsKnob"></div></div>
-        <div class="toggle-row">
-          <button class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
-          <button class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
+        <div class="ctrl-stack">
+          <div id="jsZone"><div id="jsKnob"></div></div>
+          <div class="toggle-row">
+            <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
+            <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
+          </div>
+          <div class="range-wrap">
+            <input type="range" id="spdSlider" min="0" max="100" value="60" oninput="sendSpeed(this.value)" aria-label="Tốc độ nền phần trăm"/>
+          </div>
+          <div class="spd-label">Tốc độ: <span id="spdVal">60</span>%</div>
+          <button type="button" class="estop" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
         </div>
-        <input type="range" id="spdSlider" min="0" max="100" value="60" oninput="sendSpeed(this.value)"/>
-        <div style="text-align:center;font-size:.75rem;color:var(--muted);margin-top:4px">Tốc độ: <span id="spdVal">60</span>%</div>
-        <button class="estop" type="button" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
       </div>
 
-      <div class="card" style="margin-bottom:12px">
+      <div class="card">
         <h2>Bánh xe (RPM)</h2>
         <div class="rpm-grid">
           <div class="rpm-item"><div class="rpm-val" id="rFL">0</div><div class="rpm-lbl">T.Trai</div></div>
@@ -290,12 +348,49 @@ details pre{
       <div class="card">
         <h2>Trạng thái</h2>
         <p class="status-line">
-          <span class="sdot"></span><span>WS </span><span id="wsStatus">...</span>
+          <span class="sdot" aria-hidden="true"></span><span>WS</span> <span id="wsStatus">...</span>
           <span class="badge-estop" id="eBadge">E-STOP</span>
         </p>
-        <p style="font-size:.82rem;margin-top:8px;color:var(--muted)">Quãng đường TB: <b id="distAvg" style="color:var(--text)">0.00</b> m</p>
-        <p style="font-size:.82rem;margin-top:4px;color:var(--muted)">Chế độ: <b id="modeLabel" style="color:var(--accent)">Lái tay</b></p>
-        <button type="button" onclick="odomReset()" style="margin-top:10px;padding:6px 14px;border:1px solid var(--line2);background:transparent;color:var(--text);border-radius:8px;cursor:pointer;font-size:.75rem">Reset odom</button>
+        <p class="stat-row">Quãng đường TB: <b id="distAvg">0.00</b> m</p>
+        <p class="stat-row">Chế độ: <b id="modeLabel" class="mode-manual">Lái tay</b></p>
+        <button type="button" class="btn-ghost" onclick="odomReset()">Reset odom</button>
+      </div>
+    </div>
+
+    <div class="col col-monitor" id="sec-monitor">
+      <p class="rail-title">Hệ thống</p>
+      <div class="card">
+        <h2><span class="dot"></span> ESP – nhiệt &amp; sức khỏe</h2>
+        <div class="health-grid">
+          <div>Nhiệt chip: <b id="hiTemp">--</b> °C</div>
+          <div>CPU: <b id="hiCpu">--</b> MHz</div>
+          <div>Heap (nội): <b id="hiHeap">--</b> KB</div>
+          <div>PSRAM: <b id="hiPsram">--</b></div>
+          <div>Uptime: <b id="hiUp">--</b></div>
+          <div>Client Wi‑Fi: <b id="hiAp">--</b></div>
+        </div>
+        <div id="hiLine"><span id="hiMsg">Đang chờ dữ liệu…</span></div>
+        <canvas id="spark" width="300" height="52" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="card">
+        <h2><span class="dot"></span> Giám sát sâu</h2>
+        <div class="health-grid cols-3">
+          <div>Chip: <b id="dvChip">--</b></div>
+          <div>Flash: <b id="dvFlash">--</b></div>
+          <div>Build: <b id="dvBuild">--</b></div>
+          <div>Kênh AP: <b id="dvCh">--</b></div>
+          <div class="mac-row">MAC AP: <b id="dvMac" style="font-size:.68rem;font-weight:500">--</b></div>
+          <div>Heap min: <b id="dvHmin">--</b> KB</div>
+          <div>Joy X / Y: <b id="dvJoy">--</b></div>
+          <div>Tốc độ nền: <b id="dvSpd">--</b>%</div>
+          <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
+          <div>Tuổi US: <b id="dvUsAge">--</b></div>
+        </div>
+        <details class="details-block">
+          <summary>Payload JSON thô (debug)</summary>
+          <pre id="rawJ">—</pre>
+        </details>
       </div>
     </div>
   </div>
@@ -376,7 +471,9 @@ function connectWS(){
       document.getElementById('rRR').textContent=Math.round(d.rRR??0);
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
-      document.getElementById('modeLabel').textContent=(d.mode===1)?'Tự hành (demo)':'Lái tay';
+      const ml=document.getElementById('modeLabel');
+      ml.textContent=(d.mode===1)?'Tự hành (demo)':'Lái tay';
+      ml.className=(d.mode===1)?'mode-auto':'mode-manual';
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
       if(d.tempC!=null && d.tempC>=0){
@@ -419,16 +516,23 @@ function connectWS(){
       if(d.spdPct!=null) document.getElementById('dvSpd').textContent=String(d.spdPct);
       document.getElementById('dvLfAge').textContent=fmtAge(d.lfAge);
       document.getElementById('dvUsAge').textContent=fmtAge(d.usAge);
+      if(d.spdPct!=null){
+        const sl=document.getElementById('spdSlider');
+        if(sl && document.activeElement!==sl){
+          sl.value=d.spdPct;
+          document.getElementById('spdVal').textContent=String(d.spdPct);
+        }
+      }
       document.getElementById('rawJ').textContent=JSON.stringify(d,null,2);
     }catch(x){}
   };
 }
 const zone=document.getElementById('jsZone');
 const knob=document.getElementById('jsKnob');
-const R=70;
 let drag=false;
 function jUp(cx,cy){
   const r=zone.getBoundingClientRect();
+  const R=Math.max(24, Math.min(r.width,r.height)/2 - 10);
   let ox=cx-r.left-r.width/2, oy=cy-r.top-r.height/2;
   const dist=Math.sqrt(ox*ox+oy*oy);
   if(dist>R){ ox=ox*R/dist; oy=oy*R/dist; }
@@ -443,10 +547,38 @@ function sendSpeed(v){ document.getElementById('spdVal').textContent=v; wsS({t:'
 function setMode(m){
   document.getElementById('btnManual').classList.toggle('active',m===0);
   document.getElementById('btnAuto').classList.toggle('active',m===1);
+  const ml=document.getElementById('modeLabel');
+  ml.textContent=m===1?'Tự hành (demo)':'Lái tay';
+  ml.className=m===1?'mode-auto':'mode-manual';
   wsS({t:'mode',m});
 }
 function sendEstop(){ wsS({t:'estop'}); }
 function odomReset(){ wsS({t:'odomReset'}); }
+function initSecNav(){
+  const links=[...document.querySelectorAll('.secnav a')];
+  const secs=['sec-sense','sec-drive','sec-monitor'].map(id=>document.getElementById(id)).filter(Boolean);
+  if(!links.length||!secs.length)return;
+  const setActive=id=>{
+    links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));
+  };
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver((ents)=>{
+      const vis=ents.filter(e=>e.isIntersecting&&e.intersectionRatio>0.06);
+      if(!vis.length)return;
+      vis.sort((a,b)=>b.intersectionRatio-a.intersectionRatio);
+      setActive(vis[0].target.id);
+    },{threshold:[0,0.06,0.12,0.22,0.38],rootMargin:'-10% 0px -50% 0px'});
+    secs.forEach(s=>io.observe(s));
+  }else{
+    links[0].classList.add('active');
+  }
+  links.forEach(a=>{
+    a.addEventListener('click',()=>{
+      const id=a.getAttribute('href').slice(1);
+      requestAnimationFrame(()=>setActive(id));
+    });
+  });
+}
 zone.addEventListener('mousedown',e=>{drag=true; jUp(e.clientX,e.clientY);});
 zone.addEventListener('mousemove',e=>{if(drag) jUp(e.clientX,e.clientY);});
 zone.addEventListener('mouseup',jRel);
@@ -454,6 +586,7 @@ zone.addEventListener('mouseleave',jRel);
 zone.addEventListener('touchstart',e=>{e.preventDefault(); drag=true; jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 zone.addEventListener('touchmove',e=>{e.preventDefault(); if(drag) jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 zone.addEventListener('touchend',jRel);
+initSecNav();
 buildBump();
 connectWS();
 </script>
