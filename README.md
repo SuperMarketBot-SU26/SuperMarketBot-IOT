@@ -51,12 +51,17 @@ Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 ```
 SuperMarketBot-IOT/
 ├── SuperMarketBot-IOT.ino   ← File chính (setup/loop + FreeRTOS tasks)
-├── Config.h                 ← Khai báo GPIO, hằng số, struct RobotState
+├── Config.h
+├── CtrlJson.h               ← Lệnh JSON chung WebSocket + BLE
+├── BleUi.h                  ← GATT BLE (INFO + RX + TX notify)
+├── RobotTelemetry.h         ← JSON telemetry dùng chung web + BLE
 ├── Motors.h                 ← Điều khiển 2×TB6612FNG qua LEDC
 ├── Sensors.h                ← TF-Luna LiDAR UART + HC-SR04 (NewPing)
 ├── Odometry.h               ← 4× encoder (ISR + RPM/distance)
 ├── StatusRGB.h              ← Chỉ LED RGB zin bo (GPIO 38), không LED ngoài
-└── WebUI.h                  ← SoftAP + WebServer HTTP + WebSocket Dashboard
+├── WebUI.h                  ← SoftAP + Web + WebSocket
+└── tools/
+    └── ble-dashboard.html   ← Demo Web Bluetooth (Chrome localhost)
 ```
 
 ---
@@ -122,6 +127,30 @@ Nếu vài dòng đầu Serial có ký tự lạ: do boot ROM in trước, USB C
 
 ---
 
+## BLE & demo trước hội đồng
+
+Firmware mở **3 đặc tính GATT** trong một service (UUID trong `Config.h`):
+
+| Đặc tính | Quyền | Ý nghĩa |
+|-----|-----|-----|
+| **INFO** | READ | JSON tóm tắt: tên BLE, SSID AP, IP `192.168.x.x`, cổng HTTP/WS — đọc bằng nRF Connect để “chứng minh” thiết kế |
+| **RX** | WRITE | Cùng JSON lệnh như WebSocket: `joy`, `spd`, `mode`, `estop`, `odomReset` (xem `CtrlJson.h`) |
+| **TX** | NOTIFY | Telemetry ~10 Hz, tương đương dashboard web (schema rút gọn, trường `v:1`) |
+
+**Cách demo “xịn” có giao diện (không chỉ nRF Connect):**
+
+1. Nạp firmware mới, bật robot (SoftAP + BLE cùng lúc).
+2. Trên laptop: vào thư mục `tools`, chạy `python -m http.server 8765` (hoặc VS Code Live Server).
+3. Mở Chrome/Edge: `http://localhost:8765/ble-dashboard.html`.
+4. Nhấn **Kết nối BLE** → chọn **SmartMarketBot** → xem ô như web, joystick, E‑STOP, Manual/Auto, tốc độ %.
+5. Song song có thể mở **http://192.168.4.1** trên Wi‑Fi để đối chiếu hai kênh.
+
+**Lưu ý:** Web Bluetooth cần **ngữ cảnh bảo mật** (HTTPS hoặc localhost). Điện thoại: thử Chrome Android; nếu không được, dùng laptop localhost là ổn định nhất cho demo.
+
+Tắt BLE để tiết kiệm RAM/flash: `SMB_BLE_ENABLE 0` trong `Config.h`.
+
+---
+
 ## Tinh chỉnh tham số
 
 Tất cả hằng số nằm trong `Config.h`:
@@ -136,6 +165,14 @@ Tất cả hằng số nằm trong `Config.h`:
 | `ENC_PPR` | 20 | Xung/vòng bánh xe |
 | `WHEEL_DIAM_M` | 0.065 m | Đường kính bánh |
 | `PWM_FREQ` | 20 000 Hz | Tần số PWM động cơ |
+| `TFLUNA_SEND_INIT_CMD` | 1 | Gửi lệnh Benewake lúc boot (bật UART output); tắt nếu module đã cấu hình sẵn |
+
+### TF-Luna có đèn nhưng web vẫn ~800 cm / byte UART = 0
+
+- **Chân Mode (datasheet: pin 5, tuỳ lô hàng):** để **trống hoặc 3,3 V** = UART; **nối GND** = **I2C** → không còn stream `59 59` trên TX/RX nối ESP.
+- **Dây:** **TX của Luna → RX ESP** (trước RX=`GPIO18`, sau RX=`GPIO2` theo `Config.h`), **RX Luna ← TX ESP**, GND chung, 5 V.
+- Xem Serial Monitor ngay sau dòng `[LiDAR] Raw sniff`: phải có byte và chuỗi `59 59`; nếu `0 byte` → dây/baud/chế độ sai.
+- Nạp bản mới: firmware tự gửi **bật output + khung 9 byte + FPS + save** (tắt bằng `TFLUNA_SEND_INIT_CMD 0` nếu cần).
 
 ---
 

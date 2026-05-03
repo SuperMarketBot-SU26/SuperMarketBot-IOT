@@ -41,6 +41,13 @@
 #define LIDAR_BAUD    115200
 // Góc đo TF-Luna thường 2,3°/step; tầm datasheet ~0,2m–8m (phụ thuộc vật liệu, ánh sáng)
 #define LIDAR_MAX_CM  800
+/**
+ * TF-Luna (Benewake): gửi lệnh UART sau khi mở cổng — bật output, khung 9 byte (cm), FPS, save.
+ * Tắt (=0) nếu bạn đã cấu hình bằng tool PC và không muốn firmware đụng vào.
+ */
+#define TFLUNA_SEND_INIT_CMD  1
+/** Tần số mẫu 1–250 Hz (chỉ khi TFLUNA_SEND_INIT_CMD=1). */
+#define TFLUNA_SAMPLE_HZ      100
 
 /* -------------------- SIÊU ÂM (4x HC-SR04) ------------------------- */
 // VCC 5V, GND; Trig 3,3V OK; Echo 5V → nên 1k+2k chia áp 3,3V vào chân dưới
@@ -88,6 +95,15 @@
 #define AP_MAX_CLIENTS  4
 #define WEB_PORT        80
 #define WS_PORT         81
+
+/* -------------------- BLE GATT (ESP32-S3 chỉ BLE, không Classic) ----- */
+#define SMB_BLE_ENABLE      1
+#define BLE_DEVICE_NAME     "SmartMarketBot"
+#define BLE_SERVICE_UUID    "faf6c5d0-9b10-4fce-8a7c-123456789abc"
+#define BLE_CHAR_RX_UUID    "faf6c5d1-9b10-4fce-8a7c-123456789abc"
+#define BLE_CHAR_TX_UUID    "faf6c5d2-9b10-4fce-8a7c-123456789abc"
+/** READ: JSON tĩnh mô tả thiết bị + URL dashboard Wi‑Fi (demo với nRF Connect). */
+#define BLE_CHAR_INFO_UUID  "faf6c5d3-9b10-4fce-8a7c-123456789abc"
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
@@ -144,5 +160,9 @@ struct RobotState {
 };
 
 extern RobotState g_state;
+
+/** Tích lũy byte nhận từ Luna (Serial1=trước, Serial2=sau) — debug nhanh trên web (`lr1`/`lr2`). */
+extern volatile uint32_t g_lunaRxBytes1;
+extern volatile uint32_t g_lunaRxBytes2;
 
 #endif // CONFIG_H

@@ -12,58 +12,13 @@
 #include <Preferences.h>
 #include <cstdio>
 #include <esp_wifi.h>
-#include "esp_heap_caps.h"
+#include "RobotTelemetry.h"
 
-/** Đọc nhiệt độ chip (°C). Trả về NAN nếu không đọc được. */
-inline float readChipTempCelsius() {
-  float t = temperatureRead();
-  if (t < -40.f || t > 125.f) return NAN;
-  return t;
-}
-
-/** 0 = OK, 1 = cảnh báo, 2 = nghiêm trọng (nhiệt + heap SRAM nội bộ). */
-inline int computeHealthLevel(float tempC, uint32_t heapIntFree) {
-  if (heapIntFree < 20000u) return 2;
-  if (tempC == tempC && tempC >= 90.f) return 2;
-  if (heapIntFree < 45000u) return 1;
-  if (tempC == tempC && tempC >= 80.f) return 1;
-  return 0;
-}
-
-#if BAT_MONITOR_ENABLE
-inline void batteryMonitorInit() {
-  pinMode(BAT_ADC_PIN, INPUT);
-  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
-}
-inline void batteryRead(float &voltsOut, int &pctOut) {
-  const float ratio = (BAT_DIV_R1_KOHM + BAT_DIV_R2_KOHM) / BAT_DIV_R2_KOHM;
-  uint32_t sum = 0;
-  const int n = 8;
-  for (int i = 0; i < n; i++) {
-    sum += (uint32_t)analogReadMilliVolts(BAT_ADC_PIN);
-    delayMicroseconds(250);
-  }
-  float vPin = (sum / (float)n) / 1000.0f;
-  voltsOut = vPin * ratio;
-  const float den = (BAT_V_FULL - BAT_V_EMPTY);
-  int p = (den > 0.01f)
-              ? (int)((voltsOut - BAT_V_EMPTY) / den * 100.0f)
-              : 0;
-  if (p < 0) p = 0;
-  if (p > 100) p = 100;
-  pctOut = p;
-}
-#else
-inline void batteryMonitorInit() {}
-inline void batteryRead(float &voltsOut, int &pctOut) {
-  voltsOut = -1.f;
-  pctOut = -1;
-}
-#endif
+Preferences g_prefs;
+#include "CtrlJson.h"
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
-static Preferences    g_prefs;
 
 static const char HTML_PAGE[] PROGMEM = R"rawhtml(
 <!DOCTYPE html>
@@ -312,6 +267,7 @@ details pre{
       <p class="rail-title">Khoảng cách &amp; an toàn</p>
       <div class="card">
         <h2><span class="dot"></span> LiDAR &mdash; tầm nhìn chính</h2>
+        <p class="hint" style="margin-top:-6px">Nếu số đứng im / ~800&nbsp;cm: mở <b>Giám sát</b> → <b>bytes UART Luna</b> phải tăng; =0 thì kiểm tra TX→RX và 5&nbsp;V (xem Serial 115200 lúc boot).</p>
         <div class="lidar2">
           <div class="lidar">
             <div class="lidar-in">
@@ -419,6 +375,8 @@ details pre{
           <div>Tốc độ nền: <b id="dvSpd">--</b>%</div>
           <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
           <div>Tuổi US: <b id="dvUsAge">--</b></div>
+          <div class="mac-row">UART Luna (byte tích lũy): L1=<b id="dvLr1">0</b> · L2=<b id="dvLr2">0</b></div>
+          <div class="mac-row hint" style="font-size:.72rem;line-height:1.5;color:var(--muted);margin-top:2px"><b>Tuổi LiDAR</b> chỉ đổi khi ESP nhận <b>đủ khung 9 byte</b> hợp lệ (<code>59&nbsp;59</code>… checksum đúng). Chữ <b>chưa có dữ liệu</b> nghĩa là chưa bao giờ parse được — kể cả khi đã nối dây. Hai số LiDAR ~800&nbsp;cm lúc đầu là <b>mặc định trong code</b>, không phải đo thật. <b>L1/L2</b> = byte đã vào UART: <b>0</b> → không có sóng serial (TX/RX, GND, 5&nbsp;V, chân Mode); <b>tăng</b> mà tuổi vẫn “chưa có” → thường Luna đang <b>I²C</b> (chân Mode kéo GND) hoặc baud/format lệch.</div>
         </div>
         <details class="details-block">
           <summary>Payload JSON thô (debug)</summary>
@@ -440,6 +398,13 @@ function fmtAge(ms){
   if(ms<60000)return (ms/1000).toFixed(1)+' s';
   const m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000);
   return m+' ph '+s+' s';
+}
+/** Tuổi LiDAR: nếu có byte UART nhưng chưa parse được khung → báo rõ hơn. */
+function fmtLidarAge(ms,l1,l2){
+  if(ms!=null && ms>=0) return fmtAge(ms);
+  const b=(Number(l1)||0)+(Number(l2)||0);
+  if(b>0) return 'UART có byte, chưa khung hợp lệ';
+  return 'chưa có dữ liệu';
 }
 function pushSpark(v){
   if(!(v>=0)||!isFinite(v))return;
@@ -554,8 +519,10 @@ function connectWS(){
       if(d.hMin!=null) document.getElementById('dvHmin').textContent=(d.hMin/1024).toFixed(1);
       document.getElementById('dvJoy').textContent=(d.cx??0)+' / '+(d.cy??0);
       if(d.spdPct!=null) document.getElementById('dvSpd').textContent=String(d.spdPct);
-      document.getElementById('dvLfAge').textContent=fmtAge(d.lfAge);
+      document.getElementById('dvLfAge').textContent=fmtLidarAge(d.lfAge,d.lr1,d.lr2);
       document.getElementById('dvUsAge').textContent=fmtAge(d.usAge);
+      if(d.lr1!=null)document.getElementById('dvLr1').textContent=String(d.lr1);
+      if(d.lr2!=null)document.getElementById('dvLr2').textContent=String(d.lr2);
       if(d.spdPct!=null){
         const sl=document.getElementById('spdSlider');
         if(sl && document.activeElement!==sl){
@@ -640,111 +607,13 @@ static void onWebSocketEvent(uint8_t num, WStype_t type,
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload, length);
     if (err) return;
-    const char *t = doc["t"];
-    if (!t) return;
-
-    if (strcmp(t, "joy") == 0) {
-      g_state.cmdX = (int16_t)constrain((int)doc["x"].as<int>(), -100, 100);
-      g_state.cmdY = (int16_t)constrain((int)doc["y"].as<int>(), -100, 100);
-    } else if (strcmp(t, "spd") == 0) {
-      uint16_t pct = doc["v"].as<uint16_t>();
-      if (pct > 100) pct = 100;
-      g_state.baseSpeed = (uint16_t)((uint32_t)pct * PWM_MAX / 100);
-      g_prefs.begin(NVS_NAMESPACE, false);
-      g_prefs.putUInt("baseSpeed", g_state.baseSpeed);
-      g_prefs.end();
-    } else if (strcmp(t, "mode") == 0) {
-      g_state.mode = (RobotMode)doc["m"].as<uint8_t>();
-    } else if (strcmp(t, "estop") == 0) {
-      g_state.estop = true;
-    } else if (strcmp(t, "odomReset") == 0) {
-      extern void odomResetDistance();
-      odomResetDistance();
-    }
+    robotApplyControlJson(doc);
   }
 }
 
 inline void webUIBroadcast() {
   JsonDocument doc;
-  doc["lf"]   = g_state.lidarFront;
-  doc["lb"]   = g_state.lidarBack;
-  doc["uf"]   = g_state.usFront;
-  doc["ub"]   = g_state.usBack;
-  doc["ul"]   = g_state.usLeft;
-  doc["ur"]   = g_state.usRight;
-  doc["rFL"]  = g_state.rpmFL;
-  doc["rRL"]  = g_state.rpmRL;
-  doc["rFR"]  = g_state.rpmFR;
-  doc["rRR"]  = g_state.rpmRR;
-  doc["dFL"]  = g_state.distFL;
-  doc["dRL"]  = g_state.distRL;
-  doc["dFR"]  = g_state.distFR;
-  doc["dRR"]  = g_state.distRR;
-  doc["mode"] = (uint8_t)g_state.mode;
-  doc["estop"]= g_state.estop;
-
-  float tC = readChipTempCelsius();
-  if (tC == tC && tC >= -40.f && tC <= 125.f) {
-    doc["tempC"] = (double)((int)(tC * 10.f + 0.5f)) / 10.0;
-  } else {
-    doc["tempC"] = -1.0;
-  }
-  uint32_t heapInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  doc["heap"]   = (uint32_t)ESP.getFreeHeap();
-  doc["heapIn"] = heapInt;
-  if (psramFound()) {
-    doc["psFree"] = (uint32_t)ESP.getFreePsram();
-    doc["psTot"]  = (uint32_t)ESP.getPsramSize();
-  } else {
-    doc["psFree"] = 0;
-    doc["psTot"]  = 0;
-  }
-  doc["upMs"]  = (uint32_t)millis();
-  doc["apCli"] = WiFi.softAPgetStationNum();
-  doc["cpuMHz"] = ESP.getCpuFreqMHz();
-  doc["health"] = computeHealthLevel(tC, heapInt);
-
-  doc["chip"]    = ESP.getChipModel();
-  doc["flashKB"] = (uint32_t)(ESP.getFlashChipSize() / 1024u);
-  char buildBuf[48];
-  snprintf(buildBuf, sizeof(buildBuf), "%s %s", __DATE__, __TIME__);
-  doc["build"] = buildBuf;
-  doc["mac"]   = WiFi.softAPmacAddress();
-  doc["ch"]    = (int)WiFi.channel();
-
-  doc["hMin"] = (uint32_t)heap_caps_get_minimum_free_size(
-      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-
-  doc["cx"] = (int)g_state.cmdX;
-  doc["cy"] = (int)g_state.cmdY;
-  uint32_t spdPct =
-      (g_state.baseSpeed * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
-  doc["spdPct"] = spdPct;
-
-  const uint32_t nowMs = (uint32_t)millis();
-  if (g_state.lidarLastUpdateMs == 0u) {
-    doc["lfAge"] = -1;
-  } else {
-    uint32_t age = nowMs - g_state.lidarLastUpdateMs;
-    doc["lfAge"] = (int32_t)(age > 86400000u ? 86400000 : age);
-  }
-  if (g_state.usLastUpdateMs == 0u) {
-    doc["usAge"] = -1;
-  } else {
-    uint32_t ageU = nowMs - g_state.usLastUpdateMs;
-    doc["usAge"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
-  }
-
-  float batVolts = -1.f;
-  int batPct = -1;
-  batteryRead(batVolts, batPct);
-  if (batPct >= 0 && batVolts >= 0.f) {
-    doc["batV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
-    doc["batPct"] = batPct;
-  } else {
-    doc["batV"] = -1.0;
-    doc["batPct"] = -1;
-  }
+  robotTelemetryFillJson(doc);
 
   char buf[1280];
   serializeJson(doc, buf, sizeof(buf));

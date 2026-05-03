@@ -13,6 +13,7 @@
  *    - WebSockets by Markus Sattler (Links2004/arduinoWebSockets)
  *    - ArduinoJson by Benoit Blanchon
  *    - Adafruit NeoPixel (WS2812 onboard)
+ *  • BLE: xem tools/ble-dashboard.html (Web Bluetooth demo, Chrome localhost)
  * =====================================================================*/
 
 #include "Config.h"
@@ -21,6 +22,7 @@
 #include "Odometry.h"
 #include "StatusRGB.h"
 #include "WebUI.h"
+#include "BleUi.h"
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -174,6 +176,7 @@ static void taskWebIO(void *pvParams) {
 
     if ((xTaskGetTickCount() - lastBroadcast) >= broadcastPeriod) {
       webUIBroadcast();
+      bleUiNotifyIfConnected();
       lastBroadcast = xTaskGetTickCount();
     }
     if (millis() - lastRgbMs >= rgbPeriod) {
@@ -208,6 +211,7 @@ void setup() {
 
   // ── WiFi + Web ───────────────────────────────────────────────────
   webUIInit();
+  bleUiInit();
 
   // ── Mutex ────────────────────────────────────────────────────────
   g_stateMutex = xSemaphoreCreateMutex();
@@ -216,7 +220,7 @@ void setup() {
   // Core 0: Web IO — stack 8KB, priority 1
   xTaskCreatePinnedToCore(
     taskWebIO, "WebIO",
-    8192, nullptr, 1,
+    10240, nullptr, 1,
     nullptr, 0
   );
 
