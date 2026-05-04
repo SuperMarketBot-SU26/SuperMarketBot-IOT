@@ -96,15 +96,6 @@
 #define WEB_PORT        80
 #define WS_PORT         81
 
-/* -------------------- BLE GATT (ESP32-S3 chỉ BLE, không Classic) ----- */
-#define SMB_BLE_ENABLE      1
-#define BLE_DEVICE_NAME     "SmartMarketBot"
-#define BLE_SERVICE_UUID    "faf6c5d0-9b10-4fce-8a7c-123456789abc"
-#define BLE_CHAR_RX_UUID    "faf6c5d1-9b10-4fce-8a7c-123456789abc"
-#define BLE_CHAR_TX_UUID    "faf6c5d2-9b10-4fce-8a7c-123456789abc"
-/** READ: JSON tĩnh mô tả thiết bị + URL dashboard Wi‑Fi (demo với nRF Connect). */
-#define BLE_CHAR_INFO_UUID  "faf6c5d3-9b10-4fce-8a7c-123456789abc"
-
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
  *  muốn theo dõi (khuyến nghị: điểm 12 V trước / sau pin, GND chung với ESP).

@@ -52,16 +52,13 @@ Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 SuperMarketBot-IOT/
 ├── SuperMarketBot-IOT.ino   ← File chính (setup/loop + FreeRTOS tasks)
 ├── Config.h
-├── CtrlJson.h               ← Lệnh JSON chung WebSocket + BLE
-├── BleUi.h                  ← GATT BLE (INFO + RX + TX notify)
-├── RobotTelemetry.h         ← JSON telemetry dùng chung web + BLE
+├── CtrlJson.h               ← Lệnh JSON WebSocket (điều khiển từ dashboard)
+├── RobotTelemetry.h         ← JSON telemetry cho WebSocket
 ├── Motors.h                 ← Điều khiển 2×TB6612FNG qua LEDC
 ├── Sensors.h                ← TF-Luna LiDAR UART + HC-SR04 (NewPing)
 ├── Odometry.h               ← 4× encoder (ISR + RPM/distance)
 ├── StatusRGB.h              ← Chỉ LED RGB zin bo (GPIO 38), không LED ngoài
-├── WebUI.h                  ← SoftAP + Web + WebSocket
-└── tools/
-    └── ble-dashboard.html   ← Demo Web Bluetooth (Chrome localhost)
+└── WebUI.h                  ← SoftAP + Web + WebSocket
 ```
 
 ---
@@ -124,30 +121,6 @@ Nếu vài dòng đầu Serial có ký tự lạ: do boot ROM in trước, USB C
 - Tắt **dữ liệu di động (4G/5G)** trên điện thoại khi thử, tránh mạ thông minh ưu tiên 3G/4G và lỗi nội bộ mạng.
 - Thử trình duyệt khác (Chrome) hoặc mở **http://192.168.4.1** dạng thường, không bắt buộc HTTPS.
 - Nạp lại firmware sau khi cập nhật code (Upload).
-
----
-
-## BLE & demo trước hội đồng
-
-Firmware mở **3 đặc tính GATT** trong một service (UUID trong `Config.h`):
-
-| Đặc tính | Quyền | Ý nghĩa |
-|-----|-----|-----|
-| **INFO** | READ | JSON tóm tắt: tên BLE, SSID AP, IP `192.168.x.x`, cổng HTTP/WS — đọc bằng nRF Connect để “chứng minh” thiết kế |
-| **RX** | WRITE | Cùng JSON lệnh như WebSocket: `joy`, `spd`, `mode`, `estop`, `odomReset` (xem `CtrlJson.h`) |
-| **TX** | NOTIFY | Telemetry ~10 Hz, tương đương dashboard web (schema rút gọn, trường `v:1`) |
-
-**Cách demo “xịn” có giao diện (không chỉ nRF Connect):**
-
-1. Nạp firmware mới, bật robot (SoftAP + BLE cùng lúc).
-2. Trên laptop: vào thư mục `tools`, chạy `python -m http.server 8765` (hoặc VS Code Live Server).
-3. Mở Chrome/Edge: `http://localhost:8765/ble-dashboard.html`.
-4. Nhấn **Kết nối BLE** → chọn **SmartMarketBot** → xem ô như web, joystick, E‑STOP, Manual/Auto, tốc độ %.
-5. Song song có thể mở **http://192.168.4.1** trên Wi‑Fi để đối chiếu hai kênh.
-
-**Lưu ý:** Web Bluetooth cần **ngữ cảnh bảo mật** (HTTPS hoặc localhost). Điện thoại: thử Chrome Android; nếu không được, dùng laptop localhost là ổn định nhất cho demo.
-
-Tắt BLE để tiết kiệm RAM/flash: `SMB_BLE_ENABLE 0` trong `Config.h`.
 
 ---
 

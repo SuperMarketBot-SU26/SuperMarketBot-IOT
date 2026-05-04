@@ -1,5 +1,5 @@
 /* =====================================================================
- *  CtrlJson.h — Lệnh điều khiển JSON dùng chung WebSocket + BLE
+ *  CtrlJson.h — Lệnh điều khiển JSON (WebSocket dashboard)
  * =====================================================================*/
 #ifndef CTRLJSON_H
 #define CTRLJSON_H

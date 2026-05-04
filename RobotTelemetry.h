@@ -1,5 +1,5 @@
 /* =====================================================================
- *  RobotTelemetry.h — JSON telemetry dùng chung WebSocket + BLE
+ *  RobotTelemetry.h — JSON telemetry cho WebSocket / dashboard
  * =====================================================================*/
 #ifndef ROBOT_TELEMETRY_H
 #define ROBOT_TELEMETRY_H
@@ -142,73 +142,6 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
 
   doc["lr1"] = (uint32_t)g_lunaRxBytes1;
   doc["lr2"] = (uint32_t)g_lunaRxBytes2;
-}
-
-/**
- * Telemetry gọn cho BLE notify (MTU ~512 sau trao đổi; giữ < ~480 byte JSON).
- * Cùng ý nghĩa field với web; bỏ chuỗi dài (MAC, build, tên chip đầy đủ).
- */
-inline void robotTelemetryFillJsonBle(JsonDocument &doc) {
-  doc["v"] = 1;
-  doc["lf"] = g_state.lidarFront;
-  doc["lb"] = g_state.lidarBack;
-  doc["uf"] = g_state.usFront;
-  doc["ub"] = g_state.usBack;
-  doc["ul"] = g_state.usLeft;
-  doc["ur"] = g_state.usRight;
-  doc["rFL"] = (double)((int)(g_state.rpmFL * 10.f + 0.5f)) / 10.0;
-  doc["rRL"] = (double)((int)(g_state.rpmRL * 10.f + 0.5f)) / 10.0;
-  doc["rFR"] = (double)((int)(g_state.rpmFR * 10.f + 0.5f)) / 10.0;
-  doc["rRR"] = (double)((int)(g_state.rpmRR * 10.f + 0.5f)) / 10.0;
-  doc["dFL"] = (double)((int)(g_state.distFL * 1000.f + 0.5f)) / 1000.0;
-  doc["dRL"] = (double)((int)(g_state.distRL * 1000.f + 0.5f)) / 1000.0;
-  doc["dFR"] = (double)((int)(g_state.distFR * 1000.f + 0.5f)) / 1000.0;
-  doc["dRR"] = (double)((int)(g_state.distRR * 1000.f + 0.5f)) / 1000.0;
-  doc["mode"] = (uint8_t)g_state.mode;
-  doc["es"] = g_state.estop;
-  doc["cx"] = (int)g_state.cmdX;
-  doc["cy"] = (int)g_state.cmdY;
-  doc["sp"] = (uint32_t)(g_state.baseSpeed * 100u /
-                         (uint32_t)(PWM_MAX ? PWM_MAX : 1u));
-
-  float tC = readChipTempCelsius();
-  if (tC == tC && tC >= -40.f && tC <= 125.f) {
-    doc["tC"] = (double)((int)(tC * 10.f + 0.5f)) / 10.0;
-  } else {
-    doc["tC"] = -1.0;
-  }
-  uint32_t heapInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  doc["hi"] = heapInt;
-  doc["up"] = (uint32_t)millis();
-  doc["cli"] = WiFi.softAPgetStationNum();
-  doc["hm"] = computeHealthLevel(tC, heapInt);
-
-  const uint32_t nowMs = (uint32_t)millis();
-  if (g_state.lidarLastUpdateMs == 0u) {
-    doc["lfa"] = -1;
-  } else {
-    uint32_t age = nowMs - g_state.lidarLastUpdateMs;
-    doc["lfa"] = (int32_t)(age > 86400000u ? 86400000 : age);
-  }
-  if (g_state.usLastUpdateMs == 0u) {
-    doc["usa"] = -1;
-  } else {
-    uint32_t ageU = nowMs - g_state.usLastUpdateMs;
-    doc["usa"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
-  }
-
-  doc["l1"] = (uint32_t)g_lunaRxBytes1;
-  doc["l2"] = (uint32_t)g_lunaRxBytes2;
-
-#if BAT_MONITOR_ENABLE
-  float batVolts = -1.f;
-  int batPct = -1;
-  batteryRead(batVolts, batPct);
-  if (batPct >= 0 && batVolts >= 0.f) {
-    doc["bV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
-    doc["bP"] = batPct;
-  }
-#endif
 }
 
 #endif // ROBOT_TELEMETRY_H
