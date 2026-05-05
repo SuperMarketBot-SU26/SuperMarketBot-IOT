@@ -81,11 +81,13 @@
 #define PWM_MAX       ((1 << PWM_RES_BITS) - 1)
 
 /* -------------------- AN TOÀN NÉ VẬT CẢN (không gian mở: siêu thị / hành lang) - */
-// Dừng khẩn cấp: cận tường/đùi người (LiDAR + siêu âm) — 20cm an toàn hơn 15 khi tốc độ tăng
-#define SAFE_STOP_CM    20
-// Giảm tốc từ từ theo tầm LiDAR/ US khi tới < 2m (phù hợp tầm 8m)
-#define SAFE_SLOW_CM    200
+// Vùng "dừng cứng" (cm): dùng trong tự lái + né tránh. Tăng 26–35 nếu nhiễu/dừng sớm quá.
+#define SAFE_STOP_CM    28
+// Bắt đầu giảm tốc khi vật trước gần hơn ngưỡng (cm). 80–120 = ít nhạy từ xa; 180–220 = nhả ga sớm.
+#define SAFE_SLOW_CM    100
 #define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
+/** Ngưỡng HC-SR04 trái/phải (cm) để bẻ lái trong AUTO — nhỏ hơn SAFE_STOP = ít "giật" ngang. */
+#define SAFE_SIDE_AVOID_CM  14
 
 /* -------------------- WIFI SOFTAP ---------------------------------- */
 #define AP_SSID         "SmartMarketBot"

@@ -92,11 +92,11 @@ static void autoAvoid() {
     spd = (uint16_t)(g_state.baseSpeed * ratio);
   }
 
-  // Vừa tiến vừa tránh sang trái/phải nếu bên đó trống
-  if (rightDist < SAFE_STOP_CM) {
+  // Vừa tiến vừa tránh sang trái/phải nếu bên đó rất gần (riêng ngưỡng cạnh — tránh nhiễu)
+  if (rightDist < SAFE_SIDE_AVOID_CM) {
     // Nguy hiểm bên phải → vừa tiến vừa lệch trái
     botDrive(-40, 80, spd);
-  } else if (leftDist < SAFE_STOP_CM) {
+  } else if (leftDist < SAFE_SIDE_AVOID_CM) {
     botDrive(40, 80, spd);
   } else {
     // Đường thẳng
@@ -131,10 +131,12 @@ static void taskControl(void *pvParams) {
       odomTick = xTaskGetTickCount();
     }
 
-    // ── Đánh giá dừng khẩn cấp ────────────────────────────────────
-    bool frontDanger = (g_state.lidarFront < SAFE_STOP_CM) ||
-                       (g_state.usFront    < SAFE_STOP_CM);
-    if (frontDanger) g_state.estop = true;
+    // ── E-STOP phía trước chỉ khi tự lái (lái tay: test motor, không cắt bởi US/LiDAR) ──
+    if (g_state.mode == MODE_AUTO) {
+      bool frontDanger = (g_state.lidarFront < SAFE_STOP_CM) ||
+                         (g_state.usFront < SAFE_STOP_CM);
+      if (frontDanger) g_state.estop = true;
+    }
 
     // ── Ra lệnh động cơ ───────────────────────────────────────────
     if (g_state.estop) {

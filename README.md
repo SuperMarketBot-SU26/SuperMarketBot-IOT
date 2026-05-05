@@ -133,8 +133,9 @@ Tất cả hằng số nằm trong `Config.h`:
 | `LIDAR_MAX_CM` | 800 cm (8 m) | Trần hiển thị / clamp TF-Luna (theo datasheet) |
 | `US_PING_MAX_CM` | 200 cm | Cửa sổ đo NewPing (~2 m, cân bằng tốc độ quét) |
 | `US_DISPLAY_MAX_CM` | 160 cm (1,6 m) | Thanh HMI + vùng “xa ổn định” thực tế HC-SR04 trong siêu thị |
-| `SAFE_STOP_CM` | 20 cm | Dừng / né gấp (LiDAR + siêu âm) |
-| `SAFE_SLOW_CM` | 200 cm | Bắt đầu giảm tốc từ từ theo tầm (phù hợp hành lang rộng) |
+| `SAFE_STOP_CM` | 28 cm | Trong **tự lái**: vật trước gần hơn → dừng / né (LiDAR + US) |
+| `SAFE_SIDE_AVOID_CM` | 14 cm | Chỉ **tự lái**: HC-SR04 trái/phải — bẻ lái khi thực sự gần (giảm giật) |
+| `SAFE_SLOW_CM` | 100 cm | Khoảng bắt đầu **giảm tốc** tiến (nhỏ = ít nhạy từ xa) |
 | `ENC_PPR` | 20 | Xung/vòng bánh xe |
 | `WHEEL_DIAM_M` | 0.065 m | Đường kính bánh |
 | `PWM_FREQ` | 20 000 Hz | Tần số PWM động cơ |
