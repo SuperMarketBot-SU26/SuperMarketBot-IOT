@@ -45,6 +45,7 @@ static void printMemInfo() {
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 RobotState g_state = {
   .usFront = US_PING_MAX_CM, .usBack = US_PING_MAX_CM, .usLeft = US_PING_MAX_CM, .usRight = US_PING_MAX_CM,
+  .usLF = US_PING_MAX_CM, .usLR = US_PING_MAX_CM, .usRF = US_PING_MAX_CM, .usRR = US_PING_MAX_CM,
   .lidarFront = LIDAR_MAX_CM, .lidarBack = LIDAR_MAX_CM,
   .rpmFL = 0, .rpmRL = 0, .rpmFR = 0, .rpmRR = 0,
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,

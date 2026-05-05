@@ -136,6 +136,8 @@ enum RobotMode : uint8_t {
 struct RobotState {
   // Cảm biến khoảng cách (cm)
   volatile int16_t usFront, usBack, usLeft, usRight;
+  /** 4 góc xe (sau remap web) — Trái trước / Trái sau / Phải trước / Phải sau */
+  volatile int16_t usLF, usLR, usRF, usRR;
   volatile int16_t lidarFront, lidarBack;
   // Tốc độ bánh xe (RPM)
   volatile float rpmFL, rpmRL, rpmFR, rpmRR;
@@ -157,5 +159,16 @@ extern RobotState g_state;
 /** Tích lũy byte nhận từ Luna (Serial1=trước, Serial2=sau) — debug nhanh trên web (`lr1`/`lr2`). */
 extern volatile uint32_t g_lunaRxBytes1;
 extern volatile uint32_t g_lunaRxBytes2;
+
+/** Dò “có tín hiệu thật” cho HMI — millis lần cuối (0 = chưa từng). Định nghĩa trong Sensors.h / Odometry.h */
+extern volatile uint32_t g_luna1LastOkMs;
+extern volatile uint32_t g_luna2LastOkMs;
+extern volatile uint32_t g_usPhyLastEchoMs[4];
+extern volatile uint32_t g_encPhyLastPulseMs[4];
+
+/** Cửa sổ thời gian: sau bấy lâu không có tín hiệu thì web hiển thị OFF */
+#define SENSOR_LINK_MS_LIDAR  500u
+#define SENSOR_LINK_MS_US     2000u
+#define SENSOR_LINK_MS_ENC    3500u
 
 #endif // CONFIG_H

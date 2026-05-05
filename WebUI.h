@@ -11,8 +11,10 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <cstdio>
+#include <cstring>
 #include <esp_wifi.h>
 #include "RobotTelemetry.h"
+#include "SensorLayout.h"
 
 Preferences g_prefs;
 #include "CtrlJson.h"
@@ -41,19 +43,28 @@ static const char HTML_PAGE[] PROGMEM = R"rawhtml(
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  body{background-attachment:scroll!important}
 }
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 *{box-sizing:border-box;margin:0;padding:0}
 body{
-  min-height:100dvh;background:radial-gradient(1200px 600px at 50% -20%,#12202e 0%,var(--bg0) 55%,#050608 100%);
-  color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  min-height:100dvh;color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   padding:var(--safe-t) var(--safe-x) var(--safe-b);
+  background-color:#050608;
+  background-image:
+    radial-gradient(1200px 600px at 50% -15%,rgba(18,45,58,.85) 0%,transparent 58%),
+    radial-gradient(700px 480px at 80% 95%,rgba(45,212,191,.07) 0%,transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 900'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%230c1826'/%3E%3Cstop offset='1' stop-color='%23050608'/%3E%3C/linearGradient%3E%3Cpattern id='p' width='56' height='56' patternUnits='userSpaceOnUse'%3E%3Cpath d='M56 0H0V56' fill='none' stroke='%232a3545' stroke-width='0.7' opacity='.4'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width='100%25' height='100%25' fill='url(%23a)'/%3E%3Crect width='100%25' height='100%25' fill='url(%23p)'/%3E%3Cg opacity='.11' fill='%232dd4bf' transform='translate%28720 520%29'%3E%3Crect x='-150' y='-78' width='300' height='156' rx='26'/%3E%3Ccircle cx='-108' cy='-108' r='30'/%3E%3Ccircle cx='108' cy='-108' r='30'/%3E%3Ccircle cx='-108' cy='108' r='30'/%3E%3Ccircle cx='108' cy='108' r='30'/%3E%3Cpath d='M0-118 L42-168 H-42Z'/%3E%3Cpath d='M-40-40 H40 M0-40 V40' stroke='%2338bdf8' stroke-width='6' stroke-linecap='round' opacity='.35' fill='none'/%3E%3C/g%3E%3C/svg%3E");
+  background-size:auto,cover;
+  background-position:center -80px,center bottom;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
 }
-.wrap{max-width:1100px;margin:0 auto}
+.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto}
 .brand{
   text-align:center;padding:clamp(14px,3vw,20px) 8px clamp(16px,3vw,22px);
-  background:linear-gradient(180deg,rgba(17,24,32,.6),transparent);border-bottom:1px solid var(--line);border-radius:0 0 20px 20px;
-  box-shadow:var(--glow);
+  background:linear-gradient(180deg,rgba(17,24,32,.72),transparent);border-bottom:1px solid var(--line);border-radius:0 0 20px 20px;
+  box-shadow:var(--glow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
 }
 .brand h1{
   font-size:clamp(1.2rem,3.8vw,1.65rem);font-weight:700;letter-spacing:.12em;
@@ -118,8 +129,9 @@ body{
   .card{padding:12px 12px 14px}
 }
 .card{
-  background:linear-gradient(160deg,rgba(20,28,40,.9),rgba(8,12,18,.95));
+  background:linear-gradient(160deg,rgba(20,28,40,.88),rgba(8,12,18,.93));
   border:1px solid var(--line);border-radius:16px;padding:clamp(14px,3.5vw,18px);box-shadow:0 4px 24px rgba(0,0,0,.35);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
 .card h2{
   font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:12px;
@@ -155,6 +167,12 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .lidar-unit{font-size:.7rem;color:var(--muted);font-weight:500}
 .lidar-ax{font-size:.65rem;font-weight:600;letter-spacing:.1em;margin-top:10px;color:var(--accent2);text-align:center}
 .lidar-ax b{color:var(--text);font-weight:600}
+.link-badge{font-size:.58rem;font-weight:700;letter-spacing:.08em;padding:3px 10px;border-radius:99px;border:1px solid var(--line2);margin-left:6px;vertical-align:middle;display:inline-block}
+.link-badge.on{background:rgba(34,197,94,.14);color:var(--ok);border-color:rgba(34,197,94,.38)}
+.link-badge.off{background:rgba(71,85,105,.22);color:#94a3b8;border-color:var(--line2)}
+.lidar-in.sensor-off{opacity:.52;filter:grayscale(.92)}
+.lidar-in.sensor-off .lidar-arc{opacity:.32}
+.lidar-in.sensor-off .lidar-num{color:var(--muted)!important}
 .bump-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .b-item{
   background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:10px 10px;
@@ -162,6 +180,8 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 }
 .b-item .bn{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .b-item .val{font-family:ui-monospace,Consolas,monospace;font-size:.95rem;font-weight:600;margin-top:3px}
+.b-item.sensor-off{opacity:.58;border-left-color:#475569}
+.b-item.sensor-off .val{color:var(--muted)}
 .b-bar{height:6px;border-radius:3px;background:#1a2330;margin-top:8px;overflow:hidden}
 .b-fill{height:100%;border-radius:3px;transition:width .2s,background .15s}
 .slam{
@@ -217,6 +237,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .rpm-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rpm-item{background:#0c1016;border:1px solid var(--line);border-radius:10px;padding:11px 8px;text-align:center}
 .rpm-val{font-family:ui-monospace,Consolas,monospace;font-size:clamp(1rem,3.5vw,1.2rem);font-weight:700;color:var(--accent2)}
+.rpm-item.sensor-off .rpm-val{color:#64748b!important;font-weight:600}
 .rpm-lbl{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px}
 .status-line{font-size:.8rem;margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sdot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);animation:bl 1.2s ease infinite;flex-shrink:0}
@@ -241,6 +262,13 @@ details pre{
 .spd-label{text-align:center;font-size:.76rem;color:var(--muted);margin-top:4px}
 .health-grid .mac-row{grid-column:1/-1}
 .details-block{margin-top:4px}
+.layout-form{font-size:.74rem;color:var(--muted)}
+.layout-row{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:8px;align-items:center;margin-bottom:8px}
+@media(max-width:520px){.layout-row{grid-template-columns:1fr;gap:6px}}
+.layout-row label{font-weight:600;color:var(--text);font-size:.7rem}
+.layout-row select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line2);background:#0c1016;color:var(--text);font-size:.72rem}
+.layout-lid{margin:12px 0;padding:10px;border:1px solid var(--line2);border-radius:10px;background:#0c1016}
+.layout-lid label{display:block;margin-bottom:6px;font-size:.72rem;color:var(--muted)}
 .mode-manual{color:var(--accent2)!important;font-weight:600}
 .mode-auto{color:var(--amber)!important;font-weight:600}
 </style>
@@ -260,6 +288,7 @@ details pre{
     <a href="#sec-sense">Cảm biến</a>
     <a href="#sec-drive">Điều khiển</a>
     <a href="#sec-monitor">Giám sát</a>
+    <a href="#sec-layout">Bố trí cảm biến</a>
   </nav>
 
   <div class="appgrid">
@@ -267,24 +296,24 @@ details pre{
       <p class="rail-title">Khoảng cách &amp; an toàn</p>
       <div class="card">
         <h2><span class="dot"></span> LiDAR &mdash; tầm nhìn chính</h2>
-        <p class="hint" style="margin-top:-6px">Nếu số đứng im / ~800&nbsp;cm: mở <b>Giám sát</b> → <b>bytes UART Luna</b> phải tăng; =0 thì kiểm tra TX→RX và 5&nbsp;V (xem Serial 115200 lúc boot).</p>
+        <p class="hint" style="margin-top:-6px">Nhãn <b>ON/OFF</b>: chỉ <b>ON</b> khi có khung UART LiDAR hợp lệ gần đây; bumper/encoder <b>ON</b> khi có echo siêu âm trong tầm hoặc bánh vừa có xung. Chưa nối dây / mất nguồn → <b>OFF</b>. Nếu số đứng im / ~800&nbsp;cm nhưng ON: vẫn xem <b>bytes UART</b> ở Giám sát.</p>
         <div class="lidar2">
           <div class="lidar">
-            <div class="lidar-in">
+            <div class="lidar-in sensor-off" id="lidCardF">
               <div class="lidar-arc" id="ringF" style="--p:0.2"><div>
-                <span class="lidar-num" id="vLF">--</span>
+                <span class="lidar-num" id="vLF">—</span>
                 <span class="lidar-unit">cm</span>
               </div></div>
-              <div class="lidar-ax">TRƯỚC <b>LiDAR</b></div>
+              <div class="lidar-ax">TRƯỚC <b>LiDAR</b> <span class="link-badge off" id="stLF">OFF</span></div>
             </div>
           </div>
           <div class="lidar">
-            <div class="lidar-in">
+            <div class="lidar-in sensor-off" id="lidCardB">
               <div class="lidar-arc" id="ringB" style="--p:0.2"><div>
-                <span class="lidar-num" id="vLB">--</span>
+                <span class="lidar-num" id="vLB">—</span>
                 <span class="lidar-unit">cm</span>
               </div></div>
-              <div class="lidar-ax">SAU · <b>LiDAR</b></div>
+              <div class="lidar-ax">SAU · <b>LiDAR</b> <span class="link-badge off" id="stLB">OFF</span></div>
             </div>
           </div>
         </div>
@@ -292,7 +321,7 @@ details pre{
 
       <div class="card">
         <h2><span class="dot safety"></span> Bumper (HC-SR04) &mdash; dừng cận cảnh</h2>
-        <p class="hint">Khi vật cản rất gần (&lt;~50&nbsp;cm): giảm tốc / dừng. Không thay thế LiDAR để lập bản đồ.</p>
+        <p class="hint">Khi vật cản rất gần (&lt;~50&nbsp;cm): giảm tốc / dừng. Không thay thế LiDAR để lập bản đồ. <b>OFF</b> ở bumper: chưa có echo trong tầm ~2&nbsp;m gần đây — thử đưa tay gần sensor hoặc có chướng ngại trong phạm vi.</p>
         <div class="bump-grid" id="bumpBox"></div>
       </div>
 
@@ -325,11 +354,12 @@ details pre{
 
       <div class="card">
         <h2>Bánh xe (RPM)</h2>
+        <p class="hint" style="margin-top:-4px;margin-bottom:8px;font-size:.68rem"><b>OFF</b> khi vài giây gần đây <b>chưa có xung</b> encoder — lăn nhẹ bánh để kiểm.</p>
         <div class="rpm-grid">
-          <div class="rpm-item"><div class="rpm-val" id="rFL">0</div><div class="rpm-lbl">T.Trai</div></div>
-          <div class="rpm-item"><div class="rpm-val" id="rFR">0</div><div class="rpm-lbl">T.Phai</div></div>
-          <div class="rpm-item"><div class="rpm-val" id="rRL">0</div><div class="rpm-lbl">S.Trai</div></div>
-          <div class="rpm-item"><div class="rpm-val" id="rRR">0</div><div class="rpm-lbl">S.Phai</div></div>
+          <div class="rpm-item sensor-off" id="rpmLF"><div class="rpm-val" id="rFL">OFF</div><div class="rpm-lbl">T.Trai</div></div>
+          <div class="rpm-item sensor-off" id="rpmRF"><div class="rpm-val" id="rFR">OFF</div><div class="rpm-lbl">T.Phai</div></div>
+          <div class="rpm-item sensor-off" id="rpmLR"><div class="rpm-val" id="rRL">OFF</div><div class="rpm-lbl">S.Trai</div></div>
+          <div class="rpm-item sensor-off" id="rpmRR"><div class="rpm-val" id="rRR">OFF</div><div class="rpm-lbl">S.Phai</div></div>
         </div>
       </div>
 
@@ -376,12 +406,27 @@ details pre{
           <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
           <div>Tuổi US: <b id="dvUsAge">--</b></div>
           <div class="mac-row">UART Luna (byte tích lũy): L1=<b id="dvLr1">0</b> · L2=<b id="dvLr2">0</b></div>
-          <div class="mac-row hint" style="font-size:.72rem;line-height:1.5;color:var(--muted);margin-top:2px"><b>Tuổi LiDAR</b> chỉ đổi khi ESP nhận <b>đủ khung 9 byte</b> hợp lệ (<code>59&nbsp;59</code>… checksum đúng). Chữ <b>chưa có dữ liệu</b> nghĩa là chưa bao giờ parse được — kể cả khi đã nối dây. Hai số LiDAR ~800&nbsp;cm lúc đầu là <b>mặc định trong code</b>, không phải đo thật. <b>L1/L2</b> = byte đã vào UART: <b>0</b> → không có sóng serial (TX/RX, GND, 5&nbsp;V, chân Mode); <b>tăng</b> mà tuổi vẫn “chưa có” → thường Luna đang <b>I²C</b> (chân Mode kéo GND) hoặc baud/format lệch.</div>
+          <div class="mac-row hint" style="font-size:.72rem;line-height:1.5;color:var(--muted);margin-top:2px"><b>Tuổi LiDAR</b> chỉ đổi khi ESP nhận <b>đủ khung 9 byte</b> hợp lệ (<code>59&nbsp;59</code>… checksum đúng). Chữ <b>chưa có dữ liệu</b> nghĩa là chưa bao giờ parse được — kể cả khi đã nối dây. Hai số LiDAR ~800&nbsp;cm lúc đầu là <b>mặc định trong code</b>, không phải đo thật. <b>L1/L2</b> = byte đã vào UART: <b>0</b> → không có sóng serial (TX/RX, GND, 5&nbsp;V, chân Mode); <b>tăng</b> mà tuổi vẫn “chưa có” → thường Luna đang <b>I²C</b> (chân Mode kéo GND) hoặc baud/format lệch. Trong JSON có thêm <code>lfOn</code>/<code>lbOn</code>, mảng 4 phần tử <code>usOn</code>/<code>encOn</code> (1=tín hiệu gần đây).</div>
         </div>
         <details class="details-block">
           <summary>Payload JSON thô (debug)</summary>
           <pre id="rawJ">—</pre>
         </details>
+      </div>
+
+      <div class="card" id="sec-layout">
+        <h2><span class="dot"></span> Bố trí cảm biến (team — không đổi dây GPIO)</h2>
+        <p class="hint">Mỗi <b>góc xe</b> chọn <b>một</b> siêu âm vật lý và <b>một</b> encoder vật lý (0–3, không trùng trong từng loại). LiDAR: chọn UART nào là phía <b>trước</b> xe.</p>
+        <div class="layout-form" id="layGrid"></div>
+        <div class="layout-lid">
+          <label>LiDAR phía <b>trước</b> xe đang là UART</label>
+          <select id="lidFrontSel" aria-label="LiDAR trước">
+            <option value="0">Serial1 — GPIO TX17 / RX18</option>
+            <option value="1">Serial2 — GPIO TX1 / RX2</option>
+          </select>
+        </div>
+        <button type="button" class="mode-btn" style="margin-top:8px;width:100%" onclick="saveLayout()">Lưu vào bộ nhớ robot (NVS)</button>
+        <p class="hint" id="layMsg" style="margin-top:8px;min-height:1.2em"></p>
       </div>
     </div>
   </div>
@@ -390,7 +435,10 @@ details pre{
 const WS_URL='ws://'+location.hostname+':81';
 let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=160;
-const B=[{k:'F',i:'dUF'},{k:'B',i:'dUB'},{k:'L',i:'dUL'},{k:'P',i:'dUR'}];
+const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
+const PHY_US=[{v:0,t:'US Trước (Echo 10)'},{v:1,t:'US Sau (Echo 11)'},{v:2,t:'US Trái (Echo 12)'},{v:3,t:'US Phải (Echo 13)'}];
+const PHY_ENC=[{v:0,t:'Enc FL (GPIO15)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
+const B=[{lbl:'Trái trước',i:'dULF'},{lbl:'Trái sau',i:'dULR'},{lbl:'Phải trước',i:'dURF'},{lbl:'Phải sau',i:'dURR'}];
 const spark=[]; const SPARK_N=48;
 function fmtAge(ms){
   if(ms==null||ms<0)return 'chưa có dữ liệu';
@@ -425,11 +473,48 @@ function pushSpark(v){
 }
 function buildBump(){
   document.getElementById('bumpBox').innerHTML=B.map(b=>`
-    <div class="b-item">
-      <div class="bn">US ${b.k==='L'?'Trai':b.k==='P'?'Phai':b.k==='F'?'Truoc':'Sau'}</div>
-      <div class="val" id="val_${b.i}">-- cm</div>
+    <div class="b-item sensor-off">
+      <div class="bn">HC-SR04 · ${b.lbl}</div>
+      <div class="val" id="val_${b.i}">OFF</div>
       <div class="b-bar"><div class="b-fill" id="bar_${b.i}" style="width:0%"></div></div>
     </div>`).join('');
+}
+function buildLayoutGrid(){
+  const g=document.getElementById('layGrid'); if(!g)return;
+  let h='<div class="layout-row" style="font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px"><span>Góc xe</span><span>Siêu âm vật lý</span><span>Encoder vật lý</span></div>';
+  for(let i=0;i<4;i++){
+    h+=`<div class="layout-row"><label>${SLOT_LBL[i]}</label><select id="layUs${i}"></select><select id="layEnc${i}"></select></div>`;
+  }
+  g.innerHTML=h;
+  for(let i=0;i<4;i++){
+    const su=document.getElementById('layUs'+i), se=document.getElementById('layEnc'+i);
+    PHY_US.forEach(o=>{const e=document.createElement('option'); e.value=o.v; e.textContent=o.t; su.appendChild(e);});
+    PHY_ENC.forEach(o=>{const e=document.createElement('option'); e.value=o.v; e.textContent=o.t; se.appendChild(e);});
+  }
+}
+function isPerm4(a){
+  if(a.length!==4)return false; const s=new Set(a); return s.size===4 && a.every(v=>v>=0&&v<=3);
+}
+function applyLayoutPayload(d){
+  if(!d||d.t!=='layout')return;
+  for(let i=0;i<4;i++){
+    const su=document.getElementById('layUs'+i), se=document.getElementById('layEnc'+i);
+    if(d.us&&d.us[i]!=null&&su)su.value=String(d.us[i]);
+    if(d.enc&&d.enc[i]!=null&&se)se.value=String(d.enc[i]);
+  }
+  if(d.lidF!=null){ const s=document.getElementById('lidFrontSel'); if(s) s.value=String(d.lidF); }
+}
+function saveLayout(){
+  const us=[], enc=[];
+  for(let i=0;i<4;i++){
+    us.push(parseInt(document.getElementById('layUs'+i).value,10));
+    enc.push(parseInt(document.getElementById('layEnc'+i).value,10));
+  }
+  const msg=document.getElementById('layMsg');
+  if(!isPerm4(us)||!isPerm4(enc)){ msg.textContent='Lỗi: mỗi loại phải chọn đủ 0–3 không trùng.'; return; }
+  const lidF=parseInt(document.getElementById('lidFrontSel').value,10);
+  msg.textContent='Đang gửi…';
+  wsS({t:'layout',us,enc,lidF});
 }
 function setRing(id,cm){
   const el=document.getElementById(id);
@@ -441,10 +526,19 @@ function onL(num,id){
   const e=document.getElementById(id);
   if(e)e.textContent=Math.round(num);
 }
-function onU(cm,max,id){
+function onU(cm,max,id,active){
   const v=document.getElementById('val_'+id);
   const f=document.getElementById('bar_'+id);
   if(!v||!f)return;
+  const on=active!==false;
+  const box=v.closest('.b-item');
+  if(box) box.classList.toggle('sensor-off',!on);
+  if(!on){
+    v.textContent='OFF';
+    f.style.width='0%';
+    f.style.background='#475569';
+    return;
+  }
   v.textContent=cm+' cm';
   const w=Math.min(100,cm/max*100);
   f.style.width=w+'%';
@@ -453,20 +547,56 @@ function onU(cm,max,id){
 }
 function connectWS(){
   ws=new WebSocket(WS_URL);
-  ws.onopen=()=>{document.getElementById('wsStatus').textContent='đã nối'; if(retry)clearTimeout(retry);};
+  ws.onopen=()=>{
+    document.getElementById('wsStatus').textContent='đã nối';
+    if(retry)clearTimeout(retry);
+    wsS({t:'layoutGet'});
+  };
   ws.onclose=()=>{document.getElementById('wsStatus').textContent='mất kết nối…'; retry=setTimeout(connectWS,2000);};
   ws.onmessage=e=>{
     try{
       const d=JSON.parse(e.data);
+      if(d.t==='layout'){
+        applyLayoutPayload(d);
+        const m=document.getElementById('layMsg');
+        if(m) m.textContent='Đã đồng bộ bố trí từ robot.';
+        return;
+      }
+      if(d.t==='layoutErr'){
+        const m=document.getElementById('layMsg');
+        if(m) m.textContent='Lỗi: '+(d.msg||'map không hợp lệ');
+        return;
+      }
       const lf=d.lf??0, lb=d.lb??0;
-      onL(lf,'vLF'); onL(lb,'vLB');
-      setRing('ringF',lf); setRing('ringB',lb);
-      onU(d.uf??0,US_BAR_MAX_CM,'dUF'); onU(d.ub??0,US_BAR_MAX_CM,'dUB');
-      onU(d.ul??0,US_BAR_MAX_CM,'dUL'); onU(d.ur??0,US_BAR_MAX_CM,'dUR');
-      document.getElementById('rFL').textContent=Math.round(d.rFL??0);
-      document.getElementById('rFR').textContent=Math.round(d.rFR??0);
-      document.getElementById('rRL').textContent=Math.round(d.rRL??0);
-      document.getElementById('rRR').textContent=Math.round(d.rRR??0);
+      const lfOn=d.lfOn!==undefined?!!d.lfOn:true, lbOn=d.lbOn!==undefined?!!d.lbOn:true;
+      const stLF=document.getElementById('stLF'), stLB=document.getElementById('stLB');
+      if(stLF){ stLF.textContent=lfOn?'ON':'OFF'; stLF.classList.toggle('on',lfOn); stLF.classList.toggle('off',!lfOn); }
+      if(stLB){ stLB.textContent=lbOn?'ON':'OFF'; stLB.classList.toggle('on',lbOn); stLB.classList.toggle('off',!lbOn); }
+      const cf=document.getElementById('lidCardF'), cB=document.getElementById('lidCardB');
+      if(cf) cf.classList.toggle('sensor-off',!lfOn);
+      if(cB) cB.classList.toggle('sensor-off',!lbOn);
+      const vLfEl=document.getElementById('vLF'), vLbEl=document.getElementById('vLB');
+      if(lfOn){ onL(lf,'vLF'); setRing('ringF',lf); }
+      else { if(vLfEl) vLfEl.textContent='—'; setRing('ringF',0); }
+      if(lbOn){ onL(lb,'vLB'); setRing('ringB',lb); }
+      else { if(vLbEl) vLbEl.textContent='—'; setRing('ringB',0); }
+
+      const ua=(Array.isArray(d.usOn)&&d.usOn.length===4)?d.usOn:null;
+      onU(d.usLF??0,US_BAR_MAX_CM,'dULF', ua?!!ua[0]:true);
+      onU(d.usLR??0,US_BAR_MAX_CM,'dULR', ua?!!ua[1]:true);
+      onU(d.usRF??0,US_BAR_MAX_CM,'dURF', ua?!!ua[2]:true);
+      onU(d.usRR??0,US_BAR_MAX_CM,'dURR', ua?!!ua[3]:true);
+
+      const en=(Array.isArray(d.encOn)&&d.encOn.length===4)?d.encOn:null;
+      function setRpmVis(slotId,valId,rpm,on){
+        const slot=document.getElementById(slotId), rv=document.getElementById(valId);
+        if(slot) slot.classList.toggle('sensor-off',!on);
+        if(rv) rv.textContent=on?String(Math.round(rpm)):'OFF';
+      }
+      setRpmVis('rpmLF','rFL',d.rFL??0, en?!!en[0]:true);
+      setRpmVis('rpmLR','rRL',d.rRL??0, en?!!en[1]:true);
+      setRpmVis('rpmRF','rFR',d.rFR??0, en?!!en[2]:true);
+      setRpmVis('rpmRR','rRR',d.rRR??0, en?!!en[3]:true);
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
@@ -563,7 +693,7 @@ function sendEstop(){ wsS({t:'estop'}); }
 function odomReset(){ wsS({t:'odomReset'}); }
 function initSecNav(){
   const links=[...document.querySelectorAll('.secnav a')];
-  const secs=['sec-sense','sec-drive','sec-monitor'].map(id=>document.getElementById(id)).filter(Boolean);
+  const secs=['sec-sense','sec-drive','sec-monitor','sec-layout'].map(id=>document.getElementById(id)).filter(Boolean);
   if(!links.length||!secs.length)return;
   const setActive=id=>{
     links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));
@@ -594,6 +724,7 @@ zone.addEventListener('touchstart',e=>{e.preventDefault(); drag=true; jUp(e.touc
 zone.addEventListener('touchmove',e=>{e.preventDefault(); if(drag) jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 zone.addEventListener('touchend',jRel);
 initSecNav();
+buildLayoutGrid();
 buildBump();
 connectWS();
 </script>
@@ -607,6 +738,24 @@ static void onWebSocketEvent(uint8_t num, WStype_t type,
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload, length);
     if (err) return;
+    const char *t = doc["t"];
+    if (t && strcmp(t, "layoutGet") == 0) {
+      sensorLayoutReplyToClient(g_wsServer, num);
+      return;
+    }
+    if (t && strcmp(t, "layout") == 0) {
+      if (sensorLayoutApplyJson(doc, g_prefs)) {
+        sensorLayoutReplyToClient(g_wsServer, num);
+      } else {
+        JsonDocument errDoc;
+        errDoc["t"] = "layoutErr";
+        errDoc["msg"] = "us/enc phai hoan vi 0..3, lidF 0 hoac 1";
+        char b[120];
+        serializeJson(errDoc, b, sizeof(b));
+        g_wsServer.sendTXT(num, b);
+      }
+      return;
+    }
     robotApplyControlJson(doc);
   }
 }
@@ -615,7 +764,7 @@ inline void webUIBroadcast() {
   JsonDocument doc;
   robotTelemetryFillJson(doc);
 
-  char buf[1280];
+  char buf[1400];
   serializeJson(doc, buf, sizeof(buf));
   g_wsServer.broadcastTXT(buf);
 }
@@ -623,6 +772,7 @@ inline void webUIBroadcast() {
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
+  sensorLayoutLoad(g_prefs);
   g_prefs.end();
 
   batteryMonitorInit();

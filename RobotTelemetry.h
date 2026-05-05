@@ -5,6 +5,9 @@
 #define ROBOT_TELEMETRY_H
 
 #include "Config.h"
+#include "SensorLayout.h"
+#include "Sensors.h"
+#include "Odometry.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -66,6 +69,19 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
   doc["ub"] = g_state.usBack;
   doc["ul"] = g_state.usLeft;
   doc["ur"] = g_state.usRight;
+  doc["usLF"] = g_state.usLF;
+  doc["usLR"] = g_state.usLR;
+  doc["usRF"] = g_state.usRF;
+  doc["usRR"] = g_state.usRR;
+  {
+    JsonArray mu = doc["mapU"].to<JsonArray>();
+    JsonArray me = doc["mapE"].to<JsonArray>();
+    for (int i = 0; i < 4; i++) {
+      mu.add(g_mapUsSlot[i]);
+      me.add(g_mapEncSlot[i]);
+    }
+    doc["lidF"] = g_lidarFrontUart;
+  }
   doc["rFL"] = g_state.rpmFL;
   doc["rRL"] = g_state.rpmRL;
   doc["rFR"] = g_state.rpmFR;
@@ -142,6 +158,25 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
 
   doc["lr1"] = (uint32_t)g_lunaRxBytes1;
   doc["lr2"] = (uint32_t)g_lunaRxBytes2;
+
+  /* HMI: có tín hiệu thật gần đây → web hiển thị ON (không thì OFF) */
+  auto recentOk = [nowMs](uint32_t lastMs, uint32_t winMs) -> bool {
+    return lastMs != 0u && (nowMs - lastMs) < winMs;
+  };
+  bool l1ok = recentOk(g_luna1LastOkMs, SENSOR_LINK_MS_LIDAR);
+  bool l2ok = recentOk(g_luna2LastOkMs, SENSOR_LINK_MS_LIDAR);
+  doc["lfOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l1ok : l2ok);
+  doc["lbOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l2ok : l1ok);
+  JsonArray jUsOn = doc["usOn"].to<JsonArray>();
+  JsonArray jEnOn = doc["encOn"].to<JsonArray>();
+  for (int s = 0; s < 4; s++) {
+    uint8_t pu = g_mapUsSlot[s];
+    uint8_t pe = g_mapEncSlot[s];
+    if (pu > 3u) pu = (uint8_t)s;
+    if (pe > 3u) pe = (uint8_t)s;
+    jUsOn.add((uint8_t)recentOk(g_usPhyLastEchoMs[pu], SENSOR_LINK_MS_US));
+    jEnOn.add((uint8_t)recentOk(g_encPhyLastPulseMs[pe], SENSOR_LINK_MS_ENC));
+  }
 }
 
 #endif // ROBOT_TELEMETRY_H

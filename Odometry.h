@@ -10,6 +10,7 @@
 #define ODOMETRY_H
 
 #include "Config.h"
+#include "SensorLayout.h"
 
 #define ODOM_PERIOD_MS 100   // Cửa sổ tính RPM
 
@@ -21,6 +22,7 @@ volatile uint32_t g_ticksRR = 0;
 
 // Tổng xung tích luỹ để tính quãng đường
 uint32_t g_totalFL = 0, g_totalRL = 0, g_totalFR = 0, g_totalRR = 0;
+volatile uint32_t g_encPhyLastPulseMs[4] = {0, 0, 0, 0};
 
 // ISR phải IRAM_ATTR, càng ngắn càng tốt
 void IRAM_ATTR isrFL() { g_ticksFL++; }
@@ -65,16 +67,29 @@ inline void odomUpdate() {
 
   g_totalFL += fl; g_totalRL += rl; g_totalFR += fr; g_totalRR += rr;
 
-  const float scaleRpm = 60000.0f / (ENC_PPR * (float)ODOM_PERIOD_MS);
-  g_state.rpmFL = fl * scaleRpm;
-  g_state.rpmRL = rl * scaleRpm;
-  g_state.rpmFR = fr * scaleRpm;
-  g_state.rpmRR = rr * scaleRpm;
+  uint32_t tPulse = (uint32_t)millis();
+  if (fl) g_encPhyLastPulseMs[0] = tPulse;
+  if (rl) g_encPhyLastPulseMs[1] = tPulse;
+  if (fr) g_encPhyLastPulseMs[2] = tPulse;
+  if (rr) g_encPhyLastPulseMs[3] = tPulse;
 
-  g_state.distFL = (g_totalFL / ENC_PPR) * WHEEL_CIRC_M;
-  g_state.distRL = (g_totalRL / ENC_PPR) * WHEEL_CIRC_M;
-  g_state.distFR = (g_totalFR / ENC_PPR) * WHEEL_CIRC_M;
-  g_state.distRR = (g_totalRR / ENC_PPR) * WHEEL_CIRC_M;
+  const float scaleRpm = 60000.0f / (ENC_PPR * (float)ODOM_PERIOD_MS);
+  float rpmPhy[4] = {fl * scaleRpm, rl * scaleRpm, fr * scaleRpm, rr * scaleRpm};
+  g_state.rpmFL = rpmPhy[g_mapEncSlot[SLOT_LF]];
+  g_state.rpmRL = rpmPhy[g_mapEncSlot[SLOT_LR]];
+  g_state.rpmFR = rpmPhy[g_mapEncSlot[SLOT_RF]];
+  g_state.rpmRR = rpmPhy[g_mapEncSlot[SLOT_RR]];
+
+  float distPhy[4] = {
+      (g_totalFL / ENC_PPR) * WHEEL_CIRC_M,
+      (g_totalRL / ENC_PPR) * WHEEL_CIRC_M,
+      (g_totalFR / ENC_PPR) * WHEEL_CIRC_M,
+      (g_totalRR / ENC_PPR) * WHEEL_CIRC_M,
+  };
+  g_state.distFL = distPhy[g_mapEncSlot[SLOT_LF]];
+  g_state.distRL = distPhy[g_mapEncSlot[SLOT_LR]];
+  g_state.distFR = distPhy[g_mapEncSlot[SLOT_RF]];
+  g_state.distRR = distPhy[g_mapEncSlot[SLOT_RR]];
 }
 
 inline void odomResetDistance() {

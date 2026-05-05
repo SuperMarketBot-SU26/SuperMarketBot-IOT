@@ -14,11 +14,15 @@
 
 #include "Config.h"
 #include <NewPing.h>
+#include "SensorLayout.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 volatile uint32_t g_lunaRxBytes1 = 0;
 volatile uint32_t g_lunaRxBytes2 = 0;
+volatile uint32_t g_luna1LastOkMs = 0;
+volatile uint32_t g_luna2LastOkMs = 0;
+volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
 
 // 4 cảm biến siêu âm dùng cùng 1 chân TRIG (GPIO14)
 static NewPing g_sonarF(US_TRIG, US_ECHO_F, US_PING_MAX_CM);
@@ -97,18 +101,33 @@ inline void sensorsInit() {
  * (Blocking ~3–4ms mỗi hướng với US_PING_MAX_CM=200)
  */
 inline void sensorsPollUS() {
-  g_state.usFront = g_sonarF.ping_cm();
+  uint32_t tnow = (uint32_t)millis();
+  int16_t phy[4];
+  phy[0] = (int16_t)g_sonarF.ping_cm();
   sensorsYieldMs(5);
-  g_state.usBack = g_sonarB.ping_cm();
+  phy[1] = (int16_t)g_sonarB.ping_cm();
   sensorsYieldMs(5);
-  g_state.usLeft = g_sonarL.ping_cm();
+  phy[2] = (int16_t)g_sonarL.ping_cm();
   sensorsYieldMs(5);
-  g_state.usRight = g_sonarR.ping_cm();
-  // 0 = không echo trong cửa sổ → coi như tầm tối đa ước tính (hành lang trống)
-  if (g_state.usFront == 0) g_state.usFront = US_PING_MAX_CM;
-  if (g_state.usBack  == 0) g_state.usBack  = US_PING_MAX_CM;
-  if (g_state.usLeft  == 0) g_state.usLeft  = US_PING_MAX_CM;
-  if (g_state.usRight == 0) g_state.usRight = US_PING_MAX_CM;
+  phy[3] = (int16_t)g_sonarR.ping_cm();
+  for (int i = 0; i < 4; i++) {
+    if (phy[i] > 0) g_usPhyLastEchoMs[i] = tnow;
+    if (phy[i] == 0) phy[i] = US_PING_MAX_CM;
+  }
+  int16_t usSlot[4];
+  for (int s = 0; s < 4; s++) {
+    uint8_t p = g_mapUsSlot[s];
+    if (p > 3) p = (uint8_t)s;
+    usSlot[s] = phy[p];
+  }
+  g_state.usLF = usSlot[SLOT_LF];
+  g_state.usLR = usSlot[SLOT_LR];
+  g_state.usRF = usSlot[SLOT_RF];
+  g_state.usRR = usSlot[SLOT_RR];
+  g_state.usFront = (int16_t)min((int)g_state.usLF, (int)g_state.usRF);
+  g_state.usBack = (int16_t)min((int)g_state.usLR, (int)g_state.usRR);
+  g_state.usLeft = (int16_t)min((int)g_state.usLF, (int)g_state.usLR);
+  g_state.usRight = (int16_t)min((int)g_state.usRF, (int)g_state.usRR);
   g_state.usLastUpdateMs = millis();
 }
 
@@ -151,18 +170,29 @@ inline bool readTfLunaStream(HardwareSerial &ser, uint8_t *buf, uint8_t &idx,
 inline void sensorsPollLidar() {
   static uint8_t buf1[9], buf2[9];
   static uint8_t idx1 = 0, idx2 = 0;
+  static int16_t rawD1 = (int16_t)LIDAR_MAX_CM;
+  static int16_t rawD2 = (int16_t)LIDAR_MAX_CM;
   int16_t d;
   if (readTfLunaStream(Serial1, buf1, idx1, g_lunaRxBytes1, d)) {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
-    g_state.lidarFront = d;
+    rawD1 = d;
+    g_luna1LastOkMs = (uint32_t)millis();
     g_state.lidarLastUpdateMs = millis();
   }
   if (readTfLunaStream(Serial2, buf2, idx2, g_lunaRxBytes2, d)) {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
-    g_state.lidarBack = d;
+    rawD2 = d;
+    g_luna2LastOkMs = (uint32_t)millis();
     g_state.lidarLastUpdateMs = millis();
+  }
+  if (g_lidarFrontUart == 0) {
+    g_state.lidarFront = rawD1;
+    g_state.lidarBack = rawD2;
+  } else {
+    g_state.lidarFront = rawD2;
+    g_state.lidarBack = rawD1;
   }
 }
 
