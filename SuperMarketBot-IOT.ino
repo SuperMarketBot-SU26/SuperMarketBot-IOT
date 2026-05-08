@@ -51,6 +51,7 @@ RobotState g_state = {
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
   .cmdX = 0, .cmdY = 0,
   .baseSpeed = 0,
+  .autoBaseSpeed = 0,
   .mode = MODE_MANUAL,
   .estop = false,
   .lidarLastUpdateMs = 0,
@@ -61,47 +62,98 @@ RobotState g_state = {
 SemaphoreHandle_t g_stateMutex;
 
 /* =====================================================================
- *  Logic tự hành né vật cản đơn giản (State Machine)
+ *  Tự hành demo (siêu thị): chỉ HC-SR04 — đi thẳng, né bằng lùi + xoay.
+ *  Không vTaskDelay; không bật estop khi gặp vật (đó là lỗi cũ làm auto “chết”).
  * =================================================================== */
-static void autoAvoid() {
-  const int16_t frontMin = min(g_state.lidarFront, g_state.usFront);
-  const int16_t backMin  = min(g_state.lidarBack,  g_state.usBack);
-  const int16_t leftDist  = g_state.usLeft;
-  const int16_t rightDist = g_state.usRight;
+enum AutoNavFsm : uint8_t { AN_CRUISE = 0, AN_BACKUP, AN_TURN };
 
-  // Dừng khẩn cấp — ưu tiên tuyệt đối
-  if (frontMin < SAFE_STOP_CM) {
-    botStop();
-    // Lùi nhẹ để thoát
-    vTaskDelay(pdMS_TO_TICKS(200));
-    botBackward(g_state.baseSpeed / 2);
-    vTaskDelay(pdMS_TO_TICKS(400));
-    botStop();
-    // Xoay về hướng nhiều không gian hơn
-    if (rightDist > leftDist) botRotateCW(g_state.baseSpeed / 2);
-    else                      botRotateCCW(g_state.baseSpeed / 2);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    botStop();
-    return;
-  }
+static AutoNavFsm s_auto_fsm = AN_CRUISE;
+static uint32_t s_auto_t0 = 0;
+static int8_t s_auto_turn = 1; // +1 CW, -1 CCW
+static uint8_t s_auto_alt = 0;
+static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 
-  // Giảm tốc khi vật cản gần (tuyến tính: 100% → 30% trong dải SAFE_STOP..SAFE_SLOW)
-  uint16_t spd = g_state.baseSpeed;
-  if (frontMin < SAFE_SLOW_CM) {
-    float ratio = (float)(frontMin - SAFE_STOP_CM) / (SAFE_SLOW_CM - SAFE_STOP_CM);
-    ratio = max(0.3f, ratio);
-    spd = (uint16_t)(g_state.baseSpeed * ratio);
-  }
+static uint16_t autoSpeedPwm() {
+  uint16_t s = g_state.autoBaseSpeed;
+  if (s == 0) s = g_state.baseSpeed;
+  uint16_t lo = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_MIN_PWM_FRAC / 100u);
+  if (s < lo) s = lo;
+  return s;
+}
 
-  // Vừa tiến vừa tránh sang trái/phải nếu bên đó rất gần (riêng ngưỡng cạnh — tránh nhiễu)
-  if (rightDist < SAFE_SIDE_AVOID_CM) {
-    // Nguy hiểm bên phải → vừa tiến vừa lệch trái
-    botDrive(-40, 80, spd);
-  } else if (leftDist < SAFE_SIDE_AVOID_CM) {
-    botDrive(40, 80, spd);
-  } else {
-    // Đường thẳng
-    botForward(spd);
+static void autoNavigateUltrasonic() {
+  const uint16_t spd = autoSpeedPwm();
+  const uint32_t now = millis();
+  const int16_t f = g_state.usFront;
+  const int16_t L = g_state.usLeft;
+  const int16_t R = g_state.usRight;
+  const int16_t B = g_state.usBack;
+
+  switch (s_auto_fsm) {
+    case AN_CRUISE: {
+      if (f < AUTO_US_BLOCK_CM) {
+        s_auto_fsm = AN_BACKUP;
+        s_auto_t0 = now;
+        break;
+      }
+      uint16_t run = spd;
+      if (f < AUTO_US_SLOW_CM && f > AUTO_US_BLOCK_CM) {
+        float den = (float)(AUTO_US_SLOW_CM - AUTO_US_BLOCK_CM);
+        float t = den > 1.f ? (float)(f - AUTO_US_BLOCK_CM) / den : 1.f;
+        if (t < 0.2f) t = 0.2f;
+        run = (uint16_t)((float)spd * t);
+      }
+      if (R < AUTO_US_SIDE_CM && L >= R - 2) {
+        botDrive(-40, 70, run);
+      } else if (L < AUTO_US_SIDE_CM && R >= L - 2) {
+        botDrive(40, 70, run);
+      } else {
+        botForward(run);
+      }
+      break;
+    }
+    case AN_BACKUP: {
+      uint16_t bspd = (uint16_t)(((uint32_t)spd * 12u) / 25u);
+      uint16_t bmin = (uint16_t)(PWM_MAX / 14u);
+      if (bspd < bmin) bspd = bmin;
+
+      if (B < AUTO_US_BACK_STOP_CM) {
+        if (L > R + 3) s_auto_turn = -1;
+        else if (R > L + 3) s_auto_turn = 1;
+        else s_auto_turn = ((s_auto_alt & 1u) != 0) ? 1 : -1;
+        s_auto_alt++;
+        s_auto_fsm = AN_TURN;
+        s_auto_t0 = now;
+        botStop();
+        break;
+      }
+      botBackward(bspd);
+      if (now - s_auto_t0 >= AUTO_BACKUP_MS) {
+        if (L > R + 3) s_auto_turn = -1;
+        else if (R > L + 3) s_auto_turn = 1;
+        else s_auto_turn = ((s_auto_alt & 1u) != 0) ? 1 : -1;
+        s_auto_alt++;
+        s_auto_fsm = AN_TURN;
+        s_auto_t0 = now;
+        botStop();
+      }
+      break;
+    }
+    case AN_TURN: {
+      uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
+      uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
+      if (tspd < tmin) tspd = tmin;
+      if (s_auto_turn > 0) botRotateCW(tspd);
+      else botRotateCCW(tspd);
+      if (now - s_auto_t0 >= AUTO_TURN_MS) {
+        botStop();
+        s_auto_fsm = AN_CRUISE;
+      }
+      break;
+    }
+    default:
+      s_auto_fsm = AN_CRUISE;
+      break;
   }
 }
 
@@ -117,40 +169,35 @@ static void taskControl(void *pvParams) {
   TickType_t usTick   = xTaskGetTickCount();
 
   while (true) {
-    // ── Đọc LiDAR (mỗi vòng, non-blocking) ────────────────────────
+    if (g_state.mode == MODE_AUTO && s_ctrl_prev_mode != MODE_AUTO) {
+      g_state.estop = false;
+      s_auto_fsm = AN_CRUISE;
+      s_auto_t0 = millis();
+      s_auto_alt = 0;
+    }
+    if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
+      s_auto_fsm = AN_CRUISE;
+    }
+    s_ctrl_prev_mode = g_state.mode;
+
     sensorsPollLidar();
 
-    // ── Đọc siêu âm (~4×5ms = 20ms) mỗi 60ms để giảm ảnh hưởng ──
     if ((xTaskGetTickCount() - usTick) >= pdMS_TO_TICKS(60)) {
       sensorsPollUS();
       usTick = xTaskGetTickCount();
     }
 
-    // ── Odometry mỗi 100ms ─────────────────────────────────────────
     if ((xTaskGetTickCount() - odomTick) >= pdMS_TO_TICKS(ODOM_PERIOD_MS)) {
       odomUpdate();
       odomTick = xTaskGetTickCount();
     }
 
-    // ── E-STOP phía trước chỉ khi tự lái (lái tay: test motor, không cắt bởi US/LiDAR) ──
-    if (g_state.mode == MODE_AUTO) {
-      bool frontDanger = (g_state.lidarFront < SAFE_STOP_CM) ||
-                         (g_state.usFront < SAFE_STOP_CM);
-      if (frontDanger) g_state.estop = true;
-    }
-
-    // ── Ra lệnh động cơ ───────────────────────────────────────────
     if (g_state.estop) {
       botStop();
-      // Tự xoá estop sau khi người dùng gửi lại lệnh joystick
-      if (g_state.cmdX == 0 && g_state.cmdY == 0) {
-        // chờ confirm release — reset estop
-        g_state.estop = false;
-      }
+      if (g_state.cmdX == 0 && g_state.cmdY == 0) g_state.estop = false;
     } else if (g_state.mode == MODE_AUTO) {
-      autoAvoid();
+      autoNavigateUltrasonic();
     } else {
-      // Chế độ lái tay
       if (g_state.cmdX == 0 && g_state.cmdY == 0) {
         botStop();
       } else {

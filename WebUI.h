@@ -211,9 +211,71 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
   box-shadow:0 4px 20px rgba(45,212,191,.4);pointer-events:none;transition:top .04s linear,left .04s linear;
 }
 .range-wrap{margin-top:4px;padding:8px 0;min-height:48px;display:flex;align-items:center}
-input[type=range]{width:100%;accent-color:var(--accent);height:8px;-webkit-appearance:none;appearance:none;background:transparent}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0);box-shadow:0 2px 8px rgba(0,0,0,.35)}
-input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0)}
+/* Thanh tốc độ: track đầy đủ + fill, không chỉ “chấm” */
+.spd-block{
+  margin:10px 0 0;padding:12px 14px 14px;background:rgba(12,16,22,.92);
+  border:1px solid var(--line2);border-radius:14px;
+  box-shadow:0 2px 12px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.04);
+}
+.spd-block:first-of-type{margin-top:6px}
+.spd-block__head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.spd-block__label{font-size:.68rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.spd-block__hint{font-size:.62rem;color:var(--muted);opacity:.88;margin-top:2px;line-height:1.35}
+.spd-block__badge{
+  font-family:ui-monospace,"Segoe UI Mono",Consolas,monospace;font-weight:700;font-size:.88rem;
+  min-width:3.2ch;text-align:right;padding:5px 11px;border-radius:10px;border:1px solid rgba(45,212,191,.35);
+  background:linear-gradient(165deg,rgba(45,212,191,.18),rgba(8,14,20,.9));color:var(--accent);
+  box-shadow:0 0 16px rgba(45,212,191,.08);
+}
+.spd-block--auto .spd-block__badge{
+  border-color:rgba(251,191,36,.4);
+  background:linear-gradient(165deg,rgba(251,191,36,.16),rgba(8,14,20,.9));color:var(--amber);
+  box-shadow:0 0 16px rgba(251,191,36,.08);
+}
+.spd-block__ticks{
+  display:flex;justify-content:space-between;margin-top:8px;padding:0 2px;
+  font-size:.58rem;color:var(--muted);letter-spacing:.02em;
+}
+input.spd-range{
+  --spd-pct:60%;
+  --fill-a:var(--accent);--fill-b:var(--accent2);
+  display:block;width:100%;height:36px;margin:0 -2px;cursor:pointer;background:transparent;
+  -webkit-appearance:none;appearance:none;
+}
+input.spd-range--auto{--fill-a:#fbbf24;--fill-b:#38bdf8}
+/* WebKit: vạch nền + phần đã chọn */
+input.spd-range::-webkit-slider-runnable-track{
+  height:14px;border-radius:7px;
+  background:linear-gradient(90deg,var(--fill-a),var(--fill-b)) 0 / var(--spd-pct) 100% no-repeat #1a2330;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.05);
+}
+input.spd-range::-webkit-slider-thumb{
+  -webkit-appearance:none;width:28px;height:28px;margin-top:-7px;border-radius:9px;box-sizing:border-box;
+  background:linear-gradient(180deg,#f1f5f9,#cbd5e1);
+  border:3px solid var(--fill-a);
+  box-shadow:0 4px 14px rgba(45,212,191,.35),0 2px 4px rgba(0,0,0,.4);
+}
+.spd-block--auto input.spd-range::-webkit-slider-thumb{
+  border-color:#fbbf24;box-shadow:0 4px 14px rgba(251,191,36,.35),0 2px 4px rgba(0,0,0,.4);
+}
+/* Firefox */
+input.spd-range::-moz-range-track{
+  height:14px;border-radius:7px;background:#1a2330;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.45);
+}
+input.spd-range::-moz-range-progress{
+  height:14px;border-radius:7px 0 0 7px;
+  background:linear-gradient(90deg,var(--fill-a),var(--fill-b));
+}
+input.spd-range::-moz-range-thumb{
+  width:26px;height:26px;border:none;border-radius:9px;box-sizing:border-box;
+  background:linear-gradient(180deg,#f1f5f9,#cbd5e1);
+  border:3px solid var(--fill-a);box-shadow:0 4px 12px rgba(0,0,0,.25);
+}
+.spd-block--auto input.spd-range::-moz-range-thumb{border-color:#fbbf24}
+input[type=range]:not(.spd-range){width:100%;accent-color:var(--accent);height:8px;-webkit-appearance:none;appearance:none;background:transparent}
+input[type=range]:not(.spd-range)::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+input[type=range]:not(.spd-range)::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0)}
 .toggle-row{display:flex;align-items:stretch;gap:10px;justify-content:center;margin-top:4px;flex-wrap:wrap}
 .mode-btn{
   flex:1;min-width:min(100%,140px);min-height:46px;padding:10px 16px;border:none;border-radius:12px;font-size:.78rem;cursor:pointer;font-weight:600;
@@ -260,7 +322,6 @@ details pre{
   -webkit-overflow-scrolling:touch;
 }
 .hint{font-size:.68rem;color:var(--muted);margin-bottom:10px;line-height:1.45;opacity:.92}
-.spd-label{text-align:center;font-size:.76rem;color:var(--muted);margin-top:4px}
 .health-grid .mac-row{grid-column:1/-1}
 .details-block{margin-top:4px}
 .layout-form{font-size:.74rem;color:var(--muted)}
@@ -353,10 +414,31 @@ details pre{
             <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
             <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
           </div>
-          <div class="range-wrap">
-            <input type="range" id="spdSlider" min="0" max="100" value="60" oninput="sendSpeed(this.value)" aria-label="Tốc độ nền phần trăm"/>
+          <div class="spd-block spd-block--manual">
+            <div class="spd-block__head">
+              <div>
+                <div class="spd-block__label">Tốc độ · Lái tay</div>
+                <div class="spd-block__hint">Áp dụng khi kéo joystick</div>
+              </div>
+              <span class="spd-block__badge" id="spdVal">60%</span>
+            </div>
+            <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="60"
+              oninput="sendSpeed(this.value)" aria-label="Tốc độ lái tay phần trăm"/>
+            <div class="spd-block__ticks"><span>0%</span><span>50%</span><span>100%</span></div>
           </div>
-          <div class="spd-label">Tốc độ: <span id="spdVal">60</span>%</div>
+          <div class="spd-block spd-block--auto">
+            <div class="spd-block__head">
+              <div>
+                <div class="spd-block__label">Tốc độ · Tự hành</div>
+                <div class="spd-block__hint">Demo né vật bằng HC-SR04 (15–100%)</div>
+              </div>
+              <span class="spd-block__badge" id="spdAutoVal">50%</span>
+            </div>
+            <input type="range" class="spd-range spd-range--auto" id="spdAutoSlider" min="15" max="100" value="50"
+              oninput="sendSpeedAuto(this.value)" aria-label="Tốc độ tự hành phần trăm"/>
+            <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
+          </div>
+          <p class="hint" style="margin-top:8px;font-size:.68rem">Demo tự hành: đi thẳng theo <b>HC-SR04</b> (không dùng LiDAR để quyết định). Gặp vật cản → lùi ngắn → xoay về phía rộng hơn (trái/phải).</p>
           <button type="button" class="estop" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
         </div>
       </div>
@@ -411,7 +493,7 @@ details pre{
           <div class="mac-row">MAC AP: <b id="dvMac" style="font-size:.68rem;font-weight:500">--</b></div>
           <div>Heap min: <b id="dvHmin">--</b> KB</div>
           <div>Joy X / Y: <b id="dvJoy">--</b></div>
-          <div>Tốc độ nền: <b id="dvSpd">--</b>%</div>
+          <div>Tốc độ tay / auto: <b id="dvSpd">--</b>% / <b id="dvSpdAuto">--</b>%</div>
           <div>Tuổi LiDAR: <b id="dvLfAge">--</b></div>
           <div>Tuổi US: <b id="dvUsAge">--</b></div>
           <div class="mac-row">UART Luna (byte tích lũy): L1=<b id="dvLr1">0</b> · L2=<b id="dvLr2">0</b></div>
@@ -473,6 +555,15 @@ const PHY_MOT=[
 ];
 const B=[{lbl:'Trái trước',i:'dULF'},{lbl:'Trái sau',i:'dULR'},{lbl:'Phải trước',i:'dURF'},{lbl:'Phải sau',i:'dURR'}];
 const spark=[]; const SPARK_N=48;
+function paintSpdTrack(el,raw){
+  if(!el)return;
+  const mn=parseFloat(el.min)||0,mx=parseFloat(el.max)||100;
+  let v=parseFloat(raw);
+  if(!isFinite(v))v=mn;
+  v=Math.min(mx,Math.max(mn,v));
+  const pct=mx>mn?((v-mn)/(mx-mn))*100:0;
+  el.style.setProperty('--spd-pct',(Math.round(pct*100)/100)+'%');
+}
 function fmtAge(ms){
   if(ms==null||ms<0)return 'chưa có dữ liệu';
   if(ms<1000)return ms+' ms';
@@ -725,6 +816,7 @@ function connectWS(){
       if(d.hMin!=null) document.getElementById('dvHmin').textContent=(d.hMin/1024).toFixed(1);
       document.getElementById('dvJoy').textContent=(d.cx??0)+' / '+(d.cy??0);
       if(d.spdPct!=null) document.getElementById('dvSpd').textContent=String(d.spdPct);
+      if(d.spdAutoPct!=null) document.getElementById('dvSpdAuto').textContent=String(d.spdAutoPct);
       document.getElementById('dvLfAge').textContent=fmtLidarAge(d.lfAge,d.lr1,d.lr2);
       document.getElementById('dvUsAge').textContent=fmtAge(d.usAge);
       if(d.lr1!=null)document.getElementById('dvLr1').textContent=String(d.lr1);
@@ -733,7 +825,17 @@ function connectWS(){
         const sl=document.getElementById('spdSlider');
         if(sl && document.activeElement!==sl){
           sl.value=d.spdPct;
-          document.getElementById('spdVal').textContent=String(d.spdPct);
+          paintSpdTrack(sl,d.spdPct);
+          document.getElementById('spdVal').textContent=String(d.spdPct)+'%';
+        }
+      }
+      if(d.spdAutoPct!=null){
+        const sa=document.getElementById('spdAutoSlider');
+        if(sa && document.activeElement!==sa){
+          const av=Math.max(15,Math.min(100,d.spdAutoPct));
+          sa.value=av;
+          paintSpdTrack(sa,av);
+          document.getElementById('spdAutoVal').textContent=String(d.spdAutoPct)+'%';
         }
       }
       document.getElementById('rawJ').textContent=JSON.stringify(d,null,2);
@@ -756,7 +858,18 @@ function jUp(cx,cy){
 }
 function jRel(){ drag=false; knob.style.left='50%'; knob.style.top='50%'; wsS({t:'joy',x:0,y:0}); }
 function wsS(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
-function sendSpeed(v){ document.getElementById('spdVal').textContent=v; wsS({t:'spd',v:parseInt(v,10)}); }
+function sendSpeed(v){
+  const el=document.getElementById('spdSlider');
+  paintSpdTrack(el,v);
+  document.getElementById('spdVal').textContent=v+'%';
+  wsS({t:'spd',v:parseInt(v,10)});
+}
+function sendSpeedAuto(v){
+  const el=document.getElementById('spdAutoSlider');
+  paintSpdTrack(el,v);
+  document.getElementById('spdAutoVal').textContent=v+'%';
+  wsS({t:'spdAuto',v:parseInt(v,10)});
+}
 function setMode(m){
   document.getElementById('btnManual').classList.toggle('active',m===0);
   document.getElementById('btnAuto').classList.toggle('active',m===1);
@@ -803,6 +916,9 @@ initSecNav();
 buildLayoutGrid();
 buildMotorGrid();
 buildBump();
+(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider');
+  if(a){paintSpdTrack(a,a.value);document.getElementById('spdVal').textContent=a.value+'%';}
+  if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}})();
 connectWS();
 </script>
 </body>
@@ -866,6 +982,8 @@ inline void webUIBroadcast() {
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
+  g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", 0);
+  if (g_state.autoBaseSpeed == 0) g_state.autoBaseSpeed = g_state.baseSpeed;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
   g_prefs.end();

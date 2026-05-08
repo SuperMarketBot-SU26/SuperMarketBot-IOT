@@ -26,6 +26,13 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_prefs.begin(NVS_NAMESPACE, false);
     g_prefs.putUInt("baseSpeed", g_state.baseSpeed);
     g_prefs.end();
+  } else if (strcmp(t, "spdAuto") == 0) {
+    uint16_t pct = doc["v"].as<uint16_t>();
+    if (pct > 100) pct = 100;
+    g_state.autoBaseSpeed = (uint16_t)((uint32_t)pct * PWM_MAX / 100);
+    g_prefs.begin(NVS_NAMESPACE, false);
+    g_prefs.putUInt("autoBaseSpeed", g_state.autoBaseSpeed);
+    g_prefs.end();
   } else if (strcmp(t, "mode") == 0) {
     g_state.mode = (RobotMode)doc["m"].as<uint8_t>();
   } else if (strcmp(t, "estop") == 0) {

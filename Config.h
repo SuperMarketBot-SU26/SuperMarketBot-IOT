@@ -106,6 +106,15 @@
 /** Ngưỡng HC-SR04 trái/phải (cm) để bẻ lái trong AUTO — nhỏ hơn SAFE_STOP = ít "giật" ngang. */
 #define SAFE_SIDE_AVOID_CM  14
 
+/** Tự hành demo (chỉ HC-SR04 — chưa SLAM): đi thẳng, gặp chướng → lùi → quay về phía rộng hơn */
+#define AUTO_US_BLOCK_CM     34   // trước < cm này → bắt đầu né (US; chỉnh 28–45)
+#define AUTO_US_SLOW_CM      85   // trước gần hơn → giảm ga tiến
+#define AUTO_US_SIDE_CM      22   // cạnh < cm → lệch nhẹ
+#define AUTO_US_BACK_STOP_CM 26   // sau quá gần → không lùi nữa, chỉ xoay
+#define AUTO_BACKUP_MS       400u
+#define AUTO_TURN_MS         550u
+#define AUTO_MIN_PWM_FRAC    12   // tốc độ tối thiểu ~ PWM_MAX*12/100 khi auto
+
 /* -------------------- WIFI SOFTAP ---------------------------------- */
 #define AP_SSID         "SmartMarketBot"
 #define AP_PASS         "12345678"
@@ -163,7 +172,8 @@ struct RobotState {
   // Điều khiển
   volatile int16_t cmdX;      // -100..100 (trái/phải)
   volatile int16_t cmdY;      // -100..100 (tiến/lùi)
-  volatile uint16_t baseSpeed; // 0..PWM_MAX tốc độ nền
+  volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
+  volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
   volatile RobotMode mode;
   volatile bool estop;        // Cờ dừng khẩn cấp
   // Millis lần cuối có frame LiDAR hợp lệ / sau 1 vòng quét US (giám sát “tươi”)
