@@ -11,6 +11,7 @@
 #define MOTORS_H
 
 #include "Config.h"
+#include "MotorLayout.h"
 
 enum MotorId : uint8_t { MID_FL = 0, MID_RL = 1, MID_FR = 2, MID_RR = 3 };
 
@@ -68,30 +69,48 @@ inline void motorDrive(MotorId id, int32_t speed) {
   ledcWrite(m.pwm, speed);
 }
 
+/**
+ * Ánh xạ lệnh theo 4 góc xe (slot 0..3 = LF,LR,RF,RR) → kênh TB6612 vật lý.
+ * Mảng speedBySlot[] cùng thứ tự với g_mapMotSlot / g_motInv.
+ */
+inline void motorApplyLayout(const int32_t speedBySlot[4]) {
+  for (int s = 0; s < 4; s++) {
+    uint8_t p = g_mapMotSlot[s];
+    if (p > 3) p = (uint8_t)s;
+    int32_t sp = speedBySlot[s];
+    if (g_motInv[s]) sp = -sp;
+    motorDrive((MotorId)p, sp);
+  }
+}
+
 inline void botStop() {
   for (uint8_t i = 0; i < 4; i++) motorDrive((MotorId)i, 0);
 }
 
 inline void botForward(uint16_t s) {
-  motorDrive(MID_FL,  s); motorDrive(MID_RL,  s);
-  motorDrive(MID_FR,  s); motorDrive(MID_RR,  s);
+  int32_t v = (int32_t)s;
+  const int32_t sp[4] = {v, v, v, v};
+  motorApplyLayout(sp);
 }
 
 inline void botBackward(uint16_t s) {
-  motorDrive(MID_FL, -(int32_t)s); motorDrive(MID_RL, -(int32_t)s);
-  motorDrive(MID_FR, -(int32_t)s); motorDrive(MID_RR, -(int32_t)s);
+  int32_t v = -(int32_t)s;
+  const int32_t sp[4] = {v, v, v, v};
+  motorApplyLayout(sp);
 }
 
 // Xoay tại chỗ sang phải (tank turn CW)
 inline void botRotateCW(uint16_t s) {
-  motorDrive(MID_FL,  s); motorDrive(MID_RL,  s);
-  motorDrive(MID_FR, -(int32_t)s); motorDrive(MID_RR, -(int32_t)s);
+  int32_t v = (int32_t)s;
+  const int32_t sp[4] = {v, v, -v, -v};
+  motorApplyLayout(sp);
 }
 
 // Xoay tại chỗ sang trái (tank turn CCW)
 inline void botRotateCCW(uint16_t s) {
-  motorDrive(MID_FL, -(int32_t)s); motorDrive(MID_RL, -(int32_t)s);
-  motorDrive(MID_FR,  s); motorDrive(MID_RR,  s);
+  int32_t v = (int32_t)s;
+  const int32_t sp[4] = {-v, -v, v, v};
+  motorApplyLayout(sp);
 }
 
 /**
@@ -102,19 +121,17 @@ inline void botRotateCCW(uint16_t s) {
  */
 inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
-  // Quy đổi về [-base..+base]
   int32_t fwd  = (int32_t)y * base / 100;
   int32_t turn = (int32_t)x * base / 100;
   int32_t left  = fwd + turn;
   int32_t right = fwd - turn;
-  // Chuẩn hóa nếu vượt dải
   int32_t mag = max(abs(left), abs(right));
   if (mag > (int32_t)base) {
-    left  = left  * base / mag;
-    right = right * base / mag;
+    left  = left  * (int32_t)base / mag;
+    right = right * (int32_t)base / mag;
   }
-  motorDrive(MID_FL, left);  motorDrive(MID_RL, left);
-  motorDrive(MID_FR, right); motorDrive(MID_RR, right);
+  const int32_t sp[4] = {left, left, right, right};
+  motorApplyLayout(sp);
 }
 
 #endif // MOTORS_H

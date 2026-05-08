@@ -9,7 +9,24 @@
 
 #include <Arduino.h>
 
-/* ---------------------- ĐỘNG LỰC (2x TB6612FNG) --------------------- */
+/* ---------------------- ĐỘNG LỰC (2x TB6612FNG) ---------------------
+ *
+ * Sơ đồ chuẩn (module TB6612FNG): mỗi IC có 2 kênh H-bridge.
+ *   • VM, GND: nguồn động cơ (VD: 2S–3S ~7–12 V); GND chung với ESP.
+ *   • VCC: 2,7–5,5 V logic; PWMA/PWMB nhận PWM từ ESP (3,3 V OK).
+ *   • STBY = HIGH: mở driver; LOW: toàn IC ngủ — **cả 2 IC nối STBY → GPIO47**.
+ *   • Kênh A: AIN1, AIN2 hướng; PWMA tốc độ; ra motor: **AO1 & AO2** (2 dây motor).
+ *   • Kênh B: BIN1, BIN2; PWMB; ra motor: **BO1 & BO2**.
+ *
+ * TB6612 #1 — gắn với bánh bên TRÁI xe:
+ *   Kênh A → motor góc **Trái trước (FL)**  |  Kênh B → **Trái sau (RL)**
+ * TB6612 #2 — bên PHẢI:
+ *   Kênh A → **Phải trước (FR)**  |  Kênh B → **Phải sau (RR)**
+ *
+ * Nếu motor quay ngược khi lệnh “tiến”: đổi 2 dây AO1↔AO2 (hoặc BO1↔BO2)
+ * *hoặc* bật **Đảo chiều** trên web cho góc đó (không cần hàn lại).
+ * Nếu 2 kênh của 1 IC bị đổi chỗ với nhau: dùng web **hoán vị kênh** cho 2 góc tương ứng.
+ * -------------------------------------------------------------------- */
 // Mạch 1 — Bên TRÁI (chân 4~9, TB6612 #1: Motor FL + RL)
 #define M_FL_PWM      4     // Front-Left  PWMA  (LEDC)
 #define M_FL_IN1      5     // Front-Left  AIN1

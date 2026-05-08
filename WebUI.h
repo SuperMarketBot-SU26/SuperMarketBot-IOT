@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include "RobotTelemetry.h"
 #include "SensorLayout.h"
+#include "MotorLayout.h"
 
 Preferences g_prefs;
 #include "CtrlJson.h"
@@ -267,6 +268,13 @@ details pre{
 @media(max-width:520px){.layout-row{grid-template-columns:1fr;gap:6px}}
 .layout-row label{font-weight:600;color:var(--text);font-size:.7rem}
 .layout-row select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line2);background:#0c1016;color:var(--text);font-size:.72rem}
+.layout-mot{display:grid;grid-template-columns:1.05fr 1.35fr 0.95fr;gap:8px;align-items:center;margin-bottom:8px}
+@media(max-width:520px){.layout-mot{grid-template-columns:1fr;gap:6px}}
+.layout-mot label{font-weight:600;color:var(--text);font-size:.7rem}
+.pin-table{width:100%;font-size:.62rem;border-collapse:collapse;margin:12px 0;color:var(--muted)}
+.pin-table th,.pin-table td{border:1px solid var(--line2);padding:7px 8px;text-align:left;vertical-align:top}
+.pin-table th{background:#0c1016;color:var(--accent2);font-weight:600}
+.pin-table code{font-family:ui-monospace,Consolas,monospace;font-size:.58rem;color:var(--text)}
 .layout-lid{margin:12px 0;padding:10px;border:1px solid var(--line2);border-radius:10px;background:#0c1016}
 .layout-lid label{display:block;margin-bottom:6px;font-size:.72rem;color:var(--muted)}
 .mode-manual{color:var(--accent2)!important;font-weight:600}
@@ -289,6 +297,7 @@ details pre{
     <a href="#sec-drive">Điều khiển</a>
     <a href="#sec-monitor">Giám sát</a>
     <a href="#sec-layout">Bố trí cảm biến</a>
+    <a href="#sec-mot-layout">Động cơ TB6612</a>
   </nav>
 
   <div class="appgrid">
@@ -428,6 +437,24 @@ details pre{
         <button type="button" class="mode-btn" style="margin-top:8px;width:100%" onclick="saveLayout()">Lưu vào bộ nhớ robot (NVS)</button>
         <p class="hint" id="layMsg" style="margin-top:8px;min-height:1.2em"></p>
       </div>
+
+      <div class="card" id="sec-mot-layout">
+        <h2><span class="dot"></span> Bố trí động cơ (2× TB6612)</h2>
+        <p class="hint">Chỉ một driver chạy 2 bánh: kiểm tra <b>VM</b>, <b>GND</b>, <b>STBY→GPIO47</b> cho <b>cả hai</b> IC. Bánh quay ngược khi tiến: thử <b>Đảo chiều</b>; lắp nhầm kênh A/B: dùng cột <b>Kênh driver thật</b> (mỗi giá trị 0–3 dùng đúng 1 lần).</p>
+        <table class="pin-table" aria-label="Chân TB6612 tới ESP32">
+          <thead><tr><th>IC / kênh</th><th>Góc (chuẩn)</th><th>GPIO ESP32-S3</th><th>Cực ra motor</th></tr></thead>
+          <tbody>
+            <tr><td>TB6612 <b>#1</b> A</td><td>Trái trước FL</td><td><code>PWM 4</code>, AIN1 <code>5</code>, AIN2 <code>6</code></td><td><code>AO1 – AO2</code></td></tr>
+            <tr><td>TB6612 <b>#1</b> B</td><td>Trái sau RL</td><td><code>PWM 7</code>, BIN1 <code>8</code>, BIN2 <code>9</code></td><td><code>BO1 – BO2</code></td></tr>
+            <tr><td>TB6612 <b>#2</b> A</td><td>Phải trước FR</td><td><code>PWM 21</code>, AIN1 <code>45</code>, AIN2 <code>46</code></td><td><code>AO1 – AO2</code></td></tr>
+            <tr><td>TB6612 <b>#2</b> B</td><td>Phải sau RR</td><td><code>PWM 40</code>, BIN1 <code>41</code>, BIN2 <code>42</code></td><td><code>BO1 – BO2</code></td></tr>
+            <tr><td colspan="2"><b>STBY</b> (chân STBY hai IC nối chung)</td><td colspan="2"><code>GPIO 47</code> mức HIGH = mở driver</td></tr>
+          </tbody>
+        </table>
+        <div class="layout-form" id="motGrid"></div>
+        <button type="button" class="mode-btn" style="margin-top:8px;width:100%" onclick="saveMotorLayout()">Lưu vào bộ nhớ robot (NVS)</button>
+        <p class="hint" id="motLayMsg" style="margin-top:8px;min-height:1.2em"></p>
+      </div>
     </div>
   </div>
 </div>
@@ -438,6 +465,12 @@ const LIDAR_MAX_CM=800, US_BAR_MAX_CM=160;
 const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
 const PHY_US=[{v:0,t:'US Trước (Echo 10)'},{v:1,t:'US Sau (Echo 11)'},{v:2,t:'US Trái (Echo 12)'},{v:3,t:'US Phải (Echo 13)'}];
 const PHY_ENC=[{v:0,t:'Enc FL (GPIO15)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
+const PHY_MOT=[
+  {v:0,t:'#1-A FL — PWM4, AIN 5/6 → AO1-AO2'},
+  {v:1,t:'#1-B RL — PWM7, BIN 8/9 → BO1-BO2'},
+  {v:2,t:'#2-A FR — PWM21, AIN 45/46 → AO1-AO2'},
+  {v:3,t:'#2-B RR — PWM40, BIN 41/42 → BO1-BO2'}
+];
 const B=[{lbl:'Trái trước',i:'dULF'},{lbl:'Trái sau',i:'dULR'},{lbl:'Phải trước',i:'dURF'},{lbl:'Phải sau',i:'dURR'}];
 const spark=[]; const SPARK_N=48;
 function fmtAge(ms){
@@ -504,6 +537,37 @@ function applyLayoutPayload(d){
   }
   if(d.lidF!=null){ const s=document.getElementById('lidFrontSel'); if(s) s.value=String(d.lidF); }
 }
+function buildMotorGrid(){
+  const g=document.getElementById('motGrid'); if(!g)return;
+  let h='<div class="layout-mot" style="font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px"><span>Góc xe</span><span>Kênh TB6612 đang nối motor này</span><span>Chiều</span></div>';
+  for(let i=0;i<4;i++){
+    h+=`<div class="layout-mot"><label>${SLOT_LBL[i]}</label><select id="motMap${i}"></select><select id="motInv${i}"><option value="0">Tiến = như code</option><option value="1">Đảo chiều (lùi↔tiến)</option></select></div>`;
+  }
+  g.innerHTML=h;
+  for(let i=0;i<4;i++){
+    const sm=document.getElementById('motMap'+i);
+    PHY_MOT.forEach(o=>{const e=document.createElement('option'); e.value=String(o.v); e.textContent=o.t; sm.appendChild(e);});
+  }
+}
+function applyMotorPayload(d){
+  if(!d||d.t!=='motLayout')return;
+  for(let i=0;i<4;i++){
+    const sm=document.getElementById('motMap'+i), si=document.getElementById('motInv'+i);
+    if(d.mapMot&&d.mapMot[i]!=null&&sm) sm.value=String(d.mapMot[i]);
+    if(d.motInv&&d.motInv[i]!=null&&si) si.value=String(d.motInv[i]);
+  }
+}
+function saveMotorLayout(){
+  const mapMot=[], motInv=[];
+  for(let i=0;i<4;i++){
+    mapMot.push(parseInt(document.getElementById('motMap'+i).value,10));
+    motInv.push(parseInt(document.getElementById('motInv'+i).value,10));
+  }
+  const msg=document.getElementById('motLayMsg');
+  if(!isPerm4(mapMot)){ msg.textContent='Lỗi: 4 kênh phải chọn đủ 0–3, không trùng.'; return; }
+  msg.textContent='Đang gửi…';
+  wsS({t:'motLayout',mapMot,motInv});
+}
 function saveLayout(){
   const us=[], enc=[];
   for(let i=0;i<4;i++){
@@ -551,6 +615,7 @@ function connectWS(){
     document.getElementById('wsStatus').textContent='đã nối';
     if(retry)clearTimeout(retry);
     wsS({t:'layoutGet'});
+    wsS({t:'motorLayoutGet'});
   };
   ws.onclose=()=>{document.getElementById('wsStatus').textContent='mất kết nối…'; retry=setTimeout(connectWS,2000);};
   ws.onmessage=e=>{
@@ -565,6 +630,17 @@ function connectWS(){
       if(d.t==='layoutErr'){
         const m=document.getElementById('layMsg');
         if(m) m.textContent='Lỗi: '+(d.msg||'map không hợp lệ');
+        return;
+      }
+      if(d.t==='motLayout'){
+        applyMotorPayload(d);
+        const m=document.getElementById('motLayMsg');
+        if(m) m.textContent='Đã đồng bộ bố trí motor từ robot.';
+        return;
+      }
+      if(d.t==='motLayoutErr'){
+        const m=document.getElementById('motLayMsg');
+        if(m) m.textContent='Lỗi: '+(d.msg||'mapMot/motInv không hợp lệ');
         return;
       }
       const lf=d.lf??0, lb=d.lb??0;
@@ -693,7 +769,7 @@ function sendEstop(){ wsS({t:'estop'}); }
 function odomReset(){ wsS({t:'odomReset'}); }
 function initSecNav(){
   const links=[...document.querySelectorAll('.secnav a')];
-  const secs=['sec-sense','sec-drive','sec-monitor','sec-layout'].map(id=>document.getElementById(id)).filter(Boolean);
+  const secs=['sec-sense','sec-drive','sec-monitor','sec-layout','sec-mot-layout'].map(id=>document.getElementById(id)).filter(Boolean);
   if(!links.length||!secs.length)return;
   const setActive=id=>{
     links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));
@@ -725,6 +801,7 @@ zone.addEventListener('touchmove',e=>{e.preventDefault(); if(drag) jUp(e.touches
 zone.addEventListener('touchend',jRel);
 initSecNav();
 buildLayoutGrid();
+buildMotorGrid();
 buildBump();
 connectWS();
 </script>
@@ -756,6 +833,23 @@ static void onWebSocketEvent(uint8_t num, WStype_t type,
       }
       return;
     }
+    if (t && strcmp(t, "motorLayoutGet") == 0) {
+      motorLayoutReplyToClient(g_wsServer, num);
+      return;
+    }
+    if (t && strcmp(t, "motLayout") == 0) {
+      if (motorLayoutApplyJson(doc, g_prefs)) {
+        motorLayoutReplyToClient(g_wsServer, num);
+      } else {
+        JsonDocument errDoc;
+        errDoc["t"] = "motLayoutErr";
+        errDoc["msg"] = "mapMot phai hoan vi 0..3, motInv 0 hoac 1";
+        char b[120];
+        serializeJson(errDoc, b, sizeof(b));
+        g_wsServer.sendTXT(num, b);
+      }
+      return;
+    }
     robotApplyControlJson(doc);
   }
 }
@@ -773,6 +867,7 @@ inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
   sensorLayoutLoad(g_prefs);
+  motorLayoutLoad(g_prefs);
   g_prefs.end();
 
   batteryMonitorInit();

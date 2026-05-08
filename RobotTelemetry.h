@@ -6,6 +6,7 @@
 
 #include "Config.h"
 #include "SensorLayout.h"
+#include "MotorLayout.h"
 #include "Sensors.h"
 #include "Odometry.h"
 #include <Arduino.h>
@@ -81,6 +82,14 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
       me.add(g_mapEncSlot[i]);
     }
     doc["lidF"] = g_lidarFrontUart;
+  }
+  {
+    JsonArray mm = doc["mapMot"].to<JsonArray>();
+    JsonArray mi = doc["motInv"].to<JsonArray>();
+    for (int i = 0; i < 4; i++) {
+      mm.add(g_mapMotSlot[i]);
+      mi.add(g_motInv[i]);
+    }
   }
   doc["rFL"] = g_state.rpmFL;
   doc["rRL"] = g_state.rpmRL;
