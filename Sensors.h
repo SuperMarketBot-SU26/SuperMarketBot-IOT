@@ -77,6 +77,11 @@ inline void sensorsInit() {
   // TRIG chung: mức nghỉ LOW trước khi NewPing chiếm dụng
   pinMode(US_TRIG, OUTPUT);
   digitalWrite(US_TRIG, LOW);
+  // Ép chân Echo là digital input (S3 + nhiễu driver/servo đôi khi “dính” mode sai sau reset)
+  pinMode(US_ECHO_F, INPUT);
+  pinMode(US_ECHO_B, INPUT);
+  pinMode(US_ECHO_L, INPUT);
+  pinMode(US_ECHO_R, INPUT);
 
   // Bộ đệm RX lớn hơn — tránh mất byte LiDAR khi CPU bận (WiFi + task khác)
   Serial1.setRxBufferSize(1024);
@@ -101,17 +106,19 @@ inline void sensorsInit() {
  * (Blocking ~3–4ms mỗi hướng với US_PING_MAX_CM=200)
  */
 inline void sensorsPollUS() {
-  uint32_t tnow = (uint32_t)millis();
   int16_t phy[4];
   phy[0] = (int16_t)g_sonarF.ping_cm();
-  sensorsYieldMs(5);
+  if (phy[0] > 0) g_usPhyLastEchoMs[0] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
   phy[1] = (int16_t)g_sonarB.ping_cm();
-  sensorsYieldMs(5);
+  if (phy[1] > 0) g_usPhyLastEchoMs[1] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
   phy[2] = (int16_t)g_sonarL.ping_cm();
-  sensorsYieldMs(5);
+  if (phy[2] > 0) g_usPhyLastEchoMs[2] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
   phy[3] = (int16_t)g_sonarR.ping_cm();
+  if (phy[3] > 0) g_usPhyLastEchoMs[3] = millis();
   for (int i = 0; i < 4; i++) {
-    if (phy[i] > 0) g_usPhyLastEchoMs[i] = tnow;
     if (phy[i] == 0) phy[i] = US_PING_MAX_CM;
   }
   int16_t usSlot[4];

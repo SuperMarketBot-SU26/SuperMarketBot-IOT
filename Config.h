@@ -75,6 +75,8 @@
 #define US_ECHO_R     13
 // NewPing: tham số tối đa (ms chờ) ~ tương ứng ~2m — đủ thực tế, ping không quá lâu
 #define US_PING_MAX_CM  200
+/** Nghỉ giữa hai lần ping tuần tự (ms). Dùng chung TRIG: 5ms dễ cross-talk khi 4 SR04. */
+#define US_INTER_PING_MS  14u
 // Trong hành lang / siêu thị: HC-SR04 ổn định thường ~1,2–1,8m; dùng 1,6m cho HMI + coi như "xa"
 #define US_DISPLAY_MAX_CM 160
 
