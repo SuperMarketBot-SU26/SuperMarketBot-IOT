@@ -1,7 +1,7 @@
 /* =====================================================================
  *  StatusRGB.h — Chỉ LED RGB zin trên bo ESP32-S3-DevKit (GPIO 38), không LED ngoài
  *  Thư viện: Adafruit NeoPixel.
- *  Mặc định US Echo Phải = GPIO 38 → SMB_ONBOARD_RGB = 0. Nếu bật LED: đổi US_ECHO_R trong Config.
+ *  ENC_RR=48, Neo=38 → không trùng chân; Echo US 10–13, ENC_FL=39.
  * =====================================================================*/
 #ifndef STATUS_RGB_H
 #define STATUS_RGB_H

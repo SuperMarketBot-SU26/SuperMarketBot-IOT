@@ -545,8 +545,8 @@ const WS_URL='ws://'+location.hostname+':81';
 let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=160;
 const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
-const PHY_US=[{v:0,t:'US Trước (Echo 39)'},{v:1,t:'US Sau (Echo 43)'},{v:2,t:'US Trái (Echo 44)'},{v:3,t:'US Phải (Echo 38)'}];
-const PHY_ENC=[{v:0,t:'Enc FL (GPIO15)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
+const PHY_US=[{v:0,t:'US Trước (Echo 10)'},{v:1,t:'US Sau (Echo 11)'},{v:2,t:'US Trái (Echo 12)'},{v:3,t:'US Phải (Echo 13)'}];
+const PHY_ENC=[{v:0,t:'Enc FL (GPIO39)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
 const PHY_MOT=[
   {v:0,t:'#1-A FL — PWM4, AIN 5/6 → AO1-AO2'},
   {v:1,t:'#1-B RL — PWM7, BIN 8/9 → BO1-BO2'},

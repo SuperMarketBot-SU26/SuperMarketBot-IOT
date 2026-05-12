@@ -68,14 +68,12 @@
 
 /* -------------------- SIÊU ÂM (4x HC-SR04) ------------------------- */
 // VCC 5V, GND; Trig 3,3V OK; Echo 5V → nên 1k+2k chia áp 3,3V vào chân dưới
-//
-// Echo dời sang dải J3 cạnh TB6612 phải (39, 38, 40–42 động cơ, 43, 44) — cắm gọn một hàng.
-// 38 = WS2812 zin: không dùng NeoPixel khi Echo Phải = 38 (SMB_ONBOARD_RGB = 0 bên dưới).
-#define US_TRIG       14    // Trigger dùng chung (1 chân, giữ 14 như cũ)
-#define US_ECHO_F     39    // Trước — sát GPIO 40 trên hàng DevKitC-1
-#define US_ECHO_B     43    // Sau — ngay sau khối 40–42
-#define US_ECHO_L     44    // Trái
-#define US_ECHO_R     38    // Phải (trùng pad LED; tắt RGB firmware)
+// Echo F/B/L/R = 10–13 (một dải J1) + Trig 14 chung.
+#define US_TRIG       14
+#define US_ECHO_F     10
+#define US_ECHO_B     11
+#define US_ECHO_L     12
+#define US_ECHO_R     13
 // NewPing: tham số tối đa (ms chờ) ~ tương ứng ~2m — đủ thực tế, ping không quá lâu
 #define US_PING_MAX_CM  200
 /** Nghỉ giữa hai lần ping tuần tự (ms). Dùng chung TRIG: 5ms dễ cross-talk khi 4 SR04. */
@@ -86,7 +84,7 @@
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
 // GPIO3 (ENC_FR): trên S3 là MTCK/JTAG — trong Arduino chọn USB JTAG disabled / peripheral JTAG off nếu encoder không đếm xung.
-#define ENC_FL        15    // Trước trái
+#define ENC_FL        39    // Trước trái
 #define ENC_RL        16    // Sau trái
 #define ENC_FR        3     // Trước phải (JTAG, chỉ dùng input)
 #define ENC_RR        48    // Sau phải (DevKitC-1: LED RGB = 38, không dùng 38 cho enc)
@@ -139,8 +137,8 @@
  *         Vadc = Vbat * R2/(R1+R2)  (đặt BAT_DIV_* khớp R thật của bạn)
  *  Bật BAT_MONITOR_ENABLE 1 và đặt BAT_ADC_PIN trùng chân còn trống + hỗ trợ ADC. */
 #define BAT_MONITOR_ENABLE  0
-/** Nếu bật đo pin: đổi sang GPIO ADC trống — US_ECHO_F hiện dùng 39. */
-#define BAT_ADC_PIN         11
+/** Mặc định tắt. Bật BAT thì đặt chân ADC trống — US dùng 10–13, ENC_FL=39. */
+#define BAT_ADC_PIN         15
 #define BAT_DIV_R1_KOHM     68.0f
 #define BAT_DIV_R2_KOHM     10.0f
 /** Ngưỡng V pin (tại điểm đo) — chỉnh theo loại pin (3S Li-ion, 12V SLA, …). */
@@ -149,8 +147,8 @@
 
 /* -------------------- LED: chỉ RGB zin sẵn trên bo DevKit (WS2812, GPIO 38) --- */
 // Không dùng thêm bóng / dải LED ngoài — ngoài linh kiện robot chỉ: 2 LiDAR, 4 US, 4 enc, 2 driver.
-// Echo Phải = GPIO 38 → tắt NeoPixel zin (trùng chân). Muốn bật lại LED: đổi US_ECHO_R sang chân khác (vd. 48) và chuyển ENC_RR.
-#define SMB_ONBOARD_RGB     0
+// Trùng GPIO: 38 = LED zin, ENC_RR=48; Echo US = 10–13, ENC_FL = 39.
+#define SMB_ONBOARD_RGB     1
 #define SMB_NEOPIXEL_PIN    38
 #define SMB_NEOPIXEL_COUNT  1
 #define SMB_RGB_BRIGHTNESS  40  // 0–255
