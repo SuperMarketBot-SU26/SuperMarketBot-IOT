@@ -3,13 +3,13 @@
 Robot tự hành Mini 4WD — ESP32-S3-DevKitC N16R8  
 Đồ án tốt nghiệp | FPT University CN9
 
-**Phạm vi thư mục này (IoT & edge):** điều khiển, LiDAR/siêu âm, odometry, HMI nội bộ. **Không dùng LED ngoài** — chỉ **LED RGB zin sẵn** trên board ESP32 (WS2812, GPIO 38) để báo trạng thái. Phần còn lại của robot: 2× TF-Luna, 4× HC-SR04, 4× encoder, 2× TB6612 như sơ đồ. Toàn bộ hệ thống Capstone còn có Back-end, Front-end, app Android, AI. **Bản đồ SLAM** là bước tích hợp sau (MQTT/ROS2).
+**Phạm vi thư mục này (IoT & edge):** điều khiển, LiDAR/siêu âm, odometry, HMI nội bộ. **Không dùng LED ngoài** — LED RGB zin (WS2812, GPIO 38) có thể bật **chỉ khi** Echo siêu âm không trùng chân 38 (mặc định firmware: Echo phải = 38 → `SMB_ONBOARD_RGB = 0`). Phần còn lại của robot: 2× TF-Luna, 4× HC-SR04, 4× encoder, 2× TB6612 như sơ đồ. Toàn bộ hệ thống Capstone còn có Back-end, Front-end, app Android, AI. **Bản đồ SLAM** là bước tích hợp sau (MQTT/ROS2).
 
 ---
 
 ## Sơ đồ chân (ESP32-S3-DevKitC-1 + linh kiện)
 
-Bảng dưới khớp `Config.h` — **đổi dây** nếu bạn trước đây nối AIN1/AIN2 bánh phải lên **38/39** (sai: **38 = RGB LED** trên board, không dùng cho motor).
+Bảng dưới khớp `Config.h` — **đổi dây** nếu bạn trước đây nối AIN1/AIN2 bánh phải lên pad **WS2812** (sai: dùng **45, 46**). **GPIO 39** hiện là **Echo siêu âm trước**, không dùng cho hướng motor.
 
 | Chức năng | GPIO | Ghi chú |
 |-----|-----|-----|
@@ -18,17 +18,17 @@ Bảng dưới khớp `Config.h` — **đổi dây** nếu bạn trước đây 
 | **STBY** 2 mạch (chung) | 47 | Cao = chạy |
 | **LiDAR trước (UART1)** | TX 17, RX 18 | Nối 5V+GND đúng TF-Luna |
 | **LiDAR sau (UART2)** | TX 1, RX 2 | Tránh 19, 20 (USB) |
-| **HC-SR04** | Trig 14, Echo 10,11,12,13 | Echo 5V → chia áp 3,3V |
-| **Encoder (DO x4)** | 15, 16, 3, 48 | Ngắt; **48 = encoder sau phải**, không trùng LED (LED = 38) |
-| **LED zin trên bo** | 38 (WS2812) | Không lắp thêm bóng/dải LED; mã dùng NeoPixel sẵn trên bo |
+| **HC-SR04** | Trig **14**, Echo **39**, **43**, **44**, **38** (F,B,L,R) | Cùng hàng J3 với 40–42 motor; Echo 5V → chia áp 3,3V |
+| **Encoder (DO x4)** | 15, 16, 3, 48 | Ngắt; **48 = encoder sau phải** |
+| **LED zin trên bo** | 38 (WS2812) | `SMB_ONBOARD_RGB=1` chỉ khi **không** dùng GPIO 38 làm Echo (mặc định Echo phải = 38 → RGB tắt trong mã) |
 
 Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 
 ### Đã gọn dây chưa? (gợi ý bố cục cáp)
 
-- **Hợp lý sẵn:** 6 chân TB6612 trái liền mạch **4–9**; **4 siêu âm Echo 10,11,12,13** + chung Trig **14** cùng cụm số; **LiDAR trước 17+18** đi một siếc; **LiDAR sau 1+2** gọn trên cạnh board. Đó là cách ưu tiên: **cụm tín hiệu trùng vùng số = ít băng chéo.**
+- **Hợp lý sẵn:** 6 chân TB6612 trái liền mạch **4–9**; **4 siêu âm Echo 39, 43, 44, 38** + Trig **14** (Trig có thể gọn cạnh J1 tùy bạn); **LiDAR trước 17+18**; **LiDAR sau 1+2**. Siêu âm và TB6612 phải **cùng hàng 39→46** trên DevKitC-1 → ít băng chéo.
 - **Bắt buộc tách cáp:** bánh phải + STBY tập trung cạnh bên kia (**21, 40,41,42, 45,46, 47**): đúng với tài liệu S3, không còn dải 6 số thẳng hàng như bên trái — bạn dùng **một dây 7 ruột** (6 logic + 1 GND) về TB6612 #2, nhãn từng màu theo bảng dưới.
-- **Encoder** (15, 16) thường cùng khu tười với 10–14; riêng **3** và **48** nằm vị trí khác trên header — bình thường (encoder gắn 4 bánh, dây vẫn về 4 hướng). **Ghi số GPIO** bằng băng cách nhau đỡ nhầm.
+- **Encoder** (15, 16) thường gần cụm J1 với Trig **14**; riêng **3** và **48** nằm vị trí khác trên header — bình thường (encoder gắn 4 bánh, dây vẫn về 4 hướng). **Ghi số GPIO** bằng băng cách nhau đỡ nhầm.
 - **Lưu ý strapping (boot):** **GPIO 0, 3, 45, 46** trên S3 bị tài liệu nêu; code dùng **3** (enc), **45, 46** (hướng bánh trước phải). Nên: module encoder DO nối 3,3V hợp lý; dây motor đến TB6612 để driver giữ mức ổn khi cấp nguồn; tránh kéo thử động cơ cắm **trước** lúc boot ổn (giảm rủi ro pin tụt sai trạng thái).
 
 ### Bảng theo 6 cáp gợi ý (cùng quấn, gắn nhãn A–F)
@@ -36,13 +36,13 @@ Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 | Cáp | Nối tới (GPIO) | Nội dung |
 |-----|----------------|----------|
 | **A** — TB6612 bên trái | **4,5,6,7,8,9** + GND | 1 cặp 6 tín hiệu + mass |
-| **B** — Siêu âm trước+quanh + Trig chung | **10, 11, 12, 13, 14** + GND tại mô-đun | Trig=14, Echo: trước/ sau/ trái/ phải tương ứng 10–13 |
+| **B** — Siêu âm (Trig + 4 Echo) | **14** (Trig), **39, 43, 44, 38** (Echo F,B,L,R) + GND | Dải J3: Echo cạnh 40–42 motor; GPIO 38 trùng pad WS2812 — firmware tắt NeoPixel |
 | **C** — LiDAR trước (UART) | **17, 18** + 5V + GND | TX/ RX chéo theo cấu hình cảm biến + nguồn |
 | **D** — LiDAR sau (UART) | **1, 2** + 5V + GND | Tương tự, Serial2 |
 | **E** — TB6612 bên phải + STBY chung | **21, 40, 41, 42, 45, 46, 47** + GND (và 3,3/5V logic cấp theo sơ đồ driver) | Một ổ 7 tín hiệu + dùng chung 47 tới 2 mạch (theo cách bạn hàn) |
 | **F** — Encoder 4 cảm biến (DO) | **3, 15, 16, 48** + GND, Vcc theo lô cảm biến | 4 tín + nguồn cảm biến, nhãn FL/RL/FR/RR theo sơ đồ robot |
 
-**LED zin (GPIO 38):** không dây ngoài.
+**LED zin (GPIO 38):** không dây ngoài; khi dùng **Echo phải → 38**, không cấp thư viện NeoPixel điều khiển đồng thời (đã `SMB_ONBOARD_RGB = 0`).
 
 ---
 
@@ -76,8 +76,8 @@ SuperMarketBot-IOT/
 ### LED — chỉ trên bo DevKit, không thêm phần cứng ngoài
 
 - Một mối **WS2812 (RGB)** tích hợp, **GPIO 38**; không cần hàn thêm bóng.
-- `SMB_ONBOARD_RGB = 1`: màu theo chế độ (lái tay / tự hành / dừng); **cùng lúc** 4 encoder (encoder sau phải = **48**, không trùng 38).
-- `SMB_ONBOARD_RGB = 0`: tắt mã LED (nếu không muốn dùng LED zin, hiếm).
+- **Mặc định hiện tại:** `US_ECHO_R = 38` nên **`SMB_ONBOARD_RGB = 0`** (không dùng NeoPixel; chân 38 là input Echo).
+- Muốn **bật LED** lại: đổi `US_ECHO_R` sang GPIO trống (ví dụ **48**), đặt `ENC_RR` sang chân encoder khác (ví dụ **13**), cập nhật dây encoder + siêu âm, rồi `SMB_ONBOARD_RGB = 1`.
 - `SMB_RGB_BRIGHTNESS` trong `Config.h` (0–255).
 
 ---
