@@ -80,6 +80,11 @@
 #define US_INTER_PING_MS  14u
 // Trong hành lang / siêu thị: HC-SR04 ổn định thường ~1,2–1,8m; dùng 1,6m cho HMI + coi như "xa"
 #define US_DISPLAY_MAX_CM 160
+/**
+ * 0 = không gọi NewPing; `sensorsPollUS()` chỉ đồng bộ từ TF-Luna trước/sau (web + FSM dùng cùng nguồn).
+ * 1 = bật lại HC-SR04 phần cứng (cần thư viện NewPing + nối dây Echo/Trig).
+ */
+#define USE_HC_SR04_HARDWARE 0
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
@@ -106,14 +111,20 @@
 // Bắt đầu giảm tốc khi vật trước gần hơn ngưỡng (cm). 80–120 = ít nhạy từ xa; 180–220 = nhả ga sớm.
 #define SAFE_SLOW_CM    100
 #define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
-/** Ngưỡng HC-SR04 trái/phải (cm) để bẻ lái trong AUTO — nhỏ hơn SAFE_STOP = ít "giật" ngang. */
+/** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
 #define SAFE_SIDE_AVOID_CM  14
 
-/** Tự hành demo (chỉ HC-SR04 — chưa SLAM): đi thẳng, gặp chướng → lùi → quay về phía rộng hơn */
-#define AUTO_US_BLOCK_CM     34   // trước < cm này → bắt đầu né (US; chỉnh 28–45)
-#define AUTO_US_SLOW_CM      85   // trước gần hơn → giảm ga tiến
-#define AUTO_US_SIDE_CM      22   // cạnh < cm → lệch nhẹ
-#define AUTO_US_BACK_STOP_CM 26   // sau quá gần → không lùi nữa, chỉ xoay
+/** Tự hành LiDAR (2 mắt trước/sau): tiến thẳng → chặn trước thì dừng vài giây → xoay quét (CW+CCW) → lại tiến thẳng */
+#define AUTO_LIDAR_BLOCK_CM     22   // trước < cm → chuỗi dừng + quét (~20cm + dự phòng nhiễu)
+#define AUTO_LIDAR_SLOW_CM      70   // trước trong [BLOCK..SLOW] → giảm ga tiến
+#define AUTO_STOP_HOLD_MS       2800u // đứng im; Luna sau vẫn đọc (quét phía sau thụ động)
+#define AUTO_SCAN_CW_MS         1500u
+#define AUTO_SCAN_CCW_MS        1500u
+
+/** Legacy / khi USE_HC_SR04_HARDWARE=1 thêm bẻ cạnh; LiDAR-only chỉ dùng AUTO_LIDAR_* ở FSM chính */
+#define AUTO_US_SLOW_CM      85   // (SR04) trước gần hơn → giảm ga tiến
+#define AUTO_US_SIDE_CM      22   // cạnh (chỉ SR04 4 hướng)
+#define AUTO_US_BACK_STOP_CM 26   // (backup cũ — giữ define nếu tái dùng)
 #define AUTO_BACKUP_MS       400u
 #define AUTO_TURN_MS         550u
 #define AUTO_MIN_PWM_FRAC    12   // tốc độ tối thiểu ~ PWM_MAX*12/100 khi auto
@@ -137,7 +148,7 @@
  *         Vadc = Vbat * R2/(R1+R2)  (đặt BAT_DIV_* khớp R thật của bạn)
  *  Bật BAT_MONITOR_ENABLE 1 và đặt BAT_ADC_PIN trùng chân còn trống + hỗ trợ ADC. */
 #define BAT_MONITOR_ENABLE  0
-/** Mặc định tắt. Bật BAT thì đặt chân ADC trống — US dùng 10–13, ENC_FL=39. */
+/** Mặc định tắt. Bật BAT thì đặt chân ADC trống (không trùng enc/LiDAR/UART). */
 #define BAT_ADC_PIN         15
 #define BAT_DIV_R1_KOHM     68.0f
 #define BAT_DIV_R2_KOHM     10.0f
@@ -146,8 +157,8 @@
 #define BAT_V_EMPTY         10.2f
 
 /* -------------------- LED: chỉ RGB zin sẵn trên bo DevKit (WS2812, GPIO 38) --- */
-// Không dùng thêm bóng / dải LED ngoài — ngoài linh kiện robot chỉ: 2 LiDAR, 4 US, 4 enc, 2 driver.
-// Trùng GPIO: 38 = LED zin, ENC_RR=48; Echo US = 10–13, ENC_FL = 39.
+// Không dùng thêm bóng / dải LED ngoài — 2× LiDAR, 4× enc, 2× driver; SR04 tùy chọn (USE_HC_SR04_HARDWARE).
+// Trùng GPIO: 38 = LED zin, ENC_RR=48; (SR04) Echo 10–13 Trig 14; ENC_FL = 39.
 #define SMB_ONBOARD_RGB     1
 #define SMB_NEOPIXEL_PIN    38
 #define SMB_NEOPIXEL_COUNT  1

@@ -9,7 +9,7 @@
  *
  *  Thư viện cần cài (Library Manager):
  *    - ESP32 Arduino core >= 3.0 (espressif/arduino-esp32)
- *    - NewPing by Tim Eckel
+ *    - NewPing (chỉ khi USE_HC_SR04_HARDWARE=1 trong Config.h)
  *    - WebSockets by Markus Sattler (Links2004/arduinoWebSockets)
  *    - ArduinoJson by Benoit Blanchon
  *    - Adafruit NeoPixel (WS2812 onboard)
@@ -44,8 +44,8 @@ static void printMemInfo() {
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 RobotState g_state = {
-  .usFront = US_PING_MAX_CM, .usBack = US_PING_MAX_CM, .usLeft = US_PING_MAX_CM, .usRight = US_PING_MAX_CM,
-  .usLF = US_PING_MAX_CM, .usLR = US_PING_MAX_CM, .usRF = US_PING_MAX_CM, .usRR = US_PING_MAX_CM,
+  .usFront = LIDAR_MAX_CM, .usBack = LIDAR_MAX_CM, .usLeft = LIDAR_MAX_CM, .usRight = LIDAR_MAX_CM,
+  .usLF = LIDAR_MAX_CM, .usLR = LIDAR_MAX_CM, .usRF = LIDAR_MAX_CM, .usRR = LIDAR_MAX_CM,
   .lidarFront = LIDAR_MAX_CM, .lidarBack = LIDAR_MAX_CM,
   .rpmFL = 0, .rpmRL = 0, .rpmFR = 0, .rpmRR = 0,
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
@@ -62,15 +62,18 @@ RobotState g_state = {
 SemaphoreHandle_t g_stateMutex;
 
 /* =====================================================================
- *  Tự hành demo (siêu thị): chỉ HC-SR04 — đi thẳng, né bằng lùi + xoay.
- *  Không vTaskDelay; không bật estop khi gặp vật (đó là lỗi cũ làm auto “chết”).
+ *  Tự hành (LiDAR trước/sau): CRUISE đi thẳng → chặn trước → STOP_HOLD
+ *  → SCAN_CW + SCAN_CCW quét chỗ → lại CRUISE. SR04 bật thì thêm bẻ cạnh.
  * =================================================================== */
-enum AutoNavFsm : uint8_t { AN_CRUISE = 0, AN_BACKUP, AN_TURN };
+enum AutoNavFsm : uint8_t {
+  AN_CRUISE = 0,
+  AN_STOP_HOLD,
+  AN_SCAN_CW,
+  AN_SCAN_CCW
+};
 
 static AutoNavFsm s_auto_fsm = AN_CRUISE;
 static uint32_t s_auto_t0 = 0;
-static int8_t s_auto_turn = 1; // +1 CW, -1 CCW
-static uint8_t s_auto_alt = 0;
 static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 
 static uint16_t autoSpeedPwm() {
@@ -81,71 +84,70 @@ static uint16_t autoSpeedPwm() {
   return s;
 }
 
-static void autoNavigateUltrasonic() {
+static void autoNavigateAvoidance() {
   const uint16_t spd = autoSpeedPwm();
   const uint32_t now = millis();
-  const int16_t f = g_state.usFront;
+  const int16_t f = g_state.lidarFront;
   const int16_t L = g_state.usLeft;
   const int16_t R = g_state.usRight;
-  const int16_t B = g_state.usBack;
 
   switch (s_auto_fsm) {
     case AN_CRUISE: {
-      if (f < AUTO_US_BLOCK_CM) {
-        s_auto_fsm = AN_BACKUP;
+      if (f < AUTO_LIDAR_BLOCK_CM) {
+        botStop();
+        s_auto_fsm = AN_STOP_HOLD;
         s_auto_t0 = now;
         break;
       }
       uint16_t run = spd;
-      if (f < AUTO_US_SLOW_CM && f > AUTO_US_BLOCK_CM) {
-        float den = (float)(AUTO_US_SLOW_CM - AUTO_US_BLOCK_CM);
-        float t = den > 1.f ? (float)(f - AUTO_US_BLOCK_CM) / den : 1.f;
+      if (f < AUTO_LIDAR_SLOW_CM && f >= AUTO_LIDAR_BLOCK_CM) {
+        float den = (float)(AUTO_LIDAR_SLOW_CM - AUTO_LIDAR_BLOCK_CM);
+        float t = den > 1.f ? (float)(f - AUTO_LIDAR_BLOCK_CM) / den : 1.f;
         if (t < 0.2f) t = 0.2f;
         run = (uint16_t)((float)spd * t);
       }
+#if USE_HC_SR04_HARDWARE
       if (R < AUTO_US_SIDE_CM && L >= R - 2) {
         botDrive(-40, 70, run);
       } else if (L < AUTO_US_SIDE_CM && R >= L - 2) {
         botDrive(40, 70, run);
-      } else {
+      } else
+#endif
+      {
         botForward(run);
       }
       break;
     }
-    case AN_BACKUP: {
-      uint16_t bspd = (uint16_t)(((uint32_t)spd * 12u) / 25u);
-      uint16_t bmin = (uint16_t)(PWM_MAX / 14u);
-      if (bspd < bmin) bspd = bmin;
-
-      if (B < AUTO_US_BACK_STOP_CM) {
-        if (L > R + 3) s_auto_turn = -1;
-        else if (R > L + 3) s_auto_turn = 1;
-        else s_auto_turn = ((s_auto_alt & 1u) != 0) ? 1 : -1;
-        s_auto_alt++;
-        s_auto_fsm = AN_TURN;
+    case AN_STOP_HOLD: {
+      botStop();
+      if (now - s_auto_t0 >= AUTO_STOP_HOLD_MS) {
+        s_auto_fsm = AN_SCAN_CW;
         s_auto_t0 = now;
-        botStop();
-        break;
-      }
-      botBackward(bspd);
-      if (now - s_auto_t0 >= AUTO_BACKUP_MS) {
-        if (L > R + 3) s_auto_turn = -1;
-        else if (R > L + 3) s_auto_turn = 1;
-        else s_auto_turn = ((s_auto_alt & 1u) != 0) ? 1 : -1;
-        s_auto_alt++;
-        s_auto_fsm = AN_TURN;
-        s_auto_t0 = now;
-        botStop();
       }
       break;
     }
-    case AN_TURN: {
-      uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
-      uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
-      if (tspd < tmin) tspd = tmin;
-      if (s_auto_turn > 0) botRotateCW(tspd);
-      else botRotateCCW(tspd);
-      if (now - s_auto_t0 >= AUTO_TURN_MS) {
+    case AN_SCAN_CW: {
+      {
+        uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
+        uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
+        if (tspd < tmin) tspd = tmin;
+        botRotateCW(tspd);
+      }
+      if (now - s_auto_t0 >= AUTO_SCAN_CW_MS) {
+        botStop();
+        s_auto_fsm = AN_SCAN_CCW;
+        s_auto_t0 = now;
+      }
+      break;
+    }
+    case AN_SCAN_CCW: {
+      {
+        uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
+        uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
+        if (tspd < tmin) tspd = tmin;
+        botRotateCCW(tspd);
+      }
+      if (now - s_auto_t0 >= AUTO_SCAN_CCW_MS) {
         botStop();
         s_auto_fsm = AN_CRUISE;
       }
@@ -173,7 +175,6 @@ static void taskControl(void *pvParams) {
       g_state.estop = false;
       s_auto_fsm = AN_CRUISE;
       s_auto_t0 = millis();
-      s_auto_alt = 0;
     }
     if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
       s_auto_fsm = AN_CRUISE;
@@ -182,10 +183,14 @@ static void taskControl(void *pvParams) {
 
     sensorsPollLidar();
 
+#if USE_HC_SR04_HARDWARE
     if ((xTaskGetTickCount() - usTick) >= pdMS_TO_TICKS(60)) {
       sensorsPollUS();
       usTick = xTaskGetTickCount();
     }
+#else
+    sensorsPollUS();
+#endif
 
     if ((xTaskGetTickCount() - odomTick) >= pdMS_TO_TICKS(ODOM_PERIOD_MS)) {
       odomUpdate();
@@ -196,7 +201,7 @@ static void taskControl(void *pvParams) {
       botStop();
       if (g_state.cmdX == 0 && g_state.cmdY == 0) g_state.estop = false;
     } else if (g_state.mode == MODE_AUTO) {
-      autoNavigateUltrasonic();
+      autoNavigateAvoidance();
     } else {
       if (g_state.cmdX == 0 && g_state.cmdY == 0) {
         botStop();

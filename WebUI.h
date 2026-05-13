@@ -346,10 +346,10 @@ details pre{
 <div class="wrap">
   <header class="brand">
     <h1>SMARTMARKETBOT</h1>
-    <p class="desc">IoT Edge HMI &mdash; lớp định vị chính: <strong>LiDAR</strong> (khoảng cách, nền tảng bản đồ / SLAM). <strong>HC-SR04</strong> chỉ phục vụ dừng cận cảnh, không dùng để lập bản đồ.</p>
+    <p class="desc">IoT Edge HMI &mdash; <strong>TF-Luna</strong> hai hướng (trước/sau): khoảng cách chính + demo tự hành né vật. Mặc định firmware đồng bộ “bumper” từ LiDAR (không cần HC-SR04). Bật lại SR04 bằng <code>USE_HC_SR04_HARDWARE=1</code> trong <code>Config.h</code> nếu có phần cứng.</p>
     <div class="pillrow">
       <span class="pill">TF-Luna &middot; quét 2 hướng</span>
-      <span class="pill safety">HC-SR04 &middot; vùng an toàn</span>
+      <span class="pill safety">Né vật · LiDAR (+ SR04 tùy chọn)</span>
     </div>
   </header>
 
@@ -366,7 +366,7 @@ details pre{
       <p class="rail-title">Khoảng cách &amp; an toàn</p>
       <div class="card">
         <h2><span class="dot"></span> LiDAR &mdash; tầm nhìn chính</h2>
-        <p class="hint" style="margin-top:-6px">Nhãn <b>ON/OFF</b>: chỉ <b>ON</b> khi có khung UART LiDAR hợp lệ gần đây; bumper/encoder <b>ON</b> khi có echo siêu âm trong tầm hoặc bánh vừa có xung. Chưa nối dây / mất nguồn → <b>OFF</b>. Nếu số đứng im / ~800&nbsp;cm nhưng ON: vẫn xem <b>bytes UART</b> ở Giám sát.</p>
+        <p class="hint" style="margin-top:-6px">Nhãn <b>ON/OFF</b>: LiDAR <b>ON</b> khi có khung UART hợp lệ gần đây. Bumper bốn góc: <b>ON</b> khi có bản sao khoảng cách từ LiDAR (F/B) / hoặc echo SR04 nếu bật phần cứng. Encoder <b>ON</b> khi có xung gần đây. Số đứng ~800&nbsp;cm nhưng ON: xem bytes UART ở Giám sát.</p>
         <div class="lidar2">
           <div class="lidar">
             <div class="lidar-in sensor-off" id="lidCardF">
@@ -390,8 +390,8 @@ details pre{
       </div>
 
       <div class="card">
-        <h2><span class="dot safety"></span> Bumper (HC-SR04) &mdash; dừng cận cảnh</h2>
-        <p class="hint">Khi vật cản rất gần (&lt;~50&nbsp;cm): giảm tốc / dừng. Không thay thế LiDAR để lập bản đồ. <b>OFF</b> ở bumper: chưa có echo trong tầm ~2&nbsp;m gần đây — thử đưa tay gần sensor hoặc có chướng ngại trong phạm vi.</p>
+        <h2><span class="dot safety"></span> Bumper — bốn góc (bản sao LiDAR hoặc HC-SR04)</h2>
+        <p class="hint">Trước/sau lấy từ TF-Luna (cùng số như trên cung LiDAR). Trái/phải: không có LiDAR ngang → hiển thị “xa” (<code>OFF</code> link). Có thể bật lại HC-SR04 thật trong <code>Config.h</code>. <b>OFF</b> khi chưa có frame hợp lệ / chưa nối dây.</p>
         <div class="bump-grid" id="bumpBox"></div>
       </div>
 
@@ -430,7 +430,7 @@ details pre{
             <div class="spd-block__head">
               <div>
                 <div class="spd-block__label">Tốc độ · Tự hành</div>
-                <div class="spd-block__hint">Demo né vật bằng HC-SR04 (15–100%)</div>
+                <div class="spd-block__hint">Demo né vật — LiDAR trước/sau (15–100%)</div>
               </div>
               <span class="spd-block__badge" id="spdAutoVal">50%</span>
             </div>
@@ -438,7 +438,7 @@ details pre{
               oninput="sendSpeedAuto(this.value)" aria-label="Tốc độ tự hành phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
           </div>
-          <p class="hint" style="margin-top:8px;font-size:.68rem">Demo tự hành: đi thẳng theo <b>HC-SR04</b> (không dùng LiDAR để quyết định). Gặp vật cản → lùi ngắn → xoay về phía rộng hơn (trái/phải).</p>
+          <p class="hint" style="margin-top:8px;font-size:.68rem">Demo: <b>đi thẳng</b> → trước &lt; <code>AUTO_LIDAR_BLOCK_CM</code> thì <b>dừng</b> (<code>AUTO_STOP_HOLD_MS</code>) → <b>xoay quét</b> CW rồi CCW (<code>AUTO_SCAN_*_MS</code>) → lại <b>đi thẳng</b>. LiDAR sau vẫn đo trong lúc dừng. Không mắt ngang → không bẻ hông (trừ khi bật SR04).</p>
           <button type="button" class="estop" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
         </div>
       </div>

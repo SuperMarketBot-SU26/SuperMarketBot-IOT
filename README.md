@@ -3,7 +3,7 @@
 Robot tự hành Mini 4WD — ESP32-S3-DevKitC N16R8  
 Đồ án tốt nghiệp | FPT University CN9
 
-**Phạm vi thư mục này (IoT & edge):** điều khiển, LiDAR/siêu âm, odometry, HMI nội bộ. **Siêu âm:** Trig **14**, Echo **10–13**. **Encoder trước trái (FL) = GPIO 39** (có thể đổi từ 15). **LED RGB zin** GPIO 38 (`SMB_ONBOARD_RGB = 1`). Phần còn lại: 2× TF-Luna, 2× TB6612, v.v.
+**Phạm vi thư mục này (IoT & edge):** điều khiển, LiDAR, odometry, HMI. **Mặc định `USE_HC_SR04_HARDWARE = 0`:** tự hành và telemetry “US” trên web lấy từ **TF-Luna trước/sau**; bật **1** nếu còn HC-SR04 + NewPing. Encoder FL=**39**, LED **38**, LiDAR **17/18** + **1/2**.
 
 ---
 
@@ -18,15 +18,28 @@ Bảng dưới khớp `Config.h` — **đổi dây** nếu bạn trước đây 
 | **STBY** 2 mạch (chung) | 47 | Cao = chạy |
 | **LiDAR trước (UART1)** | TX 17, RX 18 | Nối 5V+GND đúng TF-Luna |
 | **LiDAR sau (UART2)** | TX 1, RX 2 | Tránh 19, 20 (USB) |
-| **HC-SR04** | Trig **14**, Echo **10, 11, 12, 13** (F,B,L,R) | Echo 5V → chia áp 3,3V |
+| **HC-SR04** (tùy chọn) | Trig **14**, Echo **10–13** | Chỉ khi `USE_HC_SR04_HARDWARE=1`; Echo 5V → chia áp 3,3V |
 | **Encoder (DO x4)** | **39** (FL), 16 (RL), 3 (FR), 48 (RR) | Ngắt; FL đổi từ **15 → 39** trong firmware hiện tại |
 | **LED zin trên bo** | 38 (WS2812) | `SMB_ONBOARD_RGB = 1` |
 
 Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 
+### Nối TF-Luna ↔ ESP32 (đúng `Config.h`)
+
+Chuẩn **chéo TX/RX**: **TX Luna → RX ESP**, **RX Luna ← TX ESP**. Hai module: **GND chung** với ESP, **5 V** ổn định cho VCC Luna. **Baud 115200** (8N1). Chân **Mode** Luna (thường chân 5) **không** kéo GND — nếu GND, module ở I2C và UART không có byte.
+
+| Vai trò trong firmware | ESP32-S3 GPIO | Tín hiệu Luna |
+|------------------------|---------------|----------------|
+| LiDAR **trước** — TX ESP | **17** | **RX** Luna trước |
+| LiDAR **trước** — RX ESP | **18** | **TX** Luna trước |
+| LiDAR **sau** — TX ESP | **1** | **RX** Luna sau |
+| LiDAR **sau** — RX ESP | **2** | **TX** Luna sau |
+
+Trên web có đổi “cổng nào gọi là trước xe” (`lidF`) — **GPIO không đổi**, chỉ đổi cách gán `lidarFront`/`lidarBack` trong phần mềm.
+
 ### Đã gọn dây chưa? (gợi ý bố cục cáp)
 
-- **Hợp lý sẵn:** TB6612 trái **4–9**; **Echo 10–13 + Trig 14**; **Encoder FL=39** (cạnh dải 40–42), RL **16** gần Trig; FR **3**, RR **48**; LiDAR **17+18**, **1+2**; TB6612 phải **21, 40–42, 45,46, 47**.
+- **Hợp lý sẵn:** TB6612 trái **4–9**; (tùy chọn) **Echo 10–13 + Trig 14**; **Encoder FL=39**, RL **16**, FR **3**, RR **48**; LiDAR **TX/RX 17+18** (trước), **1+2** (sau); TB6612 phải **21, 40–42, 45,46, 47**.
 - **Bắt buộc tách cáp:** bánh phải + STBY tập trung cạnh bên kia (**21, 40,41,42, 45,46, 47**): đúng với tài liệu S3, không còn dải 6 số thẳng hàng như bên trái — bạn dùng **một dây 7 ruột** (6 logic + 1 GND) về TB6612 #2, nhãn từng màu theo bảng dưới.
 - **Encoder:** **39** (FL) thường cùng hàng với **40–42** (motor phải); **16** gần **14**; **3** và **48** chỗ khác trên header — đánh nhãn rõ.
 - **Lưu ý strapping (boot):** **GPIO 0, 3, 45, 46** trên S3 bị tài liệu nêu; code dùng **3** (enc), **45, 46** (hướng bánh trước phải). Nên: module encoder DO nối 3,3V hợp lý; dây motor đến TB6612 để driver giữ mức ổn khi cấp nguồn; tránh kéo thử động cơ cắm **trước** lúc boot ổn (giảm rủi ro pin tụt sai trạng thái).
@@ -36,7 +49,7 @@ Tránh: **19, 20** (USB), **33–37** (PSRAM gắn module).
 | Cáp | Nối tới (GPIO) | Nội dung |
 |-----|----------------|----------|
 | **A** — TB6612 bên trái | **4,5,6,7,8,9** + GND | 1 cặp 6 tín hiệu + mass |
-| **B** — Siêu âm (Trig + 4 Echo) | **10, 11, 12, 13, 14** + GND | Trig=14; Echo F/B/L/R = 10–13 |
+| **B** — Siêu âm (nếu bật SR04) | **10–14** + GND | `USE_HC_SR04_HARDWARE=1` |
 | **C** — LiDAR trước (UART) | **17, 18** + 5V + GND | TX/ RX chéo theo cấu hình cảm biến + nguồn |
 | **D** — LiDAR sau (UART) | **1, 2** + 5V + GND | Tương tự, Serial2 |
 | **E** — TB6612 bên phải + STBY chung | **21, 40, 41, 42, 45, 46, 47** + GND (và 3,3/5V logic cấp theo sơ đồ driver) | Một ổ 7 tín hiệu + dùng chung 47 tới 2 mạch (theo cách bạn hàn) |
@@ -55,7 +68,7 @@ SuperMarketBot-IOT/
 ├── CtrlJson.h               ← Lệnh JSON WebSocket (điều khiển từ dashboard)
 ├── RobotTelemetry.h         ← JSON telemetry cho WebSocket
 ├── Motors.h                 ← Điều khiển 2×TB6612FNG qua LEDC
-├── Sensors.h                ← TF-Luna LiDAR UART + HC-SR04 (NewPing)
+├── Sensors.h                ← TF-Luna UART + tùy chọn NewPing (USE_HC_SR04_HARDWARE)
 ├── Odometry.h               ← 4× encoder (ISR + RPM/distance)
 ├── StatusRGB.h              ← Chỉ LED RGB zin bo (GPIO 38), không LED ngoài
 └── WebUI.h                  ← SoftAP + Web + WebSocket
@@ -68,7 +81,7 @@ SuperMarketBot-IOT/
 | Thư viện | Tác giả | Ghi chú |
 |---|---|---|
 | **ESP32 Arduino core** | Espressif | >= 3.0 — cài qua Board Manager |
-| **NewPing** | Tim Eckel | Siêu âm HC-SR04 |
+| **NewPing** | Tim Eckel | Chỉ khi `USE_HC_SR04_HARDWARE=1` |
 | **WebSockets** | Markus Sattler | Links2004/arduinoWebSockets |
 | **ArduinoJson** | Benoit Blanchon | >= v7 |
 | **Adafruit NeoPixel** | Adafruit | Chỉ điều khiển **LED zin** GPIO 38 |
@@ -76,7 +89,7 @@ SuperMarketBot-IOT/
 ### LED — chỉ trên bo DevKit, không thêm phần cứng ngoài
 
 - Một mối **WS2812 (RGB)** tích hợp, **GPIO 38**; không cần hàn thêm bóng.
-- `SMB_ONBOARD_RGB = 1`: màu theo chế độ; Echo US **10–13**, không tranh chân 38. ENC_FL = **39**, RR = **48**.
+- `SMB_ONBOARD_RGB = 1`: màu theo chế độ; không xung đột LiDAR (GPIO **38** = LED).
 - `SMB_ONBOARD_RGB = 0`: tắt mã LED.
 - `SMB_RGB_BRIGHTNESS` trong `Config.h` (0–255).
 
@@ -133,9 +146,14 @@ Tất cả hằng số nằm trong `Config.h`:
 | `LIDAR_MAX_CM` | 800 cm (8 m) | Trần hiển thị / clamp TF-Luna (theo datasheet) |
 | `US_PING_MAX_CM` | 200 cm | Cửa sổ đo NewPing (~2 m, cân bằng tốc độ quét) |
 | `US_DISPLAY_MAX_CM` | 160 cm (1,6 m) | Thanh HMI + vùng “xa ổn định” thực tế HC-SR04 trong siêu thị |
-| `SAFE_STOP_CM` | 28 cm | Trong **tự lái**: vật trước gần hơn → dừng / né (LiDAR + US) |
+| `USE_HC_SR04_HARDWARE` | 0 | 0 = chỉ LiDAR cho khoảng cách; 1 = NewPing SR04 |
+| `AUTO_LIDAR_BLOCK_CM` | 22 cm | Tự hành: trước &lt; → dừng + quét (≈20 cm + dự phòng) |
+| `AUTO_LIDAR_SLOW_CM` | 70 cm | Vùng giảm ga trước khi chạm ngưỡng block |
+| `AUTO_STOP_HOLD_MS` | 2800 ms | Đứng im (Luna sau vẫn đo) |
+| `AUTO_SCAN_CW_MS` / `AUTO_SCAN_CCW_MS` | 1500 / 1500 ms | Xoay chỗ quét rồi về đi thẳng |
+| `SAFE_STOP_CM` | 28 cm | (Hiện không dùng trong FSM demo; giữ cho bản mở rộng) |
 | `SAFE_SIDE_AVOID_CM` | 14 cm | Chỉ **tự lái**: HC-SR04 trái/phải — bẻ lái khi thực sự gần (giảm giật) |
-| `SAFE_SLOW_CM` | 100 cm | Khoảng bắt đầu **giảm tốc** tiến (nhỏ = ít nhạy từ xa) |
+| `SAFE_SLOW_CM` | 100 cm | (FSM hiện dùng `AUTO_LIDAR_SLOW_CM`; hằng này dự phòng) |
 | `ENC_PPR` | 20 | Xung/vòng bánh xe |
 | `WHEEL_DIAM_M` | 0.065 m | Đường kính bánh |
 | `PWM_FREQ` | 20 000 Hz | Tần số PWM động cơ |

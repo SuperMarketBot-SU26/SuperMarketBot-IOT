@@ -1,19 +1,24 @@
 /* =====================================================================
  *  Sensors.h — Cảm biến an toàn & định vị
- *    • 4x HC-SR04 (dùng chung TRIG — quét tuần tự bằng NewPing)
- *    • 2x TF-Luna LiDAR UART 9-byte frame
+ *    • 2× TF-Luna LiDAR UART 9-byte frame (Serial1 / Serial2)
+ *    • Tùy chọn 4× HC-SR04 (USE_HC_SR04_HARDWARE=1 + NewPing)
+ *
+ *  Khi USE_HC_SR04_HARDWARE=0: sensorsPollUS() đồng bộ g_state.us* từ LiDAR
+ *  (hai bên = “xa” LIDAR_MAX_CM — không có mắt ngang).
  *
  *  API:
- *    sensorsInit()     — Cấu hình TRIG chung + 2 Serial LiDAR
- *    sensorsPollUS()   — Quét 4 siêu âm (gọi từ task real-time)
- *    sensorsPollLidar()— Đọc 2 LiDAR (gọi liên tục từ task điều khiển)
- *    sensorsLogBootSample() — 1 lần lúc boot: in mẫu LiDAR/US ra Serial (debug phần cứng)
+ *    sensorsInit()     — UART LiDAR (+ TRIG/Echo SR04 nếu bật)
+ *    sensorsPollUS()   — SR04 hoặc shadow từ LiDAR
+ *    sensorsPollLidar()— Đọc 2 LiDAR
+ *    sensorsLogBootSample() — boot debug
  * =====================================================================*/
 #ifndef SENSORS_H
 #define SENSORS_H
 
 #include "Config.h"
+#if USE_HC_SR04_HARDWARE
 #include <NewPing.h>
+#endif
 #include "SensorLayout.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,11 +29,12 @@ volatile uint32_t g_luna1LastOkMs = 0;
 volatile uint32_t g_luna2LastOkMs = 0;
 volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
 
-// 4 cảm biến siêu âm dùng cùng 1 chân TRIG (GPIO14)
+#if USE_HC_SR04_HARDWARE
 static NewPing g_sonarF(US_TRIG, US_ECHO_F, US_PING_MAX_CM);
 static NewPing g_sonarB(US_TRIG, US_ECHO_B, US_PING_MAX_CM);
 static NewPing g_sonarL(US_TRIG, US_ECHO_L, US_PING_MAX_CM);
 static NewPing g_sonarR(US_TRIG, US_ECHO_R, US_PING_MAX_CM);
+#endif
 
 /** Nghỉ giữa các ping (gọi từ task điều khiển / setup — dùng vTaskDelay, không busy-wait). */
 inline void sensorsYieldMs(uint32_t ms) {
@@ -74,14 +80,14 @@ inline void tflunaUartApplyDefaults(HardwareSerial &) {}
 #endif
 
 inline void sensorsInit() {
-  // TRIG chung: mức nghỉ LOW trước khi NewPing chiếm dụng
+#if USE_HC_SR04_HARDWARE
   pinMode(US_TRIG, OUTPUT);
   digitalWrite(US_TRIG, LOW);
-  // Ép chân Echo là digital input (S3 + nhiễu driver/servo đôi khi “dính” mode sai sau reset)
   pinMode(US_ECHO_F, INPUT);
   pinMode(US_ECHO_B, INPUT);
   pinMode(US_ECHO_L, INPUT);
   pinMode(US_ECHO_R, INPUT);
+#endif
 
   // Bộ đệm RX lớn hơn — tránh mất byte LiDAR khi CPU bận (WiFi + task khác)
   Serial1.setRxBufferSize(1024);
@@ -100,27 +106,8 @@ inline void sensorsInit() {
 #endif
 }
 
-/**
- * Quét 4 siêu âm tuần tự vì dùng chung TRIG (GPIO14).
- * Ghi kết quả trực tiếp vào g_state. Giá trị 0 cm = ngoài tầm.
- * (Blocking ~3–4ms mỗi hướng với US_PING_MAX_CM=200)
- */
-inline void sensorsPollUS() {
-  int16_t phy[4];
-  phy[0] = (int16_t)g_sonarF.ping_cm();
-  if (phy[0] > 0) g_usPhyLastEchoMs[0] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  phy[1] = (int16_t)g_sonarB.ping_cm();
-  if (phy[1] > 0) g_usPhyLastEchoMs[1] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  phy[2] = (int16_t)g_sonarL.ping_cm();
-  if (phy[2] > 0) g_usPhyLastEchoMs[2] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  phy[3] = (int16_t)g_sonarR.ping_cm();
-  if (phy[3] > 0) g_usPhyLastEchoMs[3] = millis();
-  for (int i = 0; i < 4; i++) {
-    if (phy[i] == 0) phy[i] = US_PING_MAX_CM;
-  }
+/** Gán 4 khoảng cách vật lý (F,B,L,R) → góc xe + usFront/Back/Left/Right. */
+inline void sensorsCommitPhyToState(const int16_t phy[4]) {
   int16_t usSlot[4];
   for (int s = 0; s < 4; s++) {
     uint8_t p = g_mapUsSlot[s];
@@ -136,6 +123,47 @@ inline void sensorsPollUS() {
   g_state.usLeft = (int16_t)min((int)g_state.usLF, (int)g_state.usLR);
   g_state.usRight = (int16_t)min((int)g_state.usRF, (int)g_state.usRR);
   g_state.usLastUpdateMs = millis();
+}
+
+/**
+ * SR04 (nếu bật) hoặc đồng bộ từ LiDAR — gọi sau sensorsPollLidar() khi không dùng SR04.
+ */
+inline void sensorsPollUS() {
+#if USE_HC_SR04_HARDWARE
+  int16_t phy[4];
+  phy[0] = (int16_t)g_sonarF.ping_cm();
+  if (phy[0] > 0) g_usPhyLastEchoMs[0] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
+  phy[1] = (int16_t)g_sonarB.ping_cm();
+  if (phy[1] > 0) g_usPhyLastEchoMs[1] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
+  phy[2] = (int16_t)g_sonarL.ping_cm();
+  if (phy[2] > 0) g_usPhyLastEchoMs[2] = millis();
+  sensorsYieldMs(US_INTER_PING_MS);
+  phy[3] = (int16_t)g_sonarR.ping_cm();
+  if (phy[3] > 0) g_usPhyLastEchoMs[3] = millis();
+  for (int i = 0; i < 4; i++) {
+    if (phy[i] == 0) phy[i] = US_PING_MAX_CM;
+  }
+  sensorsCommitPhyToState(phy);
+#else
+  int16_t phy[4];
+  phy[US_PHY_F] = g_state.lidarFront;
+  phy[US_PHY_B] = g_state.lidarBack;
+  phy[US_PHY_L] = (int16_t)LIDAR_MAX_CM;
+  phy[US_PHY_R] = (int16_t)LIDAR_MAX_CM;
+  sensorsCommitPhyToState(phy);
+  g_state.usLeft = (int16_t)LIDAR_MAX_CM;
+  g_state.usRight = (int16_t)LIDAR_MAX_CM;
+  {
+    uint32_t tF = (g_lidarFrontUart == 0u) ? g_luna1LastOkMs : g_luna2LastOkMs;
+    uint32_t tB = (g_lidarFrontUart == 0u) ? g_luna2LastOkMs : g_luna1LastOkMs;
+    g_usPhyLastEchoMs[US_PHY_F] = tF;
+    g_usPhyLastEchoMs[US_PHY_B] = tB;
+    g_usPhyLastEchoMs[US_PHY_L] = 0;
+    g_usPhyLastEchoMs[US_PHY_R] = 0;
+  }
+#endif
 }
 
 /* ---------------------------------------------------------------
@@ -239,14 +267,14 @@ inline void sensorsLogBootSample() {
     Serial.println(F("  (Neu khong thay 59 59 trong dump: sai baud, output tat, hoac dang che do I2C.)"));
   }
 
-  Serial.println(F("[Sensors] Boot doc (30 vong parse + 1 lan US)..."));
+  Serial.println(F("[Sensors] Boot doc (30 vong LiDAR + dong bo khoang cach)..."));
   for (int i = 0; i < 30; i++) {
     sensorsPollLidar();
     sensorsYieldMs(15);
   }
   sensorsPollUS();
   Serial.printf(
-      "  LiDAR F:%d B:%d cm | US F:%d B:%d L:%d R:%d cm\n",
+      "  LiDAR F:%d B:%d cm | Shadow F:%d B:%d L:%d R:%d cm (L/R=max neu khong SR04)\n",
       (int)g_state.lidarFront, (int)g_state.lidarBack, (int)g_state.usFront,
       (int)g_state.usBack, (int)g_state.usLeft, (int)g_state.usRight);
   Serial.printf(

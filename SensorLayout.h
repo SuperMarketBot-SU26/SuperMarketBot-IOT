@@ -2,7 +2,8 @@
  *  SensorLayout.h — Ánh xạ logic (4 góc xe / trước-sau LiDAR) → phần cứng cố định
  *  Lưu NVS; team chỉnh trên web, không đổi GPIO trong code.
  *
- *  Siêu âm vật lý: 0=Echo Trước (10), 1=Sau (11), 2=Trái (12), 3=Phải (13)
+ *  Siêu âm vật lý (USE_HC_SR04_HARDWARE=1): 0=F…3=R theo GPIO trong Config.
+ *  Khi USE_HC_SR04_HARDWARE=0: web vẫn nhận uf/ub/… nhưng giá trị đồng bộ từ LiDAR (F/B), L/R = max.
  *  Encoder vật lý: 0=FL(39), 1=RL(16), 2=FR(3), 3=RR(48)
  *  Slot logic: 0=Trái trước, 1=Trái sau, 2=Phải trước, 3=Phải sau
  *  LiDAR: lidF=0 → Serial1 = “LiDAR trước xe”; 1 → Serial2 = trước (đổi vai trừu tượng)
