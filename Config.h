@@ -114,12 +114,22 @@
 /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
 #define SAFE_SIDE_AVOID_CM  14
 
-/** Tự hành LiDAR (2 mắt trước/sau): tiến thẳng → chặn trước thì dừng vài giây → xoay quét (CW+CCW) → lại tiến thẳng */
+/** Tự hành LiDAR (2 mắt trước/sau): tiến → chặn → dừng → xoay tìm hướng trống → hãm → tiến (demo thực địa; SLAM để sau). */
 #define AUTO_LIDAR_BLOCK_CM     22   // trước < cm → chuỗi dừng + quét (~20cm + dự phòng nhiễu)
 #define AUTO_LIDAR_SLOW_CM      70   // trước trong [BLOCK..SLOW] → giảm ga tiến
 #define AUTO_STOP_HOLD_MS       2800u // đứng im; Luna sau vẫn đọc (quét phía sau thụ động)
-#define AUTO_SCAN_CW_MS         1500u
-#define AUTO_SCAN_CCW_MS        1500u
+/** Ngưỡng Luna trước “đủ trống” để tiếp sau khi quét (phải > AUTO_LIDAR_BLOCK_CM). */
+#define AUTO_LIDAR_CLEAR_CM     40
+/** Số chu kỳ liên tiếp (~SAFE_LOOP_MS) thấy “đủ trống” trước khi dừng quay. */
+#define AUTO_SCAN_CLEAR_STREAK  5
+/** Thời gian xoay mỗi chiều (CW rồi CCW) khi chưa thấy hướng trống; hết → thoát về CRUISE. */
+#define AUTO_SCAN_SEEK_MS_PER_DIR  4200u
+#define AUTO_SCAN_RAMP_UP_MS    380u  // tăng PWM dần khi bắt đầu xoay mỗi lần
+#define AUTO_SCAN_DECEL_MS      260u  // hãm mượt trước khi tiến lại
+/** PWM xoay khi quét (1–100 % của PWM_MAX). Tách khỏi slider tự hành. */
+#define AUTO_SCAN_PWM_PCT       75
+/** 1 = sau cũng kích hoạt chuỗi dừng+quét nếu < AUTO_LIDAR_BLOCK_CM (cả 2 Luna tham gia). 0 = chỉ trước. */
+#define AUTO_LIDAR_BLOCK_USE_REAR 1
 
 /** Legacy / khi USE_HC_SR04_HARDWARE=1 thêm bẻ cạnh; LiDAR-only chỉ dùng AUTO_LIDAR_* ở FSM chính */
 #define AUTO_US_SLOW_CM      85   // (SR04) trước gần hơn → giảm ga tiến

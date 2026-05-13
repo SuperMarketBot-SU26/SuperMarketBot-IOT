@@ -62,18 +62,22 @@ RobotState g_state = {
 SemaphoreHandle_t g_stateMutex;
 
 /* =====================================================================
- *  Tự hành (LiDAR trước/sau): CRUISE đi thẳng → chặn trước → STOP_HOLD
- *  → SCAN_CW + SCAN_CCW quét chỗ → lại CRUISE. SR04 bật thì thêm bẻ cạnh.
+ *  Tự hành (LiDAR trước/sau): CRUISE → chặn → STOP_HOLD → quét tìm hướng
+ *  trống (xoay có ramp, CW rồi CCW tới khi đủ xa phía trước) → hãm nhẹ
+ *  → CRUISE. SR04 bật thì thêm bẻ cạnh. (SLAM / bản đồ: sau này thay FSM.)
  * =================================================================== */
 enum AutoNavFsm : uint8_t {
   AN_CRUISE = 0,
   AN_STOP_HOLD,
-  AN_SCAN_CW,
-  AN_SCAN_CCW
+  AN_SCAN_SEEK,
+  AN_SCAN_DECEL
 };
 
 static AutoNavFsm s_auto_fsm = AN_CRUISE;
 static uint32_t s_auto_t0 = 0;
+static int8_t s_scan_dir = 1;   // +1 = CW, -1 = CCW
+static uint8_t s_scan_pass = 0; // 0 = chiều đầu, 1 = đã đổi chiều một lần
+static uint8_t s_clear_streak = 0;
 static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 
 static uint16_t autoSpeedPwm() {
@@ -84,16 +88,41 @@ static uint16_t autoSpeedPwm() {
   return s;
 }
 
+static uint16_t autoScanTurnPwm() {
+  uint32_t p = ((uint32_t)PWM_MAX * (uint32_t)AUTO_SCAN_PWM_PCT) / 100u;
+  uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
+  if (p < (uint32_t)tmin) p = (uint32_t)tmin;
+  if (p > (uint32_t)PWM_MAX) p = (uint32_t)PWM_MAX;
+  return (uint16_t)p;
+}
+
+/** PWM xoay phần đầu mỗi lần đổi hướng — tránh giật; sàn ~22% mục tiêu tối thiểu. */
+static uint16_t autoScanSeekPwm(uint32_t segElapsedMs, uint16_t scanPwm) {
+  if (segElapsedMs >= AUTO_SCAN_RAMP_UP_MS) return scanPwm;
+  uint32_t p = (uint32_t)scanPwm * segElapsedMs / AUTO_SCAN_RAMP_UP_MS;
+  uint32_t lo = (uint32_t)scanPwm * 22u / 100u;
+  if (lo < (uint32_t)(PWM_MAX / 14u)) lo = (uint32_t)(PWM_MAX / 14u);
+  if (p < lo) p = lo;
+  if (p > (uint32_t)scanPwm) p = (uint32_t)scanPwm;
+  if (p > (uint32_t)PWM_MAX) p = (uint32_t)PWM_MAX;
+  return (uint16_t)p;
+}
+
 static void autoNavigateAvoidance() {
   const uint16_t spd = autoSpeedPwm();
+  const uint16_t scanPwm = autoScanTurnPwm();
   const uint32_t now = millis();
   const int16_t f = g_state.lidarFront;
+  const int16_t b = g_state.lidarBack;
   const int16_t L = g_state.usLeft;
   const int16_t R = g_state.usRight;
 
   switch (s_auto_fsm) {
     case AN_CRUISE: {
-      if (f < AUTO_LIDAR_BLOCK_CM) {
+      const bool blockFront = (f < AUTO_LIDAR_BLOCK_CM);
+      const bool blockRear =
+          (AUTO_LIDAR_BLOCK_USE_REAR != 0) && (b < AUTO_LIDAR_BLOCK_CM);
+      if (blockFront || blockRear) {
         botStop();
         s_auto_fsm = AN_STOP_HOLD;
         s_auto_t0 = now;
@@ -121,35 +150,64 @@ static void autoNavigateAvoidance() {
     case AN_STOP_HOLD: {
       botStop();
       if (now - s_auto_t0 >= AUTO_STOP_HOLD_MS) {
-        s_auto_fsm = AN_SCAN_CW;
+        s_auto_fsm = AN_SCAN_SEEK;
         s_auto_t0 = now;
+        s_scan_dir = 1;
+        s_scan_pass = 0;
+        s_clear_streak = 0;
       }
       break;
     }
-    case AN_SCAN_CW: {
-      {
-        uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
-        uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
-        if (tspd < tmin) tspd = tmin;
-        botRotateCW(tspd);
+    case AN_SCAN_SEEK: {
+      const uint32_t seg = now - s_auto_t0;
+
+      const bool frontOk = (f >= (int16_t)AUTO_LIDAR_CLEAR_CM) && (f > 3);
+      if (frontOk) {
+        if (s_clear_streak < 255) s_clear_streak++;
+      } else {
+        s_clear_streak = 0;
       }
-      if (now - s_auto_t0 >= AUTO_SCAN_CW_MS) {
+      if (s_clear_streak >= AUTO_SCAN_CLEAR_STREAK) {
+        s_auto_fsm = AN_SCAN_DECEL;
+        s_auto_t0 = now;
+        s_clear_streak = 0;
+        break;
+      }
+      if (seg >= AUTO_SCAN_SEEK_MS_PER_DIR) {
         botStop();
-        s_auto_fsm = AN_SCAN_CCW;
-        s_auto_t0 = now;
+        s_clear_streak = 0;
+        if (s_scan_pass >= 1) {
+          s_auto_fsm = AN_CRUISE;
+          s_scan_pass = 0;
+        } else {
+          s_scan_pass = 1;
+          s_scan_dir = (int8_t)(-s_scan_dir);
+          s_auto_t0 = now;
+        }
+        break;
+      }
+
+      const uint16_t turn = autoScanSeekPwm(seg, scanPwm);
+      if (s_scan_dir > 0) {
+        botRotateCW(turn);
+      } else {
+        botRotateCCW(turn);
       }
       break;
     }
-    case AN_SCAN_CCW: {
-      {
-        uint16_t tspd = (uint16_t)(((uint32_t)spd * 4u) / 10u);
-        uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
-        if (tspd < tmin) tspd = tmin;
-        botRotateCCW(tspd);
-      }
-      if (now - s_auto_t0 >= AUTO_SCAN_CCW_MS) {
+    case AN_SCAN_DECEL: {
+      const uint32_t dt = now - s_auto_t0;
+      if (dt >= AUTO_SCAN_DECEL_MS) {
         botStop();
         s_auto_fsm = AN_CRUISE;
+        break;
+      }
+      uint32_t pwm = ((uint32_t)scanPwm * (AUTO_SCAN_DECEL_MS - dt)) / AUTO_SCAN_DECEL_MS;
+      uint16_t d = (uint16_t)pwm;
+      if (s_scan_dir > 0) {
+        botRotateCW(d);
+      } else {
+        botRotateCCW(d);
       }
       break;
     }
@@ -175,13 +233,23 @@ static void taskControl(void *pvParams) {
       g_state.estop = false;
       s_auto_fsm = AN_CRUISE;
       s_auto_t0 = millis();
+      s_scan_dir = 1;
+      s_scan_pass = 0;
+      s_clear_streak = 0;
     }
     if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
       s_auto_fsm = AN_CRUISE;
+      s_scan_pass = 0;
+      s_clear_streak = 0;
     }
     s_ctrl_prev_mode = g_state.mode;
 
     sensorsPollLidar();
+    /* Dừng + xoay: đọc Luna kép để cả Serial1 & Serial2 kịp byte (PWM dễ làm UART2 chậm). */
+    if (g_state.mode == MODE_AUTO && s_auto_fsm != AN_CRUISE) {
+      sensorsPollLidar();
+      sensorsPollLidar();
+    }
 
 #if USE_HC_SR04_HARDWARE
     if ((xTaskGetTickCount() - usTick) >= pdMS_TO_TICKS(60)) {

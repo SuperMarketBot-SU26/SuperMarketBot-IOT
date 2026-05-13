@@ -147,10 +147,15 @@ Tất cả hằng số nằm trong `Config.h`:
 | `US_PING_MAX_CM` | 200 cm | Cửa sổ đo NewPing (~2 m, cân bằng tốc độ quét) |
 | `US_DISPLAY_MAX_CM` | 160 cm (1,6 m) | Thanh HMI + vùng “xa ổn định” thực tế HC-SR04 trong siêu thị |
 | `USE_HC_SR04_HARDWARE` | 0 | 0 = chỉ LiDAR cho khoảng cách; 1 = NewPing SR04 |
-| `AUTO_LIDAR_BLOCK_CM` | 22 cm | Tự hành: trước &lt; → dừng + quét (≈20 cm + dự phòng) |
+| `AUTO_LIDAR_BLOCK_CM` | 22 cm | Tự hành: trước < → dừng + quét (≈20 cm + dự phòng) |
 | `AUTO_LIDAR_SLOW_CM` | 70 cm | Vùng giảm ga trước khi chạm ngưỡng block |
 | `AUTO_STOP_HOLD_MS` | 2800 ms | Đứng im (Luna sau vẫn đo) |
-| `AUTO_SCAN_CW_MS` / `AUTO_SCAN_CCW_MS` | 1500 / 1500 ms | Xoay chỗ quét rồi về đi thẳng |
+| `AUTO_LIDAR_CLEAR_CM` | 40 cm | Sau quét: Luna trước ≥ giá trị này (ổn định vài chu kỳ) thì coi hướng trống |
+| `AUTO_SCAN_CLEAR_STREAK` | 5 | Số vòng ~30 ms liên tiếp “đủ trống” trước khi dừng xoay |
+| `AUTO_SCAN_SEEK_MS_PER_DIR` | 4200 ms | Mỗi chiều xoay tối đa; hết CW rồi CCW mà chưa trống → tiến lại thử |
+| `AUTO_SCAN_RAMP_UP_MS` / `AUTO_SCAN_DECEL_MS` | 380 / 260 ms | Tăng/giảm PWM xoay mượt |
+| `AUTO_SCAN_PWM_PCT` | 75 | PWM xoay quét (~% `PWM_MAX`), không theo slider chậm tự hành |
+| `AUTO_LIDAR_BLOCK_USE_REAR` | 1 | 1 = Luna sau < block cũng dừng+quét; 0 = chỉ trước |
 | `SAFE_STOP_CM` | 28 cm | (Hiện không dùng trong FSM demo; giữ cho bản mở rộng) |
 | `SAFE_SIDE_AVOID_CM` | 14 cm | Chỉ **tự lái**: HC-SR04 trái/phải — bẻ lái khi thực sự gần (giảm giật) |
 | `SAFE_SLOW_CM` | 100 cm | (FSM hiện dùng `AUTO_LIDAR_SLOW_CM`; hằng này dự phòng) |
