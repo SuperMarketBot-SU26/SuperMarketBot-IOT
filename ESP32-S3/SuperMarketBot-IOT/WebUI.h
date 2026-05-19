@@ -19,6 +19,7 @@
 
 Preferences g_prefs;
 #include "CtrlJson.h"
+#include "VisionTablet.h"
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -129,6 +130,8 @@ body{
 .vision-btn{font-size:.72rem;padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:#15202b;color:var(--text);cursor:pointer}
 .vision-btn.on{border-color:var(--accent);color:var(--accent)}
 .vision-sel{font-size:.72rem;padding:6px 8px;border-radius:8px;border:1px solid var(--line2);background:#15202b;color:var(--text)}
+#vWrap{cursor:pointer}
+#vWrap.live{cursor:default}
   .b-item{padding:6px 8px}
   .b-item .val{font-size:.9rem}
 }
@@ -361,7 +364,8 @@ details pre{
   </header>
 
   <nav class="secnav" aria-label="Mục chính">
-    <a href="#sec-vision">Vision tablet</a>
+    <a href="#sec-vision">Camera</a>
+    <a href="/vision">Vision full</a>
     <a href="#sec-sense">Cảm biến</a>
     <a href="#sec-drive">Điều khiển</a>
     <a href="#sec-monitor">Giám sát</a>
@@ -372,6 +376,22 @@ details pre{
   <div class="appgrid">
     <div class="col col-sense" id="sec-sense">
       <p class="rail-title">Khoảng cách &amp; an toàn</p>
+      <div class="card" id="sec-vision">
+        <h2><span class="dot"></span> Camera tablet</h2>
+        <p class="hint">Cham <b>Bat camera</b> hoac khung den. Camera tren tablet (khong phai ESP32-CAM).</p>
+        <div class="vision-wrap" id="vWrap">
+          <video id="tabCam" playsinline autoplay muted></video>
+          <span class="vision-tag" id="vTag">Cham de bat</span>
+        </div>
+        <div class="vision-ctl">
+          <button type="button" class="vision-btn" id="vStart" style="border-color:var(--accent);color:var(--accent)">Bat camera</button>
+          <select class="vision-sel" id="vProf"><option value="0">QVGA</option><option value="1">HVGA</option><option value="2">VGA</option></select>
+          <button type="button" class="vision-btn" id="vFh">Lat ngang</button>
+          <button type="button" class="vision-btn" id="vSnap">Chup anh</button>
+          <a class="vision-btn" href="/vision" style="text-decoration:none;display:inline-block">/vision</a>
+        </div>
+        <p class="hint" id="vMsg" style="margin-top:8px;min-height:1.2em"></p>
+      </div>
       <div class="card">
         <h2><span class="dot"></span> LiDAR &mdash; tầm nhìn chính</h2>
         <p class="hint" style="margin-top:-6px">Nhãn <b>ON/OFF</b>: LiDAR <b>ON</b> khi có khung UART hợp lệ gần đây. Bumper bốn góc: <b>ON</b> khi có bản sao khoảng cách từ LiDAR (F/B) / hoặc echo SR04 nếu bật phần cứng. Encoder <b>ON</b> khi có xung gần đây. Số đứng ~800&nbsp;cm nhưng ON: xem bytes UART ở Giám sát.</p>
@@ -888,9 +908,52 @@ function setMode(m){
 }
 function sendEstop(){ wsS({t:'estop'}); }
 function odomReset(){ wsS({t:'odomReset'}); }
+(function(){
+  const v=document.getElementById('tabCam');
+  if(!v)return;
+  const prof=[[320,240],[480,320],[640,480]];
+  let stream=null,fh=0;
+  const msg=document.getElementById('vMsg'),tag=document.getElementById('vTag'),wrap=document.getElementById('vWrap');
+  function setM(t){if(msg)msg.textContent=t||'';}
+  async function vStart(){
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      setM('Trinh duyet chan camera tren http. Thu Chrome (Android) hoac mo /vision.');
+      return;
+    }
+    const p=prof[parseInt(document.getElementById('vProf').value,10)||0];
+    if(stream)stream.getTracks().forEach(t=>t.stop());
+    const tries=[
+      {video:{width:{ideal:p[0]},height:{ideal:p[1]},facingMode:{ideal:'environment'}},audio:false},
+      {video:{width:{ideal:p[0]},height:{ideal:p[1]}},audio:false},
+      {video:true,audio:false}
+    ];
+    let err=null;
+    for(const c of tries){
+      try{
+        stream=await navigator.mediaDevices.getUserMedia(c);
+        v.srcObject=stream; await v.play();
+        if(wrap)wrap.classList.add('live');
+        if(tag)tag.textContent=p[0]+'x'+p[1];
+        setM('');
+        return;
+      }catch(e){err=e;}
+    }
+    setM('Loi: '+(err&&err.message?err.message:'tu choi quyen camera'));
+  }
+  document.getElementById('vStart').onclick=vStart;
+  document.getElementById('vProf').onchange=vStart;
+  if(wrap)wrap.onclick=()=>{if(!stream)vStart();};
+  document.getElementById('vFh').onclick=function(){fh=!fh;v.style.transform='scaleX('+(fh?-1:1)+')';this.classList.toggle('on',fh);};
+  document.getElementById('vSnap').onclick=function(){
+    if(!v.videoWidth)return;
+    const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext('2d').drawImage(v,0,0);
+    c.toBlob(b=>{if(!b)return;const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='smb-'+Date.now()+'.jpg';a.click();setM('Da tai anh');},'image/jpeg',0.88);
+  };
+})();
 function initSecNav(){
   const links=[...document.querySelectorAll('.secnav a')];
-  const secs=['sec-sense','sec-drive','sec-monitor','sec-layout','sec-mot-layout'].map(id=>document.getElementById(id)).filter(Boolean);
+  const secs=['sec-vision','sec-sense','sec-drive','sec-monitor','sec-layout','sec-mot-layout'].map(id=>document.getElementById(id)).filter(Boolean);
   if(!links.length||!secs.length)return;
   const setActive=id=>{
     links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));
@@ -1017,6 +1080,13 @@ inline void webUIInit() {
     g_httpServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     g_httpServer.sendHeader("Pragma", "no-cache");
     g_httpServer.send_P(200, "text/html; charset=utf-8", HTML_PAGE);
+  });
+  g_httpServer.on("/vision", HTTP_GET, []() { visionTabletSendPage(g_httpServer); });
+  g_httpServer.on("/status", HTTP_GET, []() {
+    String j = "{\"ip\":\"" + WiFi.softAPIP().toString() +
+               "\",\"wifi\":null,\"camera\":\"tablet\",\"clients\":" +
+               String(WiFi.softAPgetStationNum()) + "}";
+    g_httpServer.send(200, "application/json", j);
   });
   g_httpServer.begin();
   g_wsServer.begin();

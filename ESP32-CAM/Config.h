@@ -2,6 +2,7 @@
  *  Config.h — ESP32-CAM (STA vào hotspot ESP32-S3)
  *
  *  PHẢI KHỚP ESP32-S3/Config.h:
+ *    ESP32-S3/Config.h (trong thư mục SuperMarketBot-IOT/) phải khớp:
  *    AP_SSID         = WIFI_SSID
  *    AP_PASS         = WIFI_PASS
  *    AP_WIFI_CHANNEL = WIFI_FIXED_CHANNEL

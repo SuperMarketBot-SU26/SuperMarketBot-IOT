@@ -61,8 +61,13 @@ Trên web có đổi “cổng nào gọi là trước xe” (`lidF`) — **GPIO
 
 ## Cấu trúc mã nguồn
 
+**Arduino IDE:** mở thư mục sketch `ESP32-S3/SuperMarketBot-IOT/` (file `.ino` và mọi `.h` phải cùng một thư mục).
+
 ```
-SuperMarketBot-IOT/
+ESP32-S3/
+├── README.md
+├── tools/
+└── SuperMarketBot-IOT/      ← Mở thư mục này trong Arduino IDE
 ├── SuperMarketBot-IOT.ino   ← File chính (setup/loop + FreeRTOS tasks)
 ├── Config.h
 ├── CtrlJson.h               ← Lệnh JSON WebSocket (điều khiển từ dashboard)
@@ -71,7 +76,8 @@ SuperMarketBot-IOT/
 ├── Sensors.h                ← TF-Luna UART + tùy chọn NewPing (USE_HC_SR04_HARDWARE)
 ├── Odometry.h               ← 4× encoder (ISR + RPM/distance)
 ├── StatusRGB.h              ← Chỉ LED RGB zin bo (GPIO 38), không LED ngoài
-└── WebUI.h                  ← SoftAP + Web + WebSocket
+├── WebUI.h                  ← SoftAP + Web + WebSocket
+└── VisionTablet.h           ← Trang /vision (camera tablet)
 ```
 
 ---

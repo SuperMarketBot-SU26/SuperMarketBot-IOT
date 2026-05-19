@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pathlib
 
-p = pathlib.Path(__file__).resolve().parent.parent / "WebUI.h"
+p = pathlib.Path(__file__).resolve().parent.parent / "SuperMarketBot-IOT" / "WebUI.h"
 text = p.read_text(encoding="utf-8")
 
 marker = '      <p class="rail-title">Vận hành</p>\n      <motion></motion><motion></motion><div class="card">'
