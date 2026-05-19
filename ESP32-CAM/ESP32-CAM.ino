@@ -42,7 +42,7 @@ void setup() {
     httpCamServerBegin(s_bootMs);
     s_httpStarted = true;
     Serial.println(F("[BOOT] Ready."));
-    Serial.printf("  Preview: http://%s/stream\n", WiFi.localIP().toString().c_str());
+    Serial.printf("  Dashboard: http://%s/view\n", WiFi.localIP().toString().c_str());
     Serial.printf("  Capture: http://%s/capture\n", WiFi.localIP().toString().c_str());
   } else {
     Serial.println(F("[BOOT] No WiFi yet — HTTP starts after connect"));
@@ -69,7 +69,7 @@ void loop() {
   }
 
   static uint32_t lastLog = 0;
-  if (now - lastLog > 60000u) {
+  if (!httpCamStreamActive() && (now - lastLog > 60000u)) {
     lastLog = now;
     Serial.printf("[HEART] heap=%u min=%u cam=%s rssi=%d\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),

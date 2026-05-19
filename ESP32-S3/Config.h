@@ -140,6 +140,7 @@
 #define AUTO_MIN_PWM_FRAC    12   // tốc độ tối thiểu ~ PWM_MAX*12/100 khi auto
 
 /* -------------------- WIFI SOFTAP ---------------------------------- */
+/** Tablet + ESP32-CAM (STA) cùng vào mạng này. CAM: ESP32-CAM/Config.h WIFI_* */
 #define AP_SSID         "SmartMarketBot"
 #define AP_PASS         "12345678"
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */

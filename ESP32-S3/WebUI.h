@@ -122,6 +122,13 @@ body{
   .slam p{display:none}
   .secnav{padding:6px 4px 8px}
   .bump-grid{grid-template-columns:repeat(4,1fr);gap:6px}
+.vision-wrap{position:relative;background:#060a10;border-radius:10px;border:1px solid var(--line2);aspect-ratio:4/3;overflow:hidden}
+.vision-wrap video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+.vision-tag{position:absolute;top:8px;left:8px;font-size:.68rem;font-weight:600;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.1);color:var(--accent)}
+.vision-ctl{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
+.vision-btn{font-size:.72rem;padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:#15202b;color:var(--text);cursor:pointer}
+.vision-btn.on{border-color:var(--accent);color:var(--accent)}
+.vision-sel{font-size:.72rem;padding:6px 8px;border-radius:8px;border:1px solid var(--line2);background:#15202b;color:var(--text)}
   .b-item{padding:6px 8px}
   .b-item .val{font-size:.9rem}
 }
@@ -354,6 +361,7 @@ details pre{
   </header>
 
   <nav class="secnav" aria-label="Mục chính">
+    <a href="#sec-vision">Vision tablet</a>
     <a href="#sec-sense">Cảm biến</a>
     <a href="#sec-drive">Điều khiển</a>
     <a href="#sec-monitor">Giám sát</a>
