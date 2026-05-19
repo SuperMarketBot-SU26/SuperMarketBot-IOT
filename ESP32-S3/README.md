@@ -130,8 +130,9 @@ Nếu vài dòng đầu Serial có ký tự lạ: do boot ROM in trước, USB C
 
 ```
 1. Điện thoại/PC bắt Wi-Fi: SmartMarketBot (pass: 12345678)
-2. Mở trình duyệt → http://192.168.4.1
-3. Giao diện hiện: Joystick, LiDAR, cảm biến, RPM
+2. Điều khiển robot → http://192.168.4.1
+3. Camera tablet → https://192.168.4.1/vision (chấp nhận chứng chỉ tự ký lần đầu)
+4. Giao diện HTTP: Joystick, LiDAR, cảm biến, RPM
 ```
 
 **Nếu trang quay mãi / trắng lâu:**

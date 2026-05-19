@@ -147,6 +147,7 @@
 #define AP_WIFI_CHANNEL 6
 #define AP_MAX_CLIENTS  4
 #define WEB_PORT        80
+#define WEB_SSL_PORT    443   /* HTTPS — camera tablet (getUserMedia) */
 #define WS_PORT         81
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------

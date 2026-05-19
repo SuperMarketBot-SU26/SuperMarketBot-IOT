@@ -20,6 +20,7 @@
 Preferences g_prefs;
 #include "CtrlJson.h"
 #include "VisionTablet.h"
+#include "VisionHttps.h"
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -365,7 +366,7 @@ details pre{
 
   <nav class="secnav" aria-label="Mục chính">
     <a href="#sec-vision">Camera</a>
-    <a href="/vision">Vision full</a>
+    <a id="lnkVisionHttps" href="#">Camera HTTPS</a>
     <a href="#sec-sense">Cảm biến</a>
     <a href="#sec-drive">Điều khiển</a>
     <a href="#sec-monitor">Giám sát</a>
@@ -378,7 +379,7 @@ details pre{
       <p class="rail-title">Khoảng cách &amp; an toàn</p>
       <div class="card" id="sec-vision">
         <h2><span class="dot"></span> Camera tablet</h2>
-        <p class="hint">Cham <b>Bat camera</b> hoac khung den. Camera tren tablet (khong phai ESP32-CAM).</p>
+        <p class="hint">Camera can <b>HTTPS</b>. Neu bao loi trinh duyet: bam <b>Camera HTTPS</b> tren menu (hoac <code id="vHttpsUrl">https://192.168.4.1/vision</code>), chap nhan chung chi tu ky, roi Bat camera.</p>
         <div class="vision-wrap" id="vWrap">
           <video id="tabCam" playsinline autoplay muted></video>
           <span class="vision-tag" id="vTag">Cham de bat</span>
@@ -388,7 +389,7 @@ details pre{
           <select class="vision-sel" id="vProf"><option value="0">QVGA</option><option value="1">HVGA</option><option value="2">VGA</option></select>
           <button type="button" class="vision-btn" id="vFh">Lat ngang</button>
           <button type="button" class="vision-btn" id="vSnap">Chup anh</button>
-          <a class="vision-btn" href="/vision" style="text-decoration:none;display:inline-block">/vision</a>
+          <a class="vision-btn" id="vGoHttps" href="#" style="text-decoration:none;display:inline-block">Mo HTTPS</a>
         </div>
         <p class="hint" id="vMsg" style="margin-top:8px;min-height:1.2em"></p>
       </div>
@@ -914,10 +915,18 @@ function odomReset(){ wsS({t:'odomReset'}); }
   const prof=[[320,240],[480,320],[640,480]];
   let stream=null,fh=0;
   const msg=document.getElementById('vMsg'),tag=document.getElementById('vTag'),wrap=document.getElementById('vWrap');
+  const vHttps='https://'+location.hostname+'/vision';
+  const uEl=document.getElementById('vHttpsUrl');
+  if(uEl)uEl.textContent=vHttps;
+  document.querySelectorAll('#lnkVisionHttps,#vGoHttps').forEach(a=>{a.href=vHttps;});
   function setM(t){if(msg)msg.textContent=t||'';}
   async function vStart(){
+    if(!window.isSecureContext){
+      setM('Trinh duyet chan camera tren HTTP. Mo: '+vHttps+' — chap nhan canh bao SSL, roi Bat camera.');
+      return;
+    }
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-      setM('Trinh duyet chan camera tren http. Thu Chrome (Android) hoac mo /vision.');
+      setM('Khong co API camera. Mo '+vHttps+' bang Chrome/Safari moi.');
       return;
     }
     const p=prof[parseInt(document.getElementById('vProf').value,10)||0];
@@ -1081,7 +1090,11 @@ inline void webUIInit() {
     g_httpServer.sendHeader("Pragma", "no-cache");
     g_httpServer.send_P(200, "text/html; charset=utf-8", HTML_PAGE);
   });
-  g_httpServer.on("/vision", HTTP_GET, []() { visionTabletSendPage(g_httpServer); });
+  g_httpServer.on("/vision", HTTP_GET, []() {
+    String loc = String("https://") + WiFi.softAPIP().toString() + "/vision";
+    g_httpServer.sendHeader("Location", loc);
+    g_httpServer.send(302, "text/plain", "Camera can HTTPS — redirecting");
+  });
   g_httpServer.on("/status", HTTP_GET, []() {
     String j = "{\"ip\":\"" + WiFi.softAPIP().toString() +
                "\",\"wifi\":null,\"camera\":\"tablet\",\"clients\":" +
@@ -1089,6 +1102,7 @@ inline void webUIInit() {
     g_httpServer.send(200, "application/json", j);
   });
   g_httpServer.begin();
+  visionHttpsBegin();
   g_wsServer.begin();
   g_wsServer.onEvent(onWebSocketEvent);
   Serial.printf("[WS] WebSocket server trên port %d\n", WS_PORT);

@@ -49,10 +49,10 @@ h1{font-size:1.1rem}
 <h1>Vision — camera tablet</h1>
 <p class="sub">Demo SmartMarketBot · WiFi <b>SmartMarketBot</b> (ESP32-S3)</p>
 </div>
-<a href="/">← Robot HMI</a>
+<a href="http://192.168.4.1/">← Robot HMI (HTTP)</a>
 </header>
 <section class="panel">
-<p class="hint">Camera chay tren tablet (khong qua ESP32-CAM). Chup anh tai ve may; upload backend khi co API.</p>
+<p class="hint">Dung <b>https://</b> (khong phai http). Lan dau: chap nhan <b>chung chi tu ky</b> (Advanced / Tiep tuc). Camera tren tablet, khong qua ESP32-CAM.</p>
 <div class="vw" id="vw">
 <video id="cam" playsinline autoplay muted></video>
 <div class="tap" id="tap">Cham de bat camera</div>
@@ -82,8 +82,12 @@ function setMsg(t){document.getElementById('msg').textContent=t||'';}
 function paint(){v.style.transform='scaleX('+(fh?-1:1)+') scaleY('+(fv?-1:1)+')';}
 function updFps(){const s=(performance.now()-t0)/1000;if(s>=0.8){document.getElementById('fps').textContent=Math.round(n/s)+' fps';n=0;t0=performance.now();}}
 async function start(){
+  if(!window.isSecureContext){
+    setMsg('Can HTTPS. Neu dang http:// — doi thanh https://'+location.hostname+'/vision');
+    return;
+  }
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    setMsg('Trinh duyet chan camera tren http. Thu Chrome Android hoac Safari iOS 16+.');
+    setMsg('Khong co API camera. Thu Chrome hoac Safari moi.');
     return;
   }
   const p=prof[parseInt(document.getElementById('prof').value,10)||0];
