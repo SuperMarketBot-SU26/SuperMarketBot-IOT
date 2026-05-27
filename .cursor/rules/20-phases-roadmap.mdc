@@ -1,0 +1,19 @@
+---
+description: Roadmap Phase 1-3 MQTT navigation — doc trong docs/phases/
+globs: "**/*.{ino,h,cpp,md}"
+alwaysApply: false
+---
+
+# Phased development (IoT)
+
+Truoc khi implement navigation/MQTT lon: doc `docs/phases/00-OVERVIEW.md`.
+
+- **Phase 1** truoc: MQTT + AP_STA + nav quick fix
+- **Phase 2** sau: Localization + PID (can encoder ticks total)
+- **Phase 3** cuoi: WaypointNav + MODE_WAYPOINT
+
+Khong implement Phase 3 khi Phase 1 MQTT chua connected.
+
+MQTT: moi goi `g_mqttClient.*` chi trong **taskWebIO** (Core 0).
+
+Prompt day du: `docs/phases/phase-*.md`
