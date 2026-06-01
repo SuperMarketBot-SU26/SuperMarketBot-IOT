@@ -123,6 +123,32 @@ static void mqttReconnect() {
   }
 }
 
+/* ==================== AUTO-DOCKING (Phase 3.5) ===================== */
+#if BAT_MONITOR_ENABLE
+static bool s_dockRequested = false;
+
+static void mqttCheckAutoDock(int batPct) {
+  if (batPct <= 0) return; // ADC chưa đo được
+
+  /* Pin yếu → hủy route hiện tại và yêu cầu backend điều hướng về trạm sạc */
+  if (batPct < (int)DOCK_LOW_BAT_PCT && !s_dockRequested
+      && (g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO)) {
+    s_dockRequested = true;
+    wpNavCancel();  // Hủy route đang chạy
+    strncpy((char *)g_mqttPendingStatus, "low_battery",
+            sizeof(g_mqttPendingStatus) - 1);
+    g_mqttStatusPending = true;
+    Serial.printf("[DOCK] Battery %d%% < %d%% — requesting return to dock (Node %d).\n",
+                  batPct, (int)DOCK_LOW_BAT_PCT, (int)DOCK_NODE_ID);
+  }
+
+  /* Pin đã sạc đầy → reset flag */
+  if (batPct >= (int)DOCK_FULL_BAT_PCT) {
+    s_dockRequested = false;
+  }
+}
+#endif
+
 /* ==================== PUBLISH TELEMETRY ============================ */
 static void mqttPublishTelemetry() {
   if (!g_mqttClient.connected()) return;
@@ -132,13 +158,21 @@ static void mqttPublishTelemetry() {
 
   StaticJsonDocument<512> doc;
 
-  /* Pin — nếu BAT_MONITOR_ENABLE=1, giá trị có trong g_batPct (RobotTelemetry.h).
-     Tạm null cho đến khi Phase 2 gắn ADC. */
-  doc["Battery"]       = (bool)BAT_MONITOR_ENABLE ? (int)0 : (int)-1; // -1 = N/A
+  /* Pin — BAT_MONITOR_ENABLE=1: đọc ADC; 0: gửi -1 (N/A) */
+#if BAT_MONITOR_ENABLE
+  extern int g_batPct;   // Được tính từ ADC trong Sensors.h / BatteryMonitor
+  int batPct = g_batPct;
+  mqttCheckAutoDock(batPct);
+#else
+  int batPct = -1;       // Chưa có mạch đo pin
+#endif
+
+  doc["Battery"]       = batPct;
   doc["Location"]      = (const char *)nullptr;
   doc["Status"]        = "online";
   doc["CurrentNodeId"] = (const char *)nullptr;
-  doc["Mode"]          = (g_state.mode == MODE_AUTO) ? "auto" : "manual";
+  doc["Mode"]          = (g_state.mode == MODE_WAYPOINT) ? "waypoint"
+                       : (g_state.mode == MODE_AUTO)     ? "auto" : "manual";
   doc["IsOnline"]      = true;
   doc["XCoord"]        = g_pose.x;
   doc["YCoord"]        = g_pose.y;

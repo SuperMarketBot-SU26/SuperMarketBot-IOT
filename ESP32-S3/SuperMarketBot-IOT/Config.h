@@ -148,6 +148,36 @@
 #define STUCK_THRESHOLD          3     // 3 lần liên tiếp (~1.5s) = bị kẹt
 #define STUCK_MIN_PWM            200   // Chỉ check khi PWM đang đủ lớn
 
+/* -------------------- LOCAL OBSTACLE AVOIDANCE (Phase 3.5) --------- */
+/** Bắt đầu phản ứng khi vật cản trước gần hơn ngưỡng này (cm) */
+#define OA_DETECT_CM            50
+/** Góc xoay tối đa mỗi chiều khi quét 2 bên (độ) */
+#define OA_SCAN_ANGLE_DEG       50.0f
+/** Tốc độ xoay khi scan (% PWM_MAX) — chậm để LiDAR đọc kịp */
+#define OA_SCAN_SPEED_PCT       25
+/** Khoảng cách tối thiểu để coi là "bên trống" (cm) */
+#define OA_CLEAR_MIN_CM         60
+/** Góc lái chéo khi tránh vật cản (độ) */
+#define OA_SWERVE_ANGLE_DEG     35.0f
+/** Quãng đường lái chéo sang bên trống (m) */
+#define OA_SWERVE_DIST_M        0.40f
+/** Tốc độ khi lái chéo và đi vượt (% PWM_MAX) */
+#define OA_SWERVE_SPEED_PCT     35
+/** Quãng đường đi thẳng để vượt qua vật cản (m) */
+#define OA_PASS_DIST_M          0.50f
+/** Số lần thử tự tránh tối đa trước khi fallback chờ/reroute */
+#define OA_MAX_ATTEMPTS         2
+/** Thời gian fallback chờ trước khi xin reroute (ms) */
+#define OA_FALLBACK_WAIT_MS     10000u
+
+/* -------------------- AUTO-DOCKING (Phase 3.5) --------------------- */
+/** Node ID trạm sạc trong database (phải khớp seed data) */
+#define DOCK_NODE_ID            2
+/** Ngưỡng pin yếu kích hoạt auto-dock (%) */
+#define DOCK_LOW_BAT_PCT        20
+/** Ngưỡng pin đầy để reset dock flag (%) */
+#define DOCK_FULL_BAT_PCT       80
+
 /* -------------------- WIFI SOFTAP ---------------------------------- */
 /** Tablet + ESP32-CAM (STA) cùng vào mạng này. CAM: ESP32-CAM/Config.h WIFI_* */
 #define AP_SSID         "SmartMarketBot"
