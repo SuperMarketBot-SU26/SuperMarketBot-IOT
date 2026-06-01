@@ -10,13 +10,14 @@
 
 #include "Config.h"
 #include "Localization.h"
+#include "WaypointNav.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
 /* ==================== CẤU HÌNH MQTT ================================ */
 /** IP máy chạy Mosquitto/Backend — đổi thành IP thật trước khi nạp */
-#define MQTT_BROKER_HOST   "192.168.1.100"
+#define MQTT_BROKER_HOST   "192.168.0.103"
 #define MQTT_BROKER_PORT   1883
 /** Mã robot — dùng làm client ID và tên topic */
 #define MQTT_CLIENT_ID     "ROBOT-01"
@@ -75,9 +76,10 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     }
 
   } else if (strcmp(cmd, "navigate") == 0) {
-    /* Phase 3: WaypointNav.h sẽ xử lý; tạm log */
-    const char *wpJson = doc["payload"] | "";
-    Serial.printf("[MQTT] navigate payload len=%d (Phase 3 se xu ly)\n", (int)strlen(wpJson));
+    const char *wpJson = doc["payload"] | "{}";
+    if (!wpNavParseAndStart(wpJson)) {
+      Serial.println(F("[MQTT] navigate: parse/start failed"));
+    }
 
   } else {
     Serial.printf("[MQTT] Unknown command: %s\n", cmd);
@@ -149,7 +151,9 @@ static void mqttPublishTelemetry() {
   doc["rpmFR"]      = g_state.rpmFR;
   doc["rpmRL"]      = g_state.rpmRL;
   doc["rpmRR"]      = g_state.rpmRR;
-  doc["navState"]   = "reactive";
+  doc["navState"]   = (g_state.mode == MODE_WAYPOINT) ? "waypoint" : "reactive";
+  doc["wpStatus"]   = (const char *)g_wpStatus;
+  doc["wpIndex"]    = (g_state.mode == MODE_WAYPOINT) ? (int)s_wpIndex : -1;
   doc["estop"]      = g_state.estop;
 
   char buf[512];

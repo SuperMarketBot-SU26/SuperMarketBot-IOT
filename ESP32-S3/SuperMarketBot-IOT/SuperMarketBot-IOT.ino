@@ -14,6 +14,11 @@
  *    - ArduinoJson by Benoit Blanchon
  *    - Adafruit NeoPixel (WS2812 onboard)
  *    - PubSubClient by Nick O'Leary (Phase 1: MQTT)
+ *
+ *  Phase notes:
+ *    Phase 1: MqttClient.h (MQTT + AP+STA WiFi + Nav safety fixes)
+ *    Phase 2: Localization.h (Dead Reckoning), PidController.h (Speed PID)
+ *    Phase 3: WaypointNav.h (Pure Pursuit waypoint navigation)
  * =====================================================================*/
 
 #include "Config.h"
@@ -21,6 +26,7 @@
 #include "Sensors.h"
 #include "Odometry.h"
 #include "PidController.h"
+#include "WaypointNav.h"
 #include "StatusRGB.h"
 #include "WebUI.h"
 #include "esp_heap_caps.h"
@@ -356,7 +362,10 @@ static void taskControl(void *pvParams) {
 
     if (g_state.estop) {
       botStop();
+      wpNavStop();   // Cũng abort waypoint nav nếu đang chạy
       if (g_state.cmdX == 0 && g_state.cmdY == 0) g_state.estop = false;
+    } else if (g_state.mode == MODE_WAYPOINT) {
+      wpNavTick();
     } else if (g_state.mode == MODE_AUTO) {
       autoNavigateAvoidance();
     } else {

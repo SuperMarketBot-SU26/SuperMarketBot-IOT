@@ -157,8 +157,8 @@
 /** 0 = chỉ AP (mặc định cũ), 1 = AP+STA (robot vừa phát hotspot vừa vào router) */
 #define WIFI_STA_ENABLE        1
 /** Đổi 2 dòng này thành SSID/pass router lab/nhà trước khi nạp */
-#define STA_SSID               "YOUR_ROUTER_SSID"
-#define STA_PASS               "YOUR_ROUTER_PASS"
+#define STA_SSID               "FPTH_Home"
+#define STA_PASS               "hoithanghieu"
 #define STA_CONNECT_TIMEOUT_MS 15000u   // Timeout mỗi lần thử kết nối (ms)
 #define STA_MAX_RETRIES        3        // Số lần thử trước khi bỏ qua, AP vẫn chạy
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */
@@ -199,8 +199,9 @@
 
 /* -------------------- CHẾ ĐỘ HOẠT ĐỘNG ----------------------------- */
 enum RobotMode : uint8_t {
-  MODE_MANUAL = 0,    // Lái tay
-  MODE_AUTO   = 1     // Tự hành né vật cản
+  MODE_MANUAL   = 0,    // Lái tay
+  MODE_AUTO     = 1,    // Tự hành né vật cản (reactive FSM)
+  MODE_WAYPOINT = 2     // Tự hành bám waypoint (Pure Pursuit, Phase 3)
 };
 
 /* -------------------- CẤU TRÚC CHIA SẺ GIỮA 2 CORE ----------------- */
