@@ -117,7 +117,7 @@
 /** Tự hành LiDAR (2 mắt trước/sau): tiến → chặn → dừng → xoay tìm hướng trống → hãm → tiến (demo thực địa; SLAM để sau). */
 #define AUTO_LIDAR_BLOCK_CM     22   // trước < cm → chuỗi dừng + quét (~20cm + dự phòng nhiễu)
 #define AUTO_LIDAR_SLOW_CM      70   // trước trong [BLOCK..SLOW] → giảm ga tiến
-#define AUTO_STOP_HOLD_MS       2800u // đứng im; Luna sau vẫn đọc (quét phía sau thụ động)
+#define AUTO_STOP_HOLD_MS       800u  // đứng im; giảm 2800→800ms: LiDAR stabilize đủ mà không đơ lâu
 /** Ngưỡng Luna trước “đủ trống” để tiếp sau khi quét (phải > AUTO_LIDAR_BLOCK_CM). */
 #define AUTO_LIDAR_CLEAR_CM     40
 /** Số chu kỳ liên tiếp (~SAFE_LOOP_MS) thấy “đủ trống” trước khi dừng quay. */
@@ -139,10 +139,28 @@
 #define AUTO_TURN_MS         550u
 #define AUTO_MIN_PWM_FRAC    12   // tốc độ tối thiểu ~ PWM_MAX*12/100 khi auto
 
+/** Phase 1 — Backup maneuver khi scan thất bại hoàn toàn (cả CW & CCW đều chặn) */
+#define AUTO_BACKUP_REVERSE_MS  600u   // Thời gian lùi (ms)
+#define AUTO_BACKUP_SPEED_PCT   30     // Tốc độ lùi (% của PWM_MAX)
+
+/** Phase 1 — Stuck detection (motor chạy nhưng encoder không quay) */
+#define STUCK_CHECK_INTERVAL_MS  500u  // Kiểm tra mỗi 500ms
+#define STUCK_THRESHOLD          3     // 3 lần liên tiếp (~1.5s) = bị kẹt
+#define STUCK_MIN_PWM            200   // Chỉ check khi PWM đang đủ lớn
+
 /* -------------------- WIFI SOFTAP ---------------------------------- */
 /** Tablet + ESP32-CAM (STA) cùng vào mạng này. CAM: ESP32-CAM/Config.h WIFI_* */
 #define AP_SSID         "SmartMarketBot"
 #define AP_PASS         "12345678"
+
+/* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
+/** 0 = chỉ AP (mặc định cũ), 1 = AP+STA (robot vừa phát hotspot vừa vào router) */
+#define WIFI_STA_ENABLE        1
+/** Đổi 2 dòng này thành SSID/pass router lab/nhà trước khi nạp */
+#define STA_SSID               "YOUR_ROUTER_SSID"
+#define STA_PASS               "YOUR_ROUTER_PASS"
+#define STA_CONNECT_TIMEOUT_MS 15000u   // Timeout mỗi lần thử kết nối (ms)
+#define STA_MAX_RETRIES        3        // Số lần thử trước khi bỏ qua, AP vẫn chạy
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */
 #define AP_WIFI_CHANNEL 6
 #define AP_MAX_CLIENTS  4

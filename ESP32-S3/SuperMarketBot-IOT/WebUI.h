@@ -21,6 +21,7 @@ Preferences g_prefs;
 #include "CtrlJson.h"
 #include "VisionTablet.h"
 #include "VisionHttps.h"
+#include "MqttClient.h"
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -1071,7 +1072,11 @@ inline void webUIInit() {
   batteryMonitorInit();
 
   WiFi.persistent(false);
+#if WIFI_STA_ENABLE
+  WiFi.mode(WIFI_AP_STA);   // Vừa phát AP, vừa kết nối router
+#else
   WiFi.mode(WIFI_AP);
+#endif
   WiFi.setSleep(false);
 
   bool apOk = WiFi.softAP(AP_SSID, AP_PASS, AP_WIFI_CHANNEL, 0, AP_MAX_CLIENTS);
@@ -1084,6 +1089,35 @@ inline void webUIInit() {
                 WiFi.softAPmacAddress().c_str());
   Serial.println(
       F("[WiFi] Dien thoai ket noi VAO mang do robot phat (khong phai WiFi nha). Mat khau: AP_PASS trong Config.h"));
+
+#if WIFI_STA_ENABLE
+  /* Kết nối STA để MQTT tới backend. Thất bại → robot vẫn chạy AP-only */
+  Serial.printf("[WiFi] STA: dang ket noi \"%s\"...\n", STA_SSID);
+  WiFi.begin(STA_SSID, STA_PASS);
+  {
+    uint32_t staStart = millis();
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print('.');
+      if (millis() - staStart > STA_CONNECT_TIMEOUT_MS) {
+        retries++;
+        if (retries >= STA_MAX_RETRIES) {
+          Serial.println(F("\n[WiFi] STA that bai — AP-only mode, MQTT disabled."));
+          goto sta_done;
+        }
+        Serial.printf("\n[WiFi] STA timeout, thu lai %d/%d...\n", retries, (int)STA_MAX_RETRIES);
+        WiFi.disconnect();
+        delay(1000);
+        WiFi.begin(STA_SSID, STA_PASS);
+        staStart = millis();
+      }
+    }
+    Serial.printf("\n[WiFi] STA OK! IP: %s\n", WiFi.localIP().toString().c_str());
+    g_mqttEnabled = true;
+  }
+  sta_done:;
+#endif
 
   g_httpServer.on("/", HTTP_GET, []() {
     g_httpServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -1106,11 +1140,18 @@ inline void webUIInit() {
   g_wsServer.begin();
   g_wsServer.onEvent(onWebSocketEvent);
   Serial.printf("[WS] WebSocket server trên port %d\n", WS_PORT);
+
+#if WIFI_STA_ENABLE
+  mqttInit();
+#endif
 }
 
 inline void webUILoop() {
   g_httpServer.handleClient();
   g_wsServer.loop();
+#if WIFI_STA_ENABLE
+  mqttLoop();
+#endif
 }
 
 #endif // WEBUI_H

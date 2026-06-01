@@ -13,6 +13,7 @@
  *    - WebSockets by Markus Sattler (Links2004/arduinoWebSockets)
  *    - ArduinoJson by Benoit Blanchon
  *    - Adafruit NeoPixel (WS2812 onboard)
+ *    - PubSubClient by Nick O'Leary (Phase 1: MQTT)
  * =====================================================================*/
 
 #include "Config.h"
@@ -70,7 +71,8 @@ enum AutoNavFsm : uint8_t {
   AN_CRUISE = 0,
   AN_STOP_HOLD,
   AN_SCAN_SEEK,
-  AN_SCAN_DECEL
+  AN_SCAN_DECEL,
+  AN_BACKUP       // Phase 1: lùi khi scan CW+CCW đều thất bại
 };
 
 static AutoNavFsm s_auto_fsm = AN_CRUISE;
@@ -78,6 +80,11 @@ static uint32_t s_auto_t0 = 0;
 static int8_t s_scan_dir = 1;   // +1 = CW, -1 = CCW
 static uint8_t s_scan_pass = 0; // 0 = chiều đầu, 1 = đã đổi chiều một lần
 static uint8_t s_clear_streak = 0;
+
+/* Phase 1 — Stuck detection */
+static uint32_t s_stuckCheckMs = 0;
+static float    s_stuckLastDist = 0.f;
+static uint8_t  s_stuckCount = 0;
 static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 
 static uint16_t autoSpeedPwm() {
@@ -177,7 +184,9 @@ static void autoNavigateAvoidance() {
         botStop();
         s_clear_streak = 0;
         if (s_scan_pass >= 1) {
-          s_auto_fsm = AN_CRUISE;
+          /* Cả CW và CCW đều không tìm được hướng trống → lùi */
+          s_auto_fsm = AN_BACKUP;
+          s_auto_t0 = now;
           s_scan_pass = 0;
         } else {
           s_scan_pass = 1;
@@ -211,9 +220,57 @@ static void autoNavigateAvoidance() {
       }
       break;
     }
+    case AN_BACKUP: {
+      /* Lùi an toàn: kiểm tra Luna sau trước khi lùi */
+      if (b <= (int16_t)AUTO_LIDAR_BLOCK_CM) {
+        /* Sau cũng chặn → dừng hẳn, chờ người can thiệp */
+        botStop();
+        if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS * 3u) {
+          s_auto_fsm = AN_CRUISE;  // timeout → thử lại từ đầu
+        }
+        break;
+      }
+      uint16_t bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
+      botBackward(bkSpd);
+      if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS) {
+        botStop();
+        s_auto_fsm = AN_SCAN_SEEK;
+        s_auto_t0 = now;
+        s_scan_dir = 1;
+        s_scan_pass = 0;
+        s_clear_streak = 0;
+        s_stuckCount = 0;
+      }
+      break;
+    }
     default:
       s_auto_fsm = AN_CRUISE;
       break;
+  }
+
+  /* ── Stuck detection (chạy CRUISE mà không tiến được) ───────────── */
+  if (s_auto_fsm == AN_CRUISE && g_state.mode == MODE_AUTO) {
+    if (now - s_stuckCheckMs >= STUCK_CHECK_INTERVAL_MS) {
+      s_stuckCheckMs = now;
+      float currDist = g_state.distFL + g_state.distFR;
+      float currentPwm = (float)autoSpeedPwm();
+      if (currentPwm >= (float)STUCK_MIN_PWM) {
+        float moved = currDist - s_stuckLastDist;
+        if (moved < 0.f) moved = -moved;
+        if (moved < 0.001f) {
+          s_stuckCount++;
+          if (s_stuckCount >= STUCK_THRESHOLD) {
+            s_stuckCount = 0;
+            s_auto_fsm = AN_BACKUP;
+            s_auto_t0 = now;
+            botStop();
+          }
+        } else {
+          s_stuckCount = 0;
+        }
+      }
+      s_stuckLastDist = currDist;
+    }
   }
 }
 
@@ -236,11 +293,17 @@ static void taskControl(void *pvParams) {
       s_scan_dir = 1;
       s_scan_pass = 0;
       s_clear_streak = 0;
+      s_stuckCount = 0;
+      /* Báo backend chuyển mode */
+      strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
+      g_mqttStatusPending = true;
     }
     if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
       s_auto_fsm = AN_CRUISE;
       s_scan_pass = 0;
       s_clear_streak = 0;
+      strncpy((char *)g_mqttPendingStatus, "manual", sizeof(g_mqttPendingStatus) - 1);
+      g_mqttStatusPending = true;
     }
     s_ctrl_prev_mode = g_state.mode;
 
@@ -351,8 +414,16 @@ void setup() {
   );
 
   Serial.println(F("[Boot] Tasks created. Robot ready!"));
-  Serial.printf("[Boot] Dashboard: http://%s\n",
-                WiFi.softAPIP().toString().c_str());
+  Serial.printf("[Boot] Dashboard:  http://%s\n", WiFi.softAPIP().toString().c_str());
+  Serial.printf("[Boot] Camera:     https://%s/vision\n", WiFi.softAPIP().toString().c_str());
+#if WIFI_STA_ENABLE
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n",
+                  WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  } else {
+    Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
+  }
+#endif
   printMemInfo();
 }
 
