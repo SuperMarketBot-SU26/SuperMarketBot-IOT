@@ -11,6 +11,7 @@
 
 #include "Config.h"
 #include "SensorLayout.h"
+#include "Localization.h"
 
 #define ODOM_PERIOD_MS 100   // Cửa sổ tính RPM
 
@@ -90,11 +91,15 @@ inline void odomUpdate() {
   g_state.distRL = distPhy[g_mapEncSlot[SLOT_LR]];
   g_state.distFR = distPhy[g_mapEncSlot[SLOT_RF]];
   g_state.distRR = distPhy[g_mapEncSlot[SLOT_RR]];
+
+  /* Dead reckoning — dùng tổng ticks vật lý (trước remap) */
+  locUpdate(g_totalFL, g_totalFR, g_totalRL, g_totalRR);
 }
 
 inline void odomResetDistance() {
   g_totalFL = g_totalRL = g_totalFR = g_totalRR = 0;
   g_state.distFL = g_state.distRL = g_state.distFR = g_state.distRR = 0.0f;
+  locResetPose();
 }
 
 #endif // ODOMETRY_H

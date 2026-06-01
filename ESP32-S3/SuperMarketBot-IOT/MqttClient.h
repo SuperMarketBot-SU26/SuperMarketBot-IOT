@@ -9,6 +9,7 @@
 #define MQTT_CLIENT_H
 
 #include "Config.h"
+#include "Localization.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -137,8 +138,9 @@ static void mqttPublishTelemetry() {
   doc["CurrentNodeId"] = (const char *)nullptr;
   doc["Mode"]          = (g_state.mode == MODE_AUTO) ? "auto" : "manual";
   doc["IsOnline"]      = true;
-  doc["XCoord"]        = (const char *)nullptr;  // Phase 2: g_pose.x
-  doc["YCoord"]        = (const char *)nullptr;  // Phase 2: g_pose.y
+  doc["XCoord"]        = g_pose.x;
+  doc["YCoord"]        = g_pose.y;
+  doc["HeadingRad"]    = g_pose.headingRad;
 
   /* Sensor data */
   doc["lidarFront"] = g_state.lidarFront;

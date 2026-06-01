@@ -20,6 +20,7 @@
 #include "Motors.h"
 #include "Sensors.h"
 #include "Odometry.h"
+#include "PidController.h"
 #include "StatusRGB.h"
 #include "WebUI.h"
 #include "esp_heap_caps.h"
@@ -115,6 +116,9 @@ static uint16_t autoScanSeekPwm(uint32_t segElapsedMs, uint16_t scanPwm) {
   return (uint16_t)p;
 }
 
+/* Timestamp cho PID CRUISE */
+static uint32_t s_pidLastMs = 0;
+
 static void autoNavigateAvoidance() {
   const uint16_t spd = autoSpeedPwm();
   const uint16_t scanPwm = autoScanTurnPwm();
@@ -131,26 +135,46 @@ static void autoNavigateAvoidance() {
           (AUTO_LIDAR_BLOCK_USE_REAR != 0) && (b < AUTO_LIDAR_BLOCK_CM);
       if (blockFront || blockRear) {
         botStop();
+        pidSpeedReset();
         s_auto_fsm = AN_STOP_HOLD;
         s_auto_t0 = now;
+        s_pidLastMs = now;
         break;
       }
-      uint16_t run = spd;
+
+      /* Giảm tốc khi gần vật */
+      uint16_t targetSpd = spd;
       if (f < AUTO_LIDAR_SLOW_CM && f >= AUTO_LIDAR_BLOCK_CM) {
         float den = (float)(AUTO_LIDAR_SLOW_CM - AUTO_LIDAR_BLOCK_CM);
         float t = den > 1.f ? (float)(f - AUTO_LIDAR_BLOCK_CM) / den : 1.f;
         if (t < 0.2f) t = 0.2f;
-        run = (uint16_t)((float)spd * t);
+        targetSpd = (uint16_t)((float)spd * t);
       }
+
+      /* Speed PID — chỉ áp dụng khi encoder có xung (tránh phantom PID khi trượt) */
+      float dt_s = (float)(now - s_pidLastMs) * 0.001f;
+      s_pidLastMs = now;
+      if (dt_s < 0.001f) dt_s = 0.001f;
+
+      float actualMps = robotActualSpeedMps();
+      float targetMps = pwmToEstMps(targetSpd);
+      float pidOut = pidSpeedCompute(targetMps, actualMps, dt_s);
+
+      /* Áp dụng PID delta vào target PWM */
+      int32_t run = (int32_t)targetSpd + (int32_t)pidOut;
+      if (run < 0)           run = 0;
+      if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
+      uint16_t runPwm = (uint16_t)run;
+
 #if USE_HC_SR04_HARDWARE
       if (R < AUTO_US_SIDE_CM && L >= R - 2) {
-        botDrive(-40, 70, run);
+        botDrive(-40, 70, runPwm);
       } else if (L < AUTO_US_SIDE_CM && R >= L - 2) {
-        botDrive(40, 70, run);
+        botDrive(40, 70, runPwm);
       } else
 #endif
       {
-        botForward(run);
+        botForward(runPwm);
       }
       break;
     }
@@ -290,10 +314,12 @@ static void taskControl(void *pvParams) {
       g_state.estop = false;
       s_auto_fsm = AN_CRUISE;
       s_auto_t0 = millis();
+      s_pidLastMs = millis();
       s_scan_dir = 1;
       s_scan_pass = 0;
       s_clear_streak = 0;
       s_stuckCount = 0;
+      pidSpeedReset();
       /* Báo backend chuyển mode */
       strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
@@ -385,6 +411,7 @@ void setup() {
   sensorsInit();
   sensorsLogBootSample();
   odomInit();
+  locInit();
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();
