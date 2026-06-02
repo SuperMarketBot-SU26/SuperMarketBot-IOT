@@ -58,6 +58,10 @@ static esp_err_t httpsHandleRoot(httpd_req_t *req) {
 }
 
 inline bool visionHttpsBegin() {
+#if !VISION_HTTPS_ENABLE
+  Serial.println(F("[HTTPS] Tat (VISION_HTTPS_ENABLE=0) — dashboard HTTP nhe hon."));
+  return false;
+#endif
   if (g_httpsServer) return true;
 
   static char certRam[2200];

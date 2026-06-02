@@ -11,6 +11,7 @@
 #include "Config.h"
 #include "Localization.h"
 #include "WaypointNav.h"
+#include "CtrlJson.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -64,10 +65,11 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     g_state.estop = true;
 
   } else if (strcmp(cmd, "mode_auto") == 0) {
+    if (millis() < BOOT_GUARD_MS) return;
     g_state.mode = MODE_AUTO;
 
   } else if (strcmp(cmd, "mode_manual") == 0) {
-    g_state.mode = MODE_MANUAL;
+    robotForceManualStop();
 
   } else if (strcmp(cmd, "set_speed") == 0) {
     int v = doc["payload"] | -1;
@@ -76,6 +78,10 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     }
 
   } else if (strcmp(cmd, "navigate") == 0) {
+    if (millis() < BOOT_GUARD_MS) {
+      Serial.println(F("[MQTT] navigate ignored (boot guard — dung Manual truoc)."));
+      return;
+    }
     const char *wpJson = doc["payload"] | "{}";
     if (!wpNavParseAndStart(wpJson)) {
       Serial.println(F("[MQTT] navigate: parse/start failed"));
@@ -179,14 +185,21 @@ static void mqttPublishTelemetry() {
   doc["HeadingRad"]    = g_pose.headingRad;
 
   /* Sensor data */
-  doc["lidarFront"] = g_state.lidarFront;
-  doc["lidarRear"]  = g_state.lidarBack;
+  doc["lidarFront"] = obsFrontCm();
+  doc["lidarRear"]  = obsBackCm();
+#if USE_HC_SR04_HARDWARE
+  doc["usLF"] = g_state.usLF;
+  doc["usLR"] = g_state.usLR;
+  doc["usRF"] = g_state.usRF;
+  doc["usRR"] = g_state.usRR;
+#endif
   doc["rpmFL"]      = g_state.rpmFL;
   doc["rpmFR"]      = g_state.rpmFR;
   doc["rpmRL"]      = g_state.rpmRL;
   doc["rpmRR"]      = g_state.rpmRR;
   doc["navState"]   = (g_state.mode == MODE_WAYPOINT) ? "waypoint" : "reactive";
   doc["wpStatus"]   = (const char *)g_wpStatus;
+  doc["autoFsm"]    = (int)g_autoFsmState;
   doc["wpIndex"]    = (g_state.mode == MODE_WAYPOINT) ? (int)s_wpIndex : -1;
   doc["estop"]      = g_state.estop;
 

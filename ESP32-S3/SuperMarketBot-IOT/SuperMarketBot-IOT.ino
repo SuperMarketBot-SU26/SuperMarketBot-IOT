@@ -9,7 +9,7 @@
  *
  *  Thư viện cần cài (Library Manager):
  *    - ESP32 Arduino core >= 3.0 (espressif/arduino-esp32)
- *    - NewPing (chỉ khi USE_HC_SR04_HARDWARE=1 trong Config.h)
+ *    - NewPing (bắt buộc — USE_HC_SR04_HARDWARE=1, 4× HC-SR04)
  *    - WebSockets by Markus Sattler (Links2004/arduinoWebSockets)
  *    - ArduinoJson by Benoit Blanchon
  *    - Adafruit NeoPixel (WS2812 onboard)
@@ -28,6 +28,9 @@
 #include "PidController.h"
 #include "WaypointNav.h"
 #include "StatusRGB.h"
+#include "CtrlJson.h"
+#include "LocalObstacleAvoid.h"
+#include "ObstacleSensors.h"
 #include "WebUI.h"
 #include "esp_heap_caps.h"
 
@@ -76,18 +79,14 @@ SemaphoreHandle_t g_stateMutex;
  * =================================================================== */
 enum AutoNavFsm : uint8_t {
   AN_CRUISE = 0,
-  AN_STOP_HOLD,
-  AN_SCAN_SEEK,
-  AN_SCAN_DECEL,
-  AN_BACKUP       // Phase 1: lùi khi scan CW+CCW đều thất bại
+  AN_BACKUP   // Lùi khi OA blocked hoàn toàn
 };
 
-static AutoNavFsm s_auto_fsm = AN_CRUISE;
-static uint32_t s_auto_t0 = 0;
-static int8_t s_scan_dir = 1;   // +1 = CW, -1 = CCW
-static uint8_t s_scan_pass = 0; // 0 = chiều đầu, 1 = đã đổi chiều một lần
-static uint8_t s_clear_streak = 0;
+static OaContext s_autoOa;
 
+static AutoNavFsm s_auto_fsm = AN_CRUISE;
+volatile uint8_t g_autoFsmState = 0;  /* expose → WebSocket field "afs" */
+static uint32_t s_auto_t0 = 0;
 /* Phase 1 — Stuck detection */
 static uint32_t s_stuckCheckMs = 0;
 static float    s_stuckLastDist = 0.f;
@@ -97,29 +96,11 @@ static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 static uint16_t autoSpeedPwm() {
   uint16_t s = g_state.autoBaseSpeed;
   if (s == 0) s = g_state.baseSpeed;
+  uint16_t cap = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_CRUISE_SPEED_PCT / 100u);
+  if (s > cap) s = cap;
   uint16_t lo = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_MIN_PWM_FRAC / 100u);
   if (s < lo) s = lo;
   return s;
-}
-
-static uint16_t autoScanTurnPwm() {
-  uint32_t p = ((uint32_t)PWM_MAX * (uint32_t)AUTO_SCAN_PWM_PCT) / 100u;
-  uint16_t tmin = (uint16_t)(PWM_MAX / 11u);
-  if (p < (uint32_t)tmin) p = (uint32_t)tmin;
-  if (p > (uint32_t)PWM_MAX) p = (uint32_t)PWM_MAX;
-  return (uint16_t)p;
-}
-
-/** PWM xoay phần đầu mỗi lần đổi hướng — tránh giật; sàn ~22% mục tiêu tối thiểu. */
-static uint16_t autoScanSeekPwm(uint32_t segElapsedMs, uint16_t scanPwm) {
-  if (segElapsedMs >= AUTO_SCAN_RAMP_UP_MS) return scanPwm;
-  uint32_t p = (uint32_t)scanPwm * segElapsedMs / AUTO_SCAN_RAMP_UP_MS;
-  uint32_t lo = (uint32_t)scanPwm * 22u / 100u;
-  if (lo < (uint32_t)(PWM_MAX / 14u)) lo = (uint32_t)(PWM_MAX / 14u);
-  if (p < lo) p = lo;
-  if (p > (uint32_t)scanPwm) p = (uint32_t)scanPwm;
-  if (p > (uint32_t)PWM_MAX) p = (uint32_t)PWM_MAX;
-  return (uint16_t)p;
 }
 
 /* Timestamp cho PID CRUISE */
@@ -127,132 +108,56 @@ static uint32_t s_pidLastMs = 0;
 
 static void autoNavigateAvoidance() {
   const uint16_t spd = autoSpeedPwm();
-  const uint16_t scanPwm = autoScanTurnPwm();
   const uint32_t now = millis();
-  const int16_t f = g_state.lidarFront;
-  const int16_t b = g_state.lidarBack;
-  const int16_t L = g_state.usLeft;
-  const int16_t R = g_state.usRight;
+  const int16_t f = obsFrontCm();
+  const int16_t b = obsBackCm();
+
+  /* Telemetry: 0=CRUISE, 10+=OA sub-state */
+  g_autoFsmState = (s_autoOa.state == OA_IDLE) ? (uint8_t)s_auto_fsm
+                   : (uint8_t)(10 + (uint8_t)s_autoOa.state);
+
+  /* ── Local OA đang chạy (quét → lách → vượt) ─────────────────── */
+  if (s_autoOa.state != OA_IDLE) {
+    OaTickResult r = oaTick(s_autoOa, f, now);
+    if (r == OA_RES_DONE) {
+      s_auto_fsm = AN_CRUISE;
+      Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa)."));
+    } else if (r == OA_RES_BLOCKED) {
+      s_auto_fsm = AN_BACKUP;
+      s_auto_t0 = now;
+      Serial.println(F("[AUTO] OA blocked — backup."));
+    }
+    return;
+  }
 
   switch (s_auto_fsm) {
     case AN_CRUISE: {
-      const bool blockFront = (f < AUTO_LIDAR_BLOCK_CM);
-      const bool blockRear =
-          (AUTO_LIDAR_BLOCK_USE_REAR != 0) && (b < AUTO_LIDAR_BLOCK_CM);
-      if (blockFront || blockRear) {
+      if (obsFrontBlocked() || obsRearBlocked()) {
         botStop();
         pidSpeedReset();
-        s_auto_fsm = AN_STOP_HOLD;
-        s_auto_t0 = now;
-        s_pidLastMs = now;
         break;
       }
 
-      /* Giảm tốc khi gần vật */
-      uint16_t targetSpd = spd;
-      if (f < AUTO_LIDAR_SLOW_CM && f >= AUTO_LIDAR_BLOCK_CM) {
-        float den = (float)(AUTO_LIDAR_SLOW_CM - AUTO_LIDAR_BLOCK_CM);
-        float t = den > 1.f ? (float)(f - AUTO_LIDAR_BLOCK_CM) / den : 1.f;
-        if (t < 0.2f) t = 0.2f;
-        targetSpd = (uint16_t)((float)spd * t);
-      }
-
-      /* Speed PID — chỉ áp dụng khi encoder có xung (tránh phantom PID khi trượt) */
-      float dt_s = (float)(now - s_pidLastMs) * 0.001f;
-      s_pidLastMs = now;
-      if (dt_s < 0.001f) dt_s = 0.001f;
-
-      float actualMps = robotActualSpeedMps();
-      float targetMps = pwmToEstMps(targetSpd);
-      float pidOut = pidSpeedCompute(targetMps, actualMps, dt_s);
-
-      /* Áp dụng PID delta vào target PWM */
-      int32_t run = (int32_t)targetSpd + (int32_t)pidOut;
-      if (run < 0)           run = 0;
-      if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-      uint16_t runPwm = (uint16_t)run;
-
-#if USE_HC_SR04_HARDWARE
-      if (R < AUTO_US_SIDE_CM && L >= R - 2) {
-        botDrive(-40, 70, runPwm);
-      } else if (L < AUTO_US_SIDE_CM && R >= L - 2) {
-        botDrive(40, 70, runPwm);
-      } else
-#endif
-      {
-        botForward(runPwm);
-      }
-      break;
-    }
-    case AN_STOP_HOLD: {
-      botStop();
-      if (now - s_auto_t0 >= AUTO_STOP_HOLD_MS) {
-        s_auto_fsm = AN_SCAN_SEEK;
-        s_auto_t0 = now;
-        s_scan_dir = 1;
-        s_scan_pass = 0;
-        s_clear_streak = 0;
-      }
-      break;
-    }
-    case AN_SCAN_SEEK: {
-      const uint32_t seg = now - s_auto_t0;
-
-      const bool frontOk = (f >= (int16_t)AUTO_LIDAR_CLEAR_CM) && (f > 3);
-      if (frontOk) {
-        if (s_clear_streak < 255) s_clear_streak++;
-      } else {
-        s_clear_streak = 0;
-      }
-      if (s_clear_streak >= AUTO_SCAN_CLEAR_STREAK) {
-        s_auto_fsm = AN_SCAN_DECEL;
-        s_auto_t0 = now;
-        s_clear_streak = 0;
-        break;
-      }
-      if (seg >= AUTO_SCAN_SEEK_MS_PER_DIR) {
-        botStop();
-        s_clear_streak = 0;
-        if (s_scan_pass >= 1) {
-          /* Cả CW và CCW đều không tìm được hướng trống → lùi */
-          s_auto_fsm = AN_BACKUP;
-          s_auto_t0 = now;
-          s_scan_pass = 0;
-        } else {
-          s_scan_pass = 1;
-          s_scan_dir = (int8_t)(-s_scan_dir);
-          s_auto_t0 = now;
+      /* Gặp vật → quét 2 bên, cần ≥1m mới lách (LocalObstacleAvoid.h) */
+      if (obsOaTriggered(f)) {
+        s_autoOa.cruiseHeading = g_pose.headingRad;
+        if (oaBegin(s_autoOa, f, now)) {
+          return;
         }
-        break;
       }
 
-      const uint16_t turn = autoScanSeekPwm(seg, scanPwm);
-      if (s_scan_dir > 0) {
-        botRotateCW(turn);
-      } else {
-        botRotateCCW(turn);
-      }
-      break;
-    }
-    case AN_SCAN_DECEL: {
-      const uint32_t dt = now - s_auto_t0;
-      if (dt >= AUTO_SCAN_DECEL_MS) {
-        botStop();
-        s_auto_fsm = AN_CRUISE;
-        break;
-      }
-      uint32_t pwm = ((uint32_t)scanPwm * (AUTO_SCAN_DECEL_MS - dt)) / AUTO_SCAN_DECEL_MS;
-      uint16_t d = (uint16_t)pwm;
-      if (s_scan_dir > 0) {
-        botRotateCW(d);
-      } else {
-        botRotateCCW(d);
+      /* Chỉ tiến khi phía trước ≥ PATH_CLEAR_MIN_CM (1m) ổn định */
+      if (!oaCruiseForward(s_autoOa, f, spd)) {
+        if (!obsPathClear(f)) {
+          s_autoOa.cruiseHeading = g_pose.headingRad;
+          oaBegin(s_autoOa, f, now);
+        }
       }
       break;
     }
     case AN_BACKUP: {
       /* Lùi an toàn: kiểm tra Luna sau trước khi lùi */
-      if (b <= (int16_t)AUTO_LIDAR_BLOCK_CM) {
+      if (obsRearBlocked()) {
         /* Sau cũng chặn → dừng hẳn, chờ người can thiệp */
         botStop();
         if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS * 3u) {
@@ -264,11 +169,9 @@ static void autoNavigateAvoidance() {
       botBackward(bkSpd);
       if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS) {
         botStop();
-        s_auto_fsm = AN_SCAN_SEEK;
+        oaReset(s_autoOa);
+        s_auto_fsm = AN_CRUISE;
         s_auto_t0 = now;
-        s_scan_dir = 1;
-        s_scan_pass = 0;
-        s_clear_streak = 0;
         s_stuckCount = 0;
       }
       break;
@@ -316,15 +219,24 @@ static void taskControl(void *pvParams) {
   TickType_t usTick   = xTaskGetTickCount();
 
   while (true) {
+    /* 12s đầu: ép MANUAL — tránh MQTT/backend hoặc mode cũ khiến robot tự chạy */
+    if (millis() < BOOT_GUARD_MS) {
+      if (g_state.mode != MODE_MANUAL) {
+        robotForceManualStop();
+      } else if (g_state.cmdX != 0 || g_state.cmdY != 0) {
+        g_state.cmdX = g_state.cmdY = 0;
+        botStop();
+      }
+    }
+
     if (g_state.mode == MODE_AUTO && s_ctrl_prev_mode != MODE_AUTO) {
       g_state.estop = false;
       s_auto_fsm = AN_CRUISE;
       s_auto_t0 = millis();
       s_pidLastMs = millis();
-      s_scan_dir = 1;
-      s_scan_pass = 0;
-      s_clear_streak = 0;
       s_stuckCount = 0;
+      oaReset(s_autoOa);
+      s_autoOa.cruiseHeading = g_pose.headingRad;
       pidSpeedReset();
       /* Báo backend chuyển mode */
       strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
@@ -332,24 +244,26 @@ static void taskControl(void *pvParams) {
     }
     if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
       s_auto_fsm = AN_CRUISE;
-      s_scan_pass = 0;
-      s_clear_streak = 0;
+      oaReset(s_autoOa);
       strncpy((char *)g_mqttPendingStatus, "manual", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
     }
     s_ctrl_prev_mode = g_state.mode;
 
+#if USE_LIDAR_HARDWARE
     sensorsPollLidar();
-    /* Dừng + xoay: đọc Luna kép để cả Serial1 & Serial2 kịp byte (PWM dễ làm UART2 chậm). */
-    if (g_state.mode == MODE_AUTO && s_auto_fsm != AN_CRUISE) {
+    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
+        || wpNavOaActive()) {
       sensorsPollLidar();
       sensorsPollLidar();
     }
+#endif
 
 #if USE_HC_SR04_HARDWARE
-    if ((xTaskGetTickCount() - usTick) >= pdMS_TO_TICKS(60)) {
+    sensorsPollUS();
+    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
+        || wpNavOaActive()) {
       sensorsPollUS();
-      usTick = xTaskGetTickCount();
     }
 #else
     sensorsPollUS();
@@ -384,7 +298,7 @@ static void taskControl(void *pvParams) {
  *  TASK CORE 0 — Web IO (HTTP + WebSocket)
  * =================================================================== */
 static void taskWebIO(void *pvParams) {
-  const TickType_t broadcastPeriod = pdMS_TO_TICKS(100); // 10 Hz telemetry
+  const TickType_t broadcastPeriod = pdMS_TO_TICKS(WEB_WS_PERIOD_MS);
   TickType_t lastBroadcast = xTaskGetTickCount();
 
   static uint32_t lastRgbMs = 0;
@@ -417,6 +331,7 @@ void setup() {
 
   // ── Phần cứng ────────────────────────────────────────────────────
   motorsInit();
+  robotForceManualStop();  /* Bật nguồn = luôn dừng, lái tay — không tự Auto/Waypoint */
   sensorsInit();
   sensorsLogBootSample();
   odomInit();
@@ -438,7 +353,7 @@ void setup() {
   // Core 0: Web IO — stack 8KB, priority 1
   xTaskCreatePinnedToCore(
     taskWebIO, "WebIO",
-    8192, nullptr, 1,
+    10240, nullptr, 1,
     nullptr, 0
   );
 

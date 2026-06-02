@@ -66,25 +66,46 @@
 /** Tần số mẫu 1–250 Hz (chỉ khi TFLUNA_SEND_INIT_CMD=1). */
 #define TFLUNA_SAMPLE_HZ      100
 
-/* -------------------- SIÊU ÂM (4x HC-SR04) ------------------------- */
-// VCC 5V, GND; Trig 3,3V OK; Echo 5V → nên 1k+2k chia áp 3,3V vào chân dưới
-// Echo F/B/L/R = 10–13 (một dải J1) + Trig 14 chung.
-#define US_TRIG       14
-#define US_ECHO_F     10
-#define US_ECHO_B     11
-#define US_ECHO_L     12
-#define US_ECHO_R     13
-// NewPing: tham số tối đa (ms chờ) ~ tương ứng ~2m — đủ thực tế, ping không quá lâu
-#define US_PING_MAX_CM  200
-/** Nghỉ giữa hai lần ping tuần tự (ms). Dùng chung TRIG: 5ms dễ cross-talk khi 4 SR04. */
-#define US_INTER_PING_MS  14u
-// Trong hành lang / siêu thị: HC-SR04 ổn định thường ~1,2–1,8m; dùng 1,6m cho HMI + coi như "xa"
+/* -------------------- SIÊU ÂM (4x HC-SR04 — 4 góc xe) ---------------- */
+// VCC 5V, GND; Trig 3,3V OK; Echo 5V → chia áp 3,3V (1k+2k) vào GPIO
+// Mặc định: Echo 10=Trái trước, 11=Trái sau, 12=Phải trước, 13=Phải sau + Trig 14 chung.
+#define US_TRIG         14
+#define US_ECHO_LF      10
+#define US_ECHO_RL      11
+#define US_ECHO_RF      12
+#define US_ECHO_RR      13
+#define US_ECHO_F       US_ECHO_LF
+#define US_ECHO_B       US_ECHO_RL
+#define US_ECHO_L       US_ECHO_RF
+#define US_ECHO_R       US_ECHO_RR
+#define US_PING_MAX_CM    200
+/** Nghỉ giữa hai ping (ms) — TRIG chung, tránh cross-talk. */
+#define US_INTER_PING_MS  16u
 #define US_DISPLAY_MAX_CM 160
+/** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
+#define US_MIN_VALID_CM     3
 /**
- * 0 = không gọi NewPing; `sensorsPollUS()` chỉ đồng bộ từ TF-Luna trước/sau (web + FSM dùng cùng nguồn).
- * 1 = bật lại HC-SR04 phần cứng (cần thư viện NewPing + nối dây Echo/Trig).
+ * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
  */
-#define USE_HC_SR04_HARDWARE 0
+#define USE_HC_SR04_HARDWARE  1
+/** 0 khi chỉ dùng SR04 — không mở UART LiDAR (giảm nhiễu / CPU). */
+#define USE_LIDAR_HARDWARE    (USE_HC_SR04_HARDWARE ? 0 : 1)
+
+#if USE_HC_SR04_HARDWARE
+/** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 30 cm thì dừng. */
+#define US_STOP_CM            30
+/** Bắt đầu lách trước khi chạm vùng dừng. */
+#define US_OA_DETECT_CM       42
+/** Đủ xa để tiến / coi bên trống (SR04 không cần 1 m như LiDAR). */
+#define US_PATH_CLEAR_CM      48
+#define OA_DETECT_CM          US_OA_DETECT_CM
+#define PATH_CLEAR_MIN_CM     US_PATH_CLEAR_CM
+#define OA_PATH_CLEAR_STREAK  6
+#else
+#define US_STOP_CM            30
+#define US_OA_DETECT_CM       42
+#define US_PATH_CLEAR_CM      48
+#endif
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
@@ -110,26 +131,37 @@
 #define SAFE_STOP_CM    28
 // Bắt đầu giảm tốc khi vật trước gần hơn ngưỡng (cm). 80–120 = ít nhạy từ xa; 180–220 = nhả ga sớm.
 #define SAFE_SLOW_CM    100
+
+/** Đọc LiDAR dưới ngưỡng này (cm) coi là nhiễu / sàn / ngoài tầm tin cậy TF-Luna (~20cm min). */
+#define LIDAR_MIN_VALID_CM      18
 #define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
 /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
 #define SAFE_SIDE_AVOID_CM  14
 
-/** Tự hành LiDAR (2 mắt trước/sau): tiến → chặn → dừng → xoay tìm hướng trống → hãm → tiến (demo thực địa; SLAM để sau). */
-#define AUTO_LIDAR_BLOCK_CM     22   // trước < cm → chuỗi dừng + quét (~20cm + dự phòng nhiễu)
-#define AUTO_LIDAR_SLOW_CM      70   // trước trong [BLOCK..SLOW] → giảm ga tiến
-#define AUTO_STOP_HOLD_MS       800u  // đứng im; giảm 2800→800ms: LiDAR stabilize đủ mà không đơ lâu
-/** Ngưỡng Luna trước “đủ trống” để tiếp sau khi quét (phải > AUTO_LIDAR_BLOCK_CM). */
-#define AUTO_LIDAR_CLEAR_CM     40
-/** Số chu kỳ liên tiếp (~SAFE_LOOP_MS) thấy “đủ trống” trước khi dừng quay. */
-#define AUTO_SCAN_CLEAR_STREAK  5
-/** Thời gian xoay mỗi chiều (CW rồi CCW) khi chưa thấy hướng trống; hết → thoát về CRUISE. */
-#define AUTO_SCAN_SEEK_MS_PER_DIR  4200u
-#define AUTO_SCAN_RAMP_UP_MS    380u  // tăng PWM dần khi bắt đầu xoay mỗi lần
-#define AUTO_SCAN_DECEL_MS      260u  // hãm mượt trước khi tiến lại
-/** PWM xoay khi quét (1–100 % của PWM_MAX). Tách khỏi slider tự hành. */
-#define AUTO_SCAN_PWM_PCT       75
-/** 1 = sau cũng kích hoạt chuỗi dừng+quét nếu < AUTO_LIDAR_BLOCK_CM (cả 2 Luna tham gia). 0 = chỉ trước. */
-#define AUTO_LIDAR_BLOCK_USE_REAR 1
+#if USE_HC_SR04_HARDWARE
+#define AUTO_LIDAR_BLOCK_CM     US_STOP_CM
+#else
+#define AUTO_LIDAR_BLOCK_CM     16
+#endif
+#if !USE_HC_SR04_HARDWARE
+/** Phát hiện vật cản — LiDAR (cm). */
+#define OA_DETECT_CM            70
+#define PATH_CLEAR_MIN_CM       100
+#define OA_PATH_CLEAR_STREAK    12
+#endif
+#define OA_CLEAR_MIN_CM         PATH_CLEAR_MIN_CM
+#define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
+/** Robot nặng (tablet + pin >~1.5kg): giảm tốc, tăng mô-men tối thiểu. */
+#define ROBOT_HEAVY_LOAD        1
+#if ROBOT_HEAVY_LOAD
+#define AUTO_CRUISE_SPEED_PCT   28
+#define AUTO_MIN_PWM_FRAC       22
+#else
+#define AUTO_CRUISE_SPEED_PCT   42
+#define AUTO_MIN_PWM_FRAC       12
+#endif
+/** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */
+#define AUTO_LIDAR_BLOCK_USE_REAR 0
 
 /** Legacy / khi USE_HC_SR04_HARDWARE=1 thêm bẻ cạnh; LiDAR-only chỉ dùng AUTO_LIDAR_* ở FSM chính */
 #define AUTO_US_SLOW_CM      85   // (SR04) trước gần hơn → giảm ga tiến
@@ -137,9 +169,7 @@
 #define AUTO_US_BACK_STOP_CM 26   // (backup cũ — giữ define nếu tái dùng)
 #define AUTO_BACKUP_MS       400u
 #define AUTO_TURN_MS         550u
-#define AUTO_MIN_PWM_FRAC    12   // tốc độ tối thiểu ~ PWM_MAX*12/100 khi auto
-
-/** Phase 1 — Backup maneuver khi scan thất bại hoàn toàn (cả CW & CCW đều chặn) */
+/** Phase 1 — Backup khi OA blocked (lùi thử) */
 #define AUTO_BACKUP_REVERSE_MS  600u   // Thời gian lùi (ms)
 #define AUTO_BACKUP_SPEED_PCT   30     // Tốc độ lùi (% của PWM_MAX)
 
@@ -149,22 +179,18 @@
 #define STUCK_MIN_PWM            200   // Chỉ check khi PWM đang đủ lớn
 
 /* -------------------- LOCAL OBSTACLE AVOIDANCE (Phase 3.5) --------- */
-/** Bắt đầu phản ứng khi vật cản trước gần hơn ngưỡng này (cm) */
-#define OA_DETECT_CM            50
 /** Góc xoay tối đa mỗi chiều khi quét 2 bên (độ) */
 #define OA_SCAN_ANGLE_DEG       50.0f
 /** Tốc độ xoay khi scan (% PWM_MAX) — chậm để LiDAR đọc kịp */
 #define OA_SCAN_SPEED_PCT       25
-/** Khoảng cách tối thiểu để coi là "bên trống" (cm) */
-#define OA_CLEAR_MIN_CM         60
 /** Góc lái chéo khi tránh vật cản (độ) */
 #define OA_SWERVE_ANGLE_DEG     35.0f
-/** Quãng đường lái chéo sang bên trống (m) */
-#define OA_SWERVE_DIST_M        0.40f
+/** Quãng đường lái chéo sang bên trống (m) — robot nặng cần lệch xa hơn */
+#define OA_SWERVE_DIST_M        (ROBOT_HEAVY_LOAD ? 0.52f : 0.40f)
 /** Tốc độ khi lái chéo và đi vượt (% PWM_MAX) */
-#define OA_SWERVE_SPEED_PCT     35
+#define OA_SWERVE_SPEED_PCT     (ROBOT_HEAVY_LOAD ? 26 : 32)
 /** Quãng đường đi thẳng để vượt qua vật cản (m) */
-#define OA_PASS_DIST_M          0.50f
+#define OA_PASS_DIST_M          (ROBOT_HEAVY_LOAD ? 0.65f : 0.50f)
 /** Số lần thử tự tránh tối đa trước khi fallback chờ/reroute */
 #define OA_MAX_ATTEMPTS         2
 /** Thời gian fallback chờ trước khi xin reroute (ms) */
@@ -184,8 +210,7 @@
 #define AP_PASS         "12345678"
 
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
-/** 0 = chỉ AP (mặc định cũ), 1 = AP+STA (robot vừa phát hotspot vừa vào router) */
-#define WIFI_STA_ENABLE        1
+/** Đặt ở trên (WEB_WS / WIFI_STA_ENABLE) — không định nghĩa lại ở đây. */
 /** Đổi 2 dòng này thành SSID/pass router lab/nhà trước khi nạp */
 #define STA_SSID               "FPTH_Home"
 #define STA_PASS               "hoithanghieu"
@@ -197,6 +222,14 @@
 #define WEB_PORT        80
 #define WEB_SSL_PORT    443   /* HTTPS — camera tablet (getUserMedia) */
 #define WS_PORT         81
+/** Chu kỳ broadcast WebSocket (ms). ≥500 = mượt trên điện thoại qua AP. */
+#define WEB_WS_PERIOD_MS        500u
+/** 0 = tắt HTTPS khi chỉ cần lái robot (tiết kiệm RAM/CPU). 1 = bật /vision camera. */
+#define VISION_HTTPS_ENABLE     0
+/** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */
+#define BOOT_GUARD_MS           12000u
+/** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (nặng hơn). */
+#define WIFI_STA_ENABLE         0
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
@@ -256,6 +289,23 @@ struct RobotState {
   volatile uint32_t lidarLastUpdateMs;
   volatile uint32_t usLastUpdateMs;
 };
+
+/** FSM tự hành (AN_*) — hiển thị trên Web/MQTT khi không cắm USB Serial. */
+extern volatile uint8_t g_autoFsmState;
+
+/** LiDAR cm hợp lệ (bỏ 0 / nhiễu / dưới tầm tin cậy TF-Luna). */
+inline bool lidarCmValid(int16_t cm) {
+  return cm > (int16_t)LIDAR_MIN_VALID_CM;
+}
+
+inline bool lidarFrontBlocked(int16_t fCm) {
+  return lidarCmValid(fCm) && fCm < (int16_t)AUTO_LIDAR_BLOCK_CM;
+}
+
+inline bool lidarRearBlocked(int16_t bCm) {
+  return (AUTO_LIDAR_BLOCK_USE_REAR != 0) && lidarCmValid(bCm)
+      && bCm < (int16_t)AUTO_LIDAR_BLOCK_CM;
+}
 
 extern RobotState g_state;
 

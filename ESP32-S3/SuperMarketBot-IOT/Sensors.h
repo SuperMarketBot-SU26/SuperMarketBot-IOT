@@ -1,9 +1,9 @@
 /* =====================================================================
  *  Sensors.h — Cảm biến an toàn & định vị
- *    • 2× TF-Luna LiDAR UART 9-byte frame (Serial1 / Serial2)
- *    • Tùy chọn 4× HC-SR04 (USE_HC_SR04_HARDWARE=1 + NewPing)
+ *    • 4× HC-SR04 (4 góc) khi USE_HC_SR04_HARDWARE=1
+ *    • 2× TF-Luna khi USE_LIDAR_HARDWARE=1
  *
- *  Khi USE_HC_SR04_HARDWARE=0: sensorsPollUS() đồng bộ g_state.us* từ LiDAR
+ *  Khi chỉ LiDAR: sensorsPollUS() shadow từ Luna trước/sau
  *  (hai bên = “xa” LIDAR_MAX_CM — không có mắt ngang).
  *
  *  API:
@@ -30,10 +30,28 @@ volatile uint32_t g_luna2LastOkMs = 0;
 volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
 
 #if USE_HC_SR04_HARDWARE
-static NewPing g_sonarF(US_TRIG, US_ECHO_F, US_PING_MAX_CM);
-static NewPing g_sonarB(US_TRIG, US_ECHO_B, US_PING_MAX_CM);
-static NewPing g_sonarL(US_TRIG, US_ECHO_L, US_PING_MAX_CM);
-static NewPing g_sonarR(US_TRIG, US_ECHO_R, US_PING_MAX_CM);
+static NewPing g_sonarLF(US_TRIG, US_ECHO_LF, US_PING_MAX_CM);
+static NewPing g_sonarRL(US_TRIG, US_ECHO_RL, US_PING_MAX_CM);
+static NewPing g_sonarRF(US_TRIG, US_ECHO_RF, US_PING_MAX_CM);
+static NewPing g_sonarRR(US_TRIG, US_ECHO_RR, US_PING_MAX_CM);
+static int16_t s_usFiltered[4] = {
+  (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM,
+  (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM
+};
+
+/** Lọc nhiễu SR04: giữ giá trị cũ nếu không echo hoặc nhảy >35cm một nhịp. */
+static inline int16_t usFilterSample(uint8_t idx, int16_t raw) {
+  if (raw <= 0) return s_usFiltered[idx];
+  if (raw > (int16_t)US_PING_MAX_CM) raw = (int16_t)US_PING_MAX_CM;
+  int16_t prev = s_usFiltered[idx];
+  const bool vPrev = (prev > (int16_t)US_MIN_VALID_CM && prev < (int16_t)US_PING_MAX_CM);
+  const bool vRaw  = (raw  > (int16_t)US_MIN_VALID_CM && raw  < (int16_t)US_PING_MAX_CM);
+  if (vPrev && vRaw && abs((int)raw - (int)prev) > 35) {
+    return prev;
+  }
+  s_usFiltered[idx] = raw;
+  return raw;
+}
 #endif
 
 /** Nghỉ giữa các ping (gọi từ task điều khiển / setup — dùng vTaskDelay, không busy-wait). */
@@ -83,26 +101,29 @@ inline void sensorsInit() {
 #if USE_HC_SR04_HARDWARE
   pinMode(US_TRIG, OUTPUT);
   digitalWrite(US_TRIG, LOW);
-  pinMode(US_ECHO_F, INPUT);
-  pinMode(US_ECHO_B, INPUT);
-  pinMode(US_ECHO_L, INPUT);
-  pinMode(US_ECHO_R, INPUT);
+  pinMode(US_ECHO_LF, INPUT);
+  pinMode(US_ECHO_RL, INPUT);
+  pinMode(US_ECHO_RF, INPUT);
+  pinMode(US_ECHO_RR, INPUT);
+  Serial.println(F("[US] HC-SR04 x4 (LF/RL/RF/RR) — stop <30cm, OA tu 42cm."));
 #endif
 
-  // Bộ đệm RX lớn hơn — tránh mất byte LiDAR khi CPU bận (WiFi + task khác)
+#if USE_LIDAR_HARDWARE
   Serial1.setRxBufferSize(1024);
   Serial2.setRxBufferSize(1024);
-  // UART LiDAR trước & sau — TF-Luna mặc định 115200 8N1
   Serial1.begin(LIDAR_BAUD, SERIAL_8N1, LIDAR_F_RX, LIDAR_F_TX);
   Serial2.begin(LIDAR_BAUD, SERIAL_8N1, LIDAR_B_RX, LIDAR_B_TX);
   delay(120);
   while (Serial1.available()) (void)Serial1.read();
   while (Serial2.available()) (void)Serial2.read();
-
 #if TFLUNA_SEND_INIT_CMD
   tflunaUartApplyDefaults(Serial1);
   tflunaUartApplyDefaults(Serial2);
-  Serial.println(F("[LiDAR] Da gui lenh TF-Luna: bat output UART + khung 9 byte (cm) + save."));
+  Serial.println(F("[LiDAR] TF-Luna UART init."));
+#endif
+#else
+  g_state.lidarFront = (int16_t)LIDAR_MAX_CM;
+  g_state.lidarBack  = (int16_t)LIDAR_MAX_CM;
 #endif
 }
 
@@ -131,20 +152,22 @@ inline void sensorsCommitPhyToState(const int16_t phy[4]) {
 inline void sensorsPollUS() {
 #if USE_HC_SR04_HARDWARE
   int16_t phy[4];
-  phy[0] = (int16_t)g_sonarF.ping_cm();
-  if (phy[0] > 0) g_usPhyLastEchoMs[0] = millis();
+  int16_t r;
+  r = (int16_t)g_sonarLF.ping_cm();
+  phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
+  if (r > 0) g_usPhyLastEchoMs[US_PHY_F] = millis();
   sensorsYieldMs(US_INTER_PING_MS);
-  phy[1] = (int16_t)g_sonarB.ping_cm();
-  if (phy[1] > 0) g_usPhyLastEchoMs[1] = millis();
+  r = (int16_t)g_sonarRL.ping_cm();
+  phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
+  if (r > 0) g_usPhyLastEchoMs[US_PHY_B] = millis();
   sensorsYieldMs(US_INTER_PING_MS);
-  phy[2] = (int16_t)g_sonarL.ping_cm();
-  if (phy[2] > 0) g_usPhyLastEchoMs[2] = millis();
+  r = (int16_t)g_sonarRF.ping_cm();
+  phy[US_PHY_L] = usFilterSample(US_PHY_L, r);
+  if (r > 0) g_usPhyLastEchoMs[US_PHY_L] = millis();
   sensorsYieldMs(US_INTER_PING_MS);
-  phy[3] = (int16_t)g_sonarR.ping_cm();
-  if (phy[3] > 0) g_usPhyLastEchoMs[3] = millis();
-  for (int i = 0; i < 4; i++) {
-    if (phy[i] == 0) phy[i] = US_PING_MAX_CM;
-  }
+  r = (int16_t)g_sonarRR.ping_cm();
+  phy[US_PHY_R] = usFilterSample(US_PHY_R, r);
+  if (r > 0) g_usPhyLastEchoMs[US_PHY_R] = millis();
   sensorsCommitPhyToState(phy);
 #else
   int16_t phy[4];
@@ -203,6 +226,9 @@ inline bool readTfLunaStream(HardwareSerial &ser, uint8_t *buf, uint8_t &idx,
 }
 
 inline void sensorsPollLidar() {
+#if !USE_LIDAR_HARDWARE
+  return;
+#endif
   static uint8_t buf1[9], buf2[9];
   static uint8_t idx1 = 0, idx2 = 0;
   static int16_t rawD1 = (int16_t)LIDAR_MAX_CM;
@@ -236,6 +262,19 @@ inline void sensorsPollLidar() {
  */
 inline void sensorsLogBootSample() {
   delay(150);
+#if USE_HC_SR04_HARDWARE
+  Serial.println(F("[US] Boot ping 4 goc (8 vong)..."));
+  for (int i = 0; i < 8; i++) {
+    sensorsPollUS();
+    sensorsYieldMs(20);
+  }
+  Serial.printf(
+      "  US LF:%d RL:%d RF:%d RR:%d | F:%d B:%d L:%d R:%d cm (stop<%d)\n",
+      (int)g_state.usLF, (int)g_state.usLR, (int)g_state.usRF, (int)g_state.usRR,
+      (int)g_state.usFront, (int)g_state.usBack, (int)g_state.usLeft, (int)g_state.usRight,
+      (int)US_STOP_CM);
+  return;
+#endif
   Serial.println(F("[LiDAR] Raw sniff 450ms (mong thay 59 59 neu Luna gui dung)..."));
   uint32_t t0 = (uint32_t)millis();
   uint8_t raw1[40], raw2[40];

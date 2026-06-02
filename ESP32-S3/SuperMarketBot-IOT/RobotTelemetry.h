@@ -62,10 +62,20 @@ inline void batteryRead(float &voltsOut, int &pctOut) {
 }
 #endif
 
-/** Payload đầy đủ — gửi qua WebSocket (chunk lớn). */
-inline void robotTelemetryFillJson(JsonDocument &doc) {
+/**
+ * JSON telemetry WebSocket.
+ * @param includeSlow true = thêm heap/nhiệt/pin/map (nặng); false = gói nhẹ cho HMI.
+ */
+inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
+#if USE_HC_SR04_HARDWARE
+  doc["lf"] = g_state.usFront;
+  doc["lb"] = g_state.usBack;
+  doc["senMode"] = "us4";
+#else
   doc["lf"] = g_state.lidarFront;
   doc["lb"] = g_state.lidarBack;
+  doc["senMode"] = "lidar";
+#endif
   doc["uf"] = g_state.usFront;
   doc["ub"] = g_state.usBack;
   doc["ul"] = g_state.usLeft;
@@ -74,7 +84,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
   doc["usLR"] = g_state.usLR;
   doc["usRF"] = g_state.usRF;
   doc["usRR"] = g_state.usRR;
-  {
+  if (includeSlow) {
     JsonArray mu = doc["mapU"].to<JsonArray>();
     JsonArray me = doc["mapE"].to<JsonArray>();
     for (int i = 0; i < 4; i++) {
@@ -82,8 +92,6 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
       me.add(g_mapEncSlot[i]);
     }
     doc["lidF"] = g_lidarFrontUart;
-  }
-  {
     JsonArray mm = doc["mapMot"].to<JsonArray>();
     JsonArray mi = doc["motInv"].to<JsonArray>();
     for (int i = 0; i < 4; i++) {
@@ -100,39 +108,39 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
   doc["dFR"] = g_state.distFR;
   doc["dRR"] = g_state.distRR;
   doc["mode"] = (uint8_t)g_state.mode;
+  doc["afs"]  = g_autoFsmState;   /* 0=CRUISE 1=STOP 2=SCAN 3=DECEL 4=BACKUP */
+  doc["wpSt"] = (const char *)g_wpStatus;
   doc["estop"] = g_state.estop;
 
-  float tC = readChipTempCelsius();
-  if (tC == tC && tC >= -40.f && tC <= 125.f) {
-    doc["tempC"] = (double)((int)(tC * 10.f + 0.5f)) / 10.0;
-  } else {
-    doc["tempC"] = -1.0;
-  }
-  uint32_t heapInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  doc["heap"] = (uint32_t)ESP.getFreeHeap();
-  doc["heapIn"] = heapInt;
-  if (psramFound()) {
-    doc["psFree"] = (uint32_t)ESP.getFreePsram();
-    doc["psTot"] = (uint32_t)ESP.getPsramSize();
-  } else {
-    doc["psFree"] = 0;
-    doc["psTot"] = 0;
-  }
   doc["upMs"] = (uint32_t)millis();
   doc["apCli"] = WiFi.softAPgetStationNum();
-  doc["cpuMHz"] = ESP.getCpuFreqMHz();
-  doc["health"] = computeHealthLevel(tC, heapInt);
 
-  doc["chip"] = ESP.getChipModel();
-  doc["flashKB"] = (uint32_t)(ESP.getFlashChipSize() / 1024u);
-  char buildBuf[48];
-  snprintf(buildBuf, sizeof(buildBuf), "%s %s", __DATE__, __TIME__);
-  doc["build"] = buildBuf;
-  doc["mac"] = WiFi.softAPmacAddress();
-  doc["ch"] = (int)WiFi.channel();
-
-  doc["hMin"] = (uint32_t)heap_caps_get_minimum_free_size(
-      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (includeSlow) {
+    float tC = readChipTempCelsius();
+    if (tC == tC && tC >= -40.f && tC <= 125.f) {
+      doc["tempC"] = (double)((int)(tC * 10.f + 0.5f)) / 10.0;
+    } else {
+      doc["tempC"] = -1.0;
+    }
+    uint32_t heapInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    doc["heap"] = (uint32_t)ESP.getFreeHeap();
+    doc["heapIn"] = heapInt;
+    if (psramFound()) {
+      doc["psFree"] = (uint32_t)ESP.getFreePsram();
+      doc["psTot"] = (uint32_t)ESP.getPsramSize();
+    } else {
+      doc["psFree"] = 0;
+      doc["psTot"] = 0;
+    }
+    doc["cpuMHz"] = ESP.getCpuFreqMHz();
+    doc["health"] = computeHealthLevel(tC, heapInt);
+    doc["chip"] = ESP.getChipModel();
+    doc["flashKB"] = (uint32_t)(ESP.getFlashChipSize() / 1024u);
+    doc["mac"] = WiFi.softAPmacAddress();
+    doc["ch"] = (int)WiFi.channel();
+    doc["hMin"] = (uint32_t)heap_caps_get_minimum_free_size(
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
 
   doc["cx"] = (int)g_state.cmdX;
   doc["cy"] = (int)g_state.cmdY;
@@ -158,28 +166,38 @@ inline void robotTelemetryFillJson(JsonDocument &doc) {
     doc["usAge"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
   }
 
-  float batVolts = -1.f;
-  int batPct = -1;
-  batteryRead(batVolts, batPct);
-  if (batPct >= 0 && batVolts >= 0.f) {
-    doc["batV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
-    doc["batPct"] = batPct;
-  } else {
-    doc["batV"] = -1.0;
-    doc["batPct"] = -1;
+  if (includeSlow) {
+    float batVolts = -1.f;
+    int batPct = -1;
+    batteryRead(batVolts, batPct);
+    if (batPct >= 0 && batVolts >= 0.f) {
+      doc["batV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
+      doc["batPct"] = batPct;
+    } else {
+      doc["batV"] = -1.0;
+      doc["batPct"] = -1;
+    }
+    doc["lr1"] = (uint32_t)g_lunaRxBytes1;
+    doc["lr2"] = (uint32_t)g_lunaRxBytes2;
   }
-
-  doc["lr1"] = (uint32_t)g_lunaRxBytes1;
-  doc["lr2"] = (uint32_t)g_lunaRxBytes2;
 
   /* HMI: có tín hiệu thật gần đây → web hiển thị ON (không thì OFF) */
   auto recentOk = [nowMs](uint32_t lastMs, uint32_t winMs) -> bool {
     return lastMs != 0u && (nowMs - lastMs) < winMs;
   };
+#if USE_HC_SR04_HARDWARE
+  bool usFok = recentOk(g_usPhyLastEchoMs[US_PHY_F], SENSOR_LINK_MS_US)
+            || recentOk(g_usPhyLastEchoMs[US_PHY_L], SENSOR_LINK_MS_US);
+  bool usBok = recentOk(g_usPhyLastEchoMs[US_PHY_B], SENSOR_LINK_MS_US)
+            || recentOk(g_usPhyLastEchoMs[US_PHY_R], SENSOR_LINK_MS_US);
+  doc["lfOn"] = (uint8_t)usFok;
+  doc["lbOn"] = (uint8_t)usBok;
+#else
   bool l1ok = recentOk(g_luna1LastOkMs, SENSOR_LINK_MS_LIDAR);
   bool l2ok = recentOk(g_luna2LastOkMs, SENSOR_LINK_MS_LIDAR);
   doc["lfOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l1ok : l2ok);
   doc["lbOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l2ok : l1ok);
+#endif
   JsonArray jUsOn = doc["usOn"].to<JsonArray>();
   JsonArray jEnOn = doc["encOn"].to<JsonArray>();
   for (int s = 0; s < 4; s++) {

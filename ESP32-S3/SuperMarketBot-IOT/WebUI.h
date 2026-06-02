@@ -358,7 +358,7 @@ details pre{
 <div class="wrap">
   <header class="brand">
     <h1>SMARTMARKETBOT</h1>
-    <p class="desc">IoT Edge HMI &mdash; <strong>TF-Luna</strong> hai hướng (trước/sau): khoảng cách chính + demo tự hành né vật. Mặc định firmware đồng bộ “bumper” từ LiDAR (không cần HC-SR04). Bật lại SR04 bằng <code>USE_HC_SR04_HARDWARE=1</code> trong <code>Config.h</code> nếu có phần cứng.</p>
+    <p class="desc">IoT Edge HMI &mdash; <strong>4× HC-SR04</strong> (trái/phải trước–sau): dừng &lt;30&nbsp;cm, tự hành lách theo bên trống. Vòng tròn lớn = min trước/sau; thanh 4 góc = từng cảm biến.</p>
     <div class="pillrow">
       <span class="pill">TF-Luna &middot; quét 2 hướng</span>
       <span class="pill safety">Né vật · LiDAR (+ SR04 tùy chọn)</span>
@@ -404,7 +404,7 @@ details pre{
                 <span class="lidar-num" id="vLF">—</span>
                 <span class="lidar-unit">cm</span>
               </div></div>
-              <div class="lidar-ax">TRƯỚC <b>LiDAR</b> <span class="link-badge off" id="stLF">OFF</span></div>
+              <div class="lidar-ax">TRƯỚC <b>US min</b> <span class="link-badge off" id="stLF">OFF</span></div>
             </div>
           </div>
           <div class="lidar">
@@ -413,7 +413,7 @@ details pre{
                 <span class="lidar-num" id="vLB">—</span>
                 <span class="lidar-unit">cm</span>
               </div></div>
-              <div class="lidar-ax">SAU · <b>LiDAR</b> <span class="link-badge off" id="stLB">OFF</span></div>
+              <div class="lidar-ax">SAU · <b>US min</b> <span class="link-badge off" id="stLB">OFF</span></div>
             </div>
           </div>
         </div>
@@ -735,10 +735,22 @@ function connectWS(){
   ws.onopen=()=>{
     document.getElementById('wsStatus').textContent='đã nối';
     if(retry)clearTimeout(retry);
-    wsS({t:'layoutGet'});
-    wsS({t:'motorLayoutGet'});
+    wsS({t:'mode',m:0});
+    wsS({t:'joy',x:0,y:0});
+    setTimeout(()=>{ wsS({t:'layoutGet'}); wsS({t:'motorLayoutGet'}); }, 2500);
   };
   ws.onclose=()=>{document.getElementById('wsStatus').textContent='mất kết nối…'; retry=setTimeout(connectWS,2000);};
+  let uiPending=null, uiRaf=0;
+  function flushTelemetry(){
+    uiRaf=0;
+    if(!uiPending) return;
+    const d=uiPending; uiPending=null;
+    applyTelemetry(d);
+  }
+  function scheduleTelemetry(d){
+    uiPending=d;
+    if(!uiRaf) uiRaf=requestAnimationFrame(flushTelemetry);
+  }
   ws.onmessage=e=>{
     try{
       const d=JSON.parse(e.data);
@@ -764,6 +776,11 @@ function connectWS(){
         if(m) m.textContent='Lỗi: '+(d.msg||'mapMot/motInv không hợp lệ');
         return;
       }
+      scheduleTelemetry(d);
+    }catch(err){}
+  };
+}
+function applyTelemetry(d){
       const lf=d.lf??0, lb=d.lb??0;
       const lfOn=d.lfOn!==undefined?!!d.lfOn:true, lbOn=d.lbOn!==undefined?!!d.lbOn:true;
       const stLF=document.getElementById('stLF'), stLB=document.getElementById('stLB');
@@ -797,8 +814,8 @@ function connectWS(){
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
-      ml.textContent=(d.mode===1)?'Tự hành (demo)':'Lái tay';
-      ml.className=(d.mode===1)?'mode-auto':'mode-manual';
+      ml.textContent=(d.mode===2)?'Waypoint':((d.mode===1)?'Tự hành':'Lái tay');
+      ml.className=(d.mode===1)?'mode-auto':((d.mode===2)?'mode-auto':'mode-manual');
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
       if(d.tempC!=null && d.tempC>=0){
@@ -868,9 +885,11 @@ function connectWS(){
           document.getElementById('spdAutoVal').textContent=String(d.spdAutoPct)+'%';
         }
       }
-      document.getElementById('rawJ').textContent=JSON.stringify(d,null,2);
-    }catch(x){}
-  };
+      if(!window._rawJTick) window._rawJTick=0;
+      if((++window._rawJTick%8)===0){
+        const rj=document.getElementById('rawJ');
+        if(rj) rj.textContent=JSON.stringify(d);
+      }
 }
 const zone=document.getElementById('jsZone');
 const knob=document.getElementById('jsKnob');
@@ -1052,11 +1071,18 @@ static void onWebSocketEvent(uint8_t num, WStype_t type,
 }
 
 inline void webUIBroadcast() {
-  JsonDocument doc;
-  robotTelemetryFillJson(doc);
+  /* Không có client WS → khỏi serialize JSON (giảm lag AP khi chỉ mở HTTP tĩnh). */
+  if (g_wsServer.connectedClients() == 0) return;
 
-  char buf[1400];
-  serializeJson(doc, buf, sizeof(buf));
+  static uint8_t s_telemPhase = 0;
+  s_telemPhase++;
+
+  JsonDocument doc;
+  robotTelemetryFillJson(doc, (s_telemPhase % 5u) == 0u);  /* mỗi ~1.75s: gói đầy đủ */
+
+  char buf[1200];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  if (n >= sizeof(buf)) return;
   g_wsServer.broadcastTXT(buf);
 }
 
