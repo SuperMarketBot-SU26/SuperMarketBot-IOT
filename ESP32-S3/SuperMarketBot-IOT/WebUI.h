@@ -1117,32 +1117,45 @@ inline void webUIInit() {
       F("[WiFi] Dien thoai ket noi VAO mang do robot phat (khong phai WiFi nha). Mat khau: AP_PASS trong Config.h"));
 
 #if WIFI_STA_ENABLE
-  /* Kết nối STA để MQTT tới backend. Thất bại → robot vẫn chạy AP-only */
-  Serial.printf("[WiFi] STA: dang ket noi \"%s\"...\n", STA_SSID);
-  WiFi.begin(STA_SSID, STA_PASS);
+  /* Thử kết nối lần lượt các SSID đã cấu hình — kết nối được cái đầu tiên tìm thấy.
+   * Robot vẫn chạy SoftAP trong khi thử STA, MQTT chỉ bật khi STA thành công. */
   {
-    uint32_t staStart = millis();
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print('.');
-      if (millis() - staStart > STA_CONNECT_TIMEOUT_MS) {
-        retries++;
-        if (retries >= STA_MAX_RETRIES) {
-          Serial.println(F("\n[WiFi] STA that bai — AP-only mode, MQTT disabled."));
-          goto sta_done;
+    struct { const char* ssid; const char* pass; } staList[] = {
+      { STA_SSID,   STA_PASS   },
+      { STA_SSID_2, STA_PASS_2 },
+      { STA_SSID_3, STA_PASS_3 },
+    };
+    constexpr int STA_LIST_COUNT = sizeof(staList) / sizeof(staList[0]);
+    bool staOk = false;
+
+    for (int si = 0; si < STA_LIST_COUNT && !staOk; si++) {
+      if (staList[si].ssid == nullptr || strlen(staList[si].ssid) == 0) continue;
+      Serial.printf("[WiFi] STA [%d/%d]: dang ket noi \"%s\"...\n",
+                    si + 1, STA_LIST_COUNT, staList[si].ssid);
+      WiFi.begin(staList[si].ssid, staList[si].pass);
+
+      uint32_t staStart = millis();
+      while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print('.');
+        if (millis() - staStart > STA_CONNECT_TIMEOUT_MS) {
+          Serial.printf("\n[WiFi] \"%s\" timeout — thu SSID tiep theo.\n", staList[si].ssid);
+          WiFi.disconnect();
+          delay(500);
+          break;
         }
-        Serial.printf("\n[WiFi] STA timeout, thu lai %d/%d...\n", retries, (int)STA_MAX_RETRIES);
-        WiFi.disconnect();
-        delay(1000);
-        WiFi.begin(STA_SSID, STA_PASS);
-        staStart = millis();
+      }
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("\n[WiFi] STA OK! SSID=\"%s\"  IP=%s\n",
+                      staList[si].ssid, WiFi.localIP().toString().c_str());
+        g_mqttEnabled = true;
+        staOk = true;
       }
     }
-    Serial.printf("\n[WiFi] STA OK! IP: %s\n", WiFi.localIP().toString().c_str());
-    g_mqttEnabled = true;
+    if (!staOk) {
+      Serial.println(F("[WiFi] Tat ca SSID that bai — AP-only mode, MQTT disabled."));
+    }
   }
-  sta_done:;
 #endif
 
   g_httpServer.on("/", HTTP_GET, []() {

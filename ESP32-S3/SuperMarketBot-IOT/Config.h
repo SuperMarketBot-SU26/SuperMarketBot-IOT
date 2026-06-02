@@ -210,12 +210,16 @@
 #define AP_PASS         "12345678"
 
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
-/** Đặt ở trên (WEB_WS / WIFI_STA_ENABLE) — không định nghĩa lại ở đây. */
-/** Đổi 2 dòng này thành SSID/pass router lab/nhà trước khi nạp */
-#define STA_SSID               "FPTH_Home"
+/** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
+ *  Thêm hotspot điện thoại vào STA_SSID_2/3 để demo ở bất kỳ đâu mà không cần reflash. */
+#define STA_SSID               "FPTH_Home"       // WiFi lab FPT
 #define STA_PASS               "hoithanghieu"
-#define STA_CONNECT_TIMEOUT_MS 15000u   // Timeout mỗi lần thử kết nối (ms)
-#define STA_MAX_RETRIES        3        // Số lần thử trước khi bỏ qua, AP vẫn chạy
+#define STA_SSID_2             "SmartMarketDemo" // Hotspot điện thoại demo (đặt tên cố định)
+#define STA_PASS_2             "12345678"
+#define STA_SSID_3             ""                // Dự phòng 3 (để trống nếu không dùng)
+#define STA_PASS_3             ""
+#define STA_CONNECT_TIMEOUT_MS 10000u   // Timeout mỗi SSID (ms) — giảm xuống để thử nhanh hơn
+#define STA_MAX_RETRIES        3        // Số lần thử mỗi SSID trước khi sang SSID tiếp theo
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */
 #define AP_WIFI_CHANNEL 6
 #define AP_MAX_CLIENTS  4
@@ -228,8 +232,8 @@
 #define VISION_HTTPS_ENABLE     0
 /** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */
 #define BOOT_GUARD_MS           12000u
-/** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (nặng hơn). */
-#define WIFI_STA_ENABLE         0
+/** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (HiveMQ Cloud hoặc local broker). */
+#define WIFI_STA_ENABLE         1
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
