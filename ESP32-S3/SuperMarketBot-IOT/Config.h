@@ -214,7 +214,7 @@
  *  Thêm hotspot điện thoại vào STA_SSID_2/3 để demo ở bất kỳ đâu mà không cần reflash. */
 #define STA_SSID               "FPTH_Home"       // WiFi lab FPT
 #define STA_PASS               "hoithanghieu"
-#define STA_SSID_2             "SmartMarketDemo" // Hotspot điện thoại demo (đặt tên cố định)
+#define STA_SSID_2             "SmartMarketBot"  // Hotspot điện thoại demo
 #define STA_PASS_2             "12345678"
 #define STA_SSID_3             ""                // Dự phòng 3 (để trống nếu không dùng)
 #define STA_PASS_3             ""
