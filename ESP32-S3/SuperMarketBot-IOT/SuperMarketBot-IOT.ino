@@ -60,7 +60,7 @@ RobotState g_state = {
   .lidarFront = LIDAR_MAX_CM, .lidarBack = LIDAR_MAX_CM,
   .rpmFL = 0, .rpmRL = 0, .rpmFR = 0, .rpmRR = 0,
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
-  .cmdX = 0, .cmdY = 0,
+  .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
   .mode = MODE_MANUAL,
@@ -173,6 +173,8 @@ static void autoNavigateAvoidance() {
         s_auto_fsm = AN_CRUISE;
         s_auto_t0 = now;
         s_stuckCount = 0;
+        pidSpeedReset();
+        pidHoldReset();
       }
       break;
     }
@@ -223,8 +225,8 @@ static void taskControl(void *pvParams) {
     if (millis() < BOOT_GUARD_MS) {
       if (g_state.mode != MODE_MANUAL) {
         robotForceManualStop();
-      } else if (g_state.cmdX != 0 || g_state.cmdY != 0) {
-        g_state.cmdX = g_state.cmdY = 0;
+      } else       if (g_state.cmdX != 0 || g_state.cmdY != 0 || g_state.cmdStrafe != 0) {
+        g_state.cmdX = g_state.cmdY = g_state.cmdStrafe = 0;
         botStop();
       }
     }
@@ -238,6 +240,7 @@ static void taskControl(void *pvParams) {
       oaReset(s_autoOa);
       s_autoOa.cruiseHeading = g_pose.headingRad;
       pidSpeedReset();
+      pidHoldReset();
       /* Báo backend chuyển mode */
       strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
@@ -283,10 +286,10 @@ static void taskControl(void *pvParams) {
     } else if (g_state.mode == MODE_AUTO) {
       autoNavigateAvoidance();
     } else {
-      if (g_state.cmdX == 0 && g_state.cmdY == 0) {
+      if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
         botStop();
       } else {
-        botDrive(g_state.cmdX, g_state.cmdY, g_state.baseSpeed);
+        botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, g_state.cmdX, g_state.baseSpeed);
       }
     }
 

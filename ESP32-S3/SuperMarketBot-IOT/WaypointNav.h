@@ -132,6 +132,7 @@ inline void wpNavStart() {
   g_state.mode = MODE_WAYPOINT;
   pidSpeedReset();
   pidYawReset();
+  pidHoldReset();
   strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
   Serial.printf("[WP] Start → WP[0] (%.3f, %.3f)\n",
                 s_wpRoute[0].x, s_wpRoute[0].y);
@@ -274,9 +275,9 @@ inline void wpNavTick() {
       return;
     }
 
-    /* ── Pure Pursuit steering ─────────────────────────────────── */
+    /* ── Pure Pursuit steering + heading hold (encoder "dò line ảo") ── */
     float targetH = atan2f(dy, dx);
-    float alpha   = wpAngleDiff(targetH, g_pose.headingRad);
+    float alpha    = wpAngleDiff(targetH, g_pose.headingRad);
 
     /* Quá lệch → xoay tại chỗ */
     if (fabsf(alpha) > WP_MAX_STEER_RAD) {
@@ -286,21 +287,33 @@ inline void wpNavTick() {
       return;
     }
 
-    int16_t steer = (int16_t)(WP_STEER_K * alpha);
-    if (steer >  100) steer =  100;
-    if (steer < -100) steer = -100;
+    /* Pure Pursuit steer (góc lệch từ hướng robot tới waypoint) */
+    int16_t ppSteer = (int16_t)(WP_STEER_K * alpha);
+    if (ppSteer >  100) ppSteer =  100;
+    if (ppSteer < -100) ppSteer = -100;
 
+    /* Heading hold: bù drift encoder để đi thẳng chính xác hơn */
+    float dt_s     = (float)SAFE_LOOP_MS * 0.001f;
+    float holdCorr = pidHoldCompute(targetH, g_pose.headingRad, dt_s);
+
+    /* Speed: giảm khi gần waypoint */
     uint16_t spd = (dist < WP_SLOW_RADIUS_M)
                  ? wpPct2Pwm(WP_SLOW_SPEED_PCT)
                  : wpPct2Pwm(WP_CRUISE_SPEED_PCT);
 
-    float dt_s    = (float)SAFE_LOOP_MS * 0.001f;
+    /* Speed PID */
     float pidOut  = pidSpeedCompute(pwmToEstMps(spd), robotActualSpeedMps(), dt_s);
     int32_t runPwm = (int32_t)spd + (int32_t)pidOut;
     if (runPwm < 0) runPwm = 0;
     if (runPwm > (int32_t)PWM_MAX) runPwm = (int32_t)PWM_MAX;
 
-    botDrive(steer, 80, (uint16_t)runPwm);
+    /* Tổng steer: Pure Pursuit + heading hold */
+    int16_t turn = ppSteer + (int16_t)holdCorr;
+    if (turn >  100) turn =  100;
+    if (turn < -100) turn = -100;
+
+    /* Mecanum: strafe=0, fwd=80%, turn=correction */
+    botDriveMecanum(0, 80, turn, (uint16_t)runPwm);
     break;
   }
 

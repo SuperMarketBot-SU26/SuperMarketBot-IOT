@@ -19,6 +19,7 @@ inline void robotForceManualStop() {
   g_state.mode = MODE_MANUAL;
   g_state.cmdX = 0;
   g_state.cmdY = 0;
+  g_state.cmdStrafe = 0;
   g_state.estop = false;
   botStop();
   wpNavCancel();
@@ -31,6 +32,7 @@ inline void robotApplyControlJson(JsonDocument &doc) {
   if (strcmp(t, "joy") == 0) {
     g_state.cmdX = (int16_t)constrain((int)doc["x"].as<int>(), -100, 100);
     g_state.cmdY = (int16_t)constrain((int)doc["y"].as<int>(), -100, 100);
+    g_state.cmdStrafe = (int16_t)constrain((int)doc["s"].as<int>(), -100, 100);
   } else if (strcmp(t, "spd") == 0) {
     uint16_t pct = doc["v"].as<uint16_t>();
     if (pct > 100) pct = 100;
@@ -54,6 +56,7 @@ inline void robotApplyControlJson(JsonDocument &doc) {
       g_state.mode = (RobotMode)m;
       g_state.cmdX = 0;
       g_state.cmdY = 0;
+      g_state.cmdStrafe = 0;
       botStop();
     }
   } else if (strcmp(t, "estop") == 0) {

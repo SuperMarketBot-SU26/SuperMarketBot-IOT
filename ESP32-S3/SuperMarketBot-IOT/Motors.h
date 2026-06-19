@@ -5,7 +5,8 @@
  *    motorsStandby(en)       — Bật/tắt STBY chung
  *    motorDrive(M_*, speed)  — speed ∈ [-PWM_MAX .. +PWM_MAX]
  *    botForward / Backward / RotateCW / RotateCCW / Stop
- *    botDrive(x, y, base)    — Lái kiểu joystick (arcade mixing)
+ *    botDriveMecanum(s,fwd,t,base) — Mecanum X-config kinematics
+ *    botDrive(x, y, base)           — arcade mixing (backward-compatible)
  * =====================================================================*/
 #ifndef MOTORS_H
 #define MOTORS_H
@@ -114,24 +115,54 @@ inline void botRotateCCW(uint16_t s) {
 }
 
 /**
- * Lái kiểu joystick (Arcade drive mixing).
+ * Điều khiển chuyển động đa hướng bằng bánh xe Mecanum (chuẩn chữ X).
+ *
+ * Công thức động học Mecanum (X-configuration):
+ *   fl = fwd + strafe + turn
+ *   rl = fwd - strafe + turn
+ *   fr = fwd - strafe - turn
+ *   rr = fwd + strafe - turn
+ *
+ * @param strafe  -100..100  tịnh tiến ngang (âm=trái, dương=phải)
+ * @param fwd     -100..100  tiến/lùi  (âm=lùi,  dương=tiến)
+ * @param turn    -100..100  xoay tại chỗ (âm=CCW, dương=CW)
+ * @param base    0..PWM_MAX tốc độ nền tối đa
+ */
+inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
+                             uint16_t base) {
+  if (base > PWM_MAX) base = PWM_MAX;
+
+  // Tính tốc độ 4 bánh theo công thức X-config
+  int32_t fl = (int32_t)fwd + (int32_t)strafe + (int32_t)turn;
+  int32_t rl = (int32_t)fwd - (int32_t)strafe + (int32_t)turn;
+  int32_t fr = (int32_t)fwd - (int32_t)strafe - (int32_t)turn;
+  int32_t rr = (int32_t)fwd + (int32_t)strafe - (int32_t)turn;
+
+  // Chuẩn hóa (normalize) để không bánh nào vượt quá 'base'
+  int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
+  if (mag > (int32_t)base && mag > 0) {
+    int32_t scale = (int32_t)base * 100 / mag;
+    fl  = fl  * scale / 100;
+    rl  = rl  * scale / 100;
+    fr  = fr  * scale / 100;
+    rr  = rr  * scale / 100;
+  }
+
+  const int32_t sp[4] = {fl, rl, fr, rr};
+  motorApplyLayout(sp);
+}
+
+/**
+ * Lái kiểu joystick (Arcade drive mixing) — tương thích ngược.
+ * Chuyển tiếp sang botDriveMecanum: tay lái cũ x=xoay, y=tiến/lùi,
+ * không có tịnh tiến ngang → strafe=0.
+ *
  * @param x    -100..100 (âm = xoay trái)
  * @param y    -100..100 (âm = lùi)
  * @param base 0..PWM_MAX — mức tốc độ nền tối đa
  */
 inline void botDrive(int16_t x, int16_t y, uint16_t base) {
-  if (base > PWM_MAX) base = PWM_MAX;
-  int32_t fwd  = (int32_t)y * base / 100;
-  int32_t turn = (int32_t)x * base / 100;
-  int32_t left  = fwd + turn;
-  int32_t right = fwd - turn;
-  int32_t mag = max(abs(left), abs(right));
-  if (mag > (int32_t)base) {
-    left  = left  * (int32_t)base / mag;
-    right = right * (int32_t)base / mag;
-  }
-  const int32_t sp[4] = {left, left, right, right};
-  motorApplyLayout(sp);
+  botDriveMecanum(0, y, x, base);
 }
 
 #endif // MOTORS_H

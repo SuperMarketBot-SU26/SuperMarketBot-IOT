@@ -285,6 +285,42 @@ input.spd-range::-moz-range-thumb{
   border:3px solid var(--fill-a);box-shadow:0 4px 12px rgba(0,0,0,.25);
 }
 .spd-block--auto input.spd-range::-moz-range-thumb{border-color:#fbbf24}
+/* Mecanum strafe slider — horizontal bar style */
+.strafe-block{
+  margin:8px 0 0;padding:10px 14px 12px;background:rgba(12,16,22,.92);
+  border:1px solid var(--line2);border-radius:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.04);
+}
+.strafe-block__head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.strafe-track-wrap{display:flex;align-items:center;gap:10px}
+.strafe-dir-label{font-size:.6rem;color:var(--muted);min-width:26px;text-align:center;letter-spacing:.04em}
+input.strafe-range{
+  flex:1;height:20px;cursor:pointer;background:transparent;
+  -webkit-appearance:none;appearance:none;
+}
+input.strafe-range::-webkit-slider-runnable-track{
+  height:10px;border-radius:5px;
+  background:linear-gradient(90deg,#f87171 0%,#1a2330 50%,#22c55e 100%);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.05);
+}
+input.strafe-range::-webkit-slider-thumb{
+  -webkit-appearance:none;width:22px;height:22px;margin-top:-6px;border-radius:7px;box-sizing:border-box;
+  background:linear-gradient(180deg,#f1f5f9,#cbd5e1);
+  border:3px solid var(--accent);
+  box-shadow:0 3px 10px rgba(45,212,191,.3),0 1px 3px rgba(0,0,0,.35);
+}
+input.strafe-range::-moz-range-track{
+  height:10px;border-radius:5px;background:#1a2330;
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.4);
+}
+input.strafe-range::-moz-range-progress{
+  height:10px;border-radius:5px 0 0 5px;background:linear-gradient(90deg,#f87171,#22c55e);
+}
+input.strafe-range::-moz-range-thumb{
+  width:20px;height:20px;border:none;border-radius:7px;box-sizing:border-box;
+  background:linear-gradient(180deg,#f1f5f9,#cbd5e1);
+  border:3px solid var(--accent);box-shadow:0 3px 10px rgba(45,212,191,.3);
+}
 input[type=range]:not(.spd-range){width:100%;accent-color:var(--accent);height:8px;-webkit-appearance:none;appearance:none;background:transparent}
 input[type=range]:not(.spd-range)::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0);box-shadow:0 2px 8px rgba(0,0,0,.35)}
 input[type=range]:not(.spd-range)::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bg0)}
@@ -455,6 +491,21 @@ details pre{
             <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="60"
               oninput="sendSpeed(this.value)" aria-label="Tốc độ lái tay phần trăm"/>
             <div class="spd-block__ticks"><span>0%</span><span>50%</span><span>100%</span></div>
+          </div>
+          <div class="strafe-block">
+            <div class="strafe-block__head">
+              <div>
+                <div class="spd-block__label">Tịnh tiến ngang · Mecanum</div>
+                <div class="spd-block__hint">Slide trái/phải để strafe — cần bánh Mecanum</div>
+              </div>
+              <span class="spd-block__badge" id="strVal">0%</span>
+            </div>
+            <div class="strafe-track-wrap">
+              <span class="strafe-dir-label">&#9664; L</span>
+              <input type="range" class="strafe-range" id="strSlider" min="-100" max="100" value="0"
+                oninput="sendStrafe(this.value)" aria-label="Tịnh tiến ngang Mecanum"/>
+              <span class="strafe-dir-label">R &#9654;</span>
+            </div>
           </div>
           <div class="spd-block spd-block--auto">
             <div class="spd-block__head">
@@ -861,9 +912,18 @@ function applyTelemetry(d){
       if(d.mac!=null) document.getElementById('dvMac').textContent=String(d.mac);
       if(d.ch!=null) document.getElementById('dvCh').textContent=String(d.ch);
       if(d.hMin!=null) document.getElementById('dvHmin').textContent=(d.hMin/1024).toFixed(1);
-      document.getElementById('dvJoy').textContent=(d.cx??0)+' / '+(d.cy??0);
-      if(d.spdPct!=null) document.getElementById('dvSpd').textContent=String(d.spdPct);
-      if(d.spdAutoPct!=null) document.getElementById('dvSpdAuto').textContent=String(d.spdAutoPct);
+      document.getElementById('dvJoy').textContent=(d.cx??0)+' / '+(d.cy??0)+' / s:'+(d.cstr??0);
+      document.getElementById('dvSpd').textContent=String(d.spdPct??0)+'%';
+      document.getElementById('dvSpdAuto').textContent=String(d.spdAutoPct??0)+'%';
+      /* Sync strafe UI from telemetry (e.g. after mode switch) */
+      if(d.cstr!=null){
+        const ss=document.getElementById('strSlider');
+        if(ss && document.activeElement!==ss){
+          ss.value=d.cstr;
+          document.getElementById('strVal').textContent=d.cstr+'%';
+        }
+        window._uiStrafe=d.cstr;
+      }
       document.getElementById('dvLfAge').textContent=fmtLidarAge(d.lfAge,d.lr1,d.lr2);
       document.getElementById('dvUsAge').textContent=fmtAge(d.usAge);
       if(d.lr1!=null)document.getElementById('dvLr1').textContent=String(d.lr1);
@@ -894,6 +954,9 @@ function applyTelemetry(d){
 const zone=document.getElementById('jsZone');
 const knob=document.getElementById('jsKnob');
 let drag=false;
+let _uiStrafe=0;
+let _uiJoyX=0;
+let _uiJoyY=0;
 function jUp(cx,cy){
   const r=zone.getBoundingClientRect();
   const R=Math.max(24, Math.min(r.width,r.height)/2 - 10);
@@ -903,9 +966,10 @@ function jUp(cx,cy){
   const jX=Math.round(ox/R*100), jY=Math.round(-oy/R*100);
   knob.style.left=(r.width/2+ox)+'px';
   knob.style.top=(r.height/2+oy)+'px';
-  wsS({t:'joy',x:jX,y:jY});
+  window._uiJoyX=jX; window._uiJoyY=jY;
+  wsS({t:'joy',x:jX,y:jY,s:_uiStrafe||0});
 }
-function jRel(){ drag=false; knob.style.left='50%'; knob.style.top='50%'; wsS({t:'joy',x:0,y:0}); }
+function jRel(){ drag=false; knob.style.left='50%'; knob.style.top='50%'; _uiJoyX=0; _uiJoyY=0; wsS({t:'joy',x:0,y:0,s:_uiStrafe||0}); }
 function wsS(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 function sendSpeed(v){
   const el=document.getElementById('spdSlider');
@@ -929,6 +993,12 @@ function setMode(m){
 }
 function sendEstop(){ wsS({t:'estop'}); }
 function odomReset(){ wsS({t:'odomReset'}); }
+function sendStrafe(v){
+  const el=document.getElementById('strSlider');
+  document.getElementById('strVal').textContent=v+'%';
+  window._uiStrafe=parseInt(v,10)||0;
+  if(!drag) wsS({t:'joy',x:_uiJoyX||0,y:_uiJoyY||0,s:_uiStrafe});
+}
 (function(){
   const v=document.getElementById('tabCam');
   if(!v)return;

@@ -144,6 +144,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
 
   doc["cx"] = (int)g_state.cmdX;
   doc["cy"] = (int)g_state.cmdY;
+  doc["cstr"] = (int)g_state.cmdStrafe;
   uint32_t spdPct =
       (g_state.baseSpeed * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
   doc["spdPct"] = spdPct;

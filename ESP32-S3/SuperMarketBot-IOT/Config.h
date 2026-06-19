@@ -283,8 +283,9 @@ struct RobotState {
   // Quãng đường (m) ước lượng
   volatile float distFL, distRL, distFR, distRR;
   // Điều khiển
-  volatile int16_t cmdX;      // -100..100 (trái/phải)
+  volatile int16_t cmdX;      // -100..100 (trái/phải = xoay)
   volatile int16_t cmdY;      // -100..100 (tiến/lùi)
+  volatile int16_t cmdStrafe; // -100..100 (sang trái/phải = strafe Mecanum)
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
   volatile RobotMode mode;
