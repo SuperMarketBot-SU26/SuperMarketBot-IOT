@@ -476,9 +476,14 @@ details pre{
         <h2>Điều khiển</h2>
         <div class="ctrl-stack">
           <div id="jsZone"><div id="jsKnob"></div></div>
-          <div class="toggle-row">
+          <div class="toggle-row" style="gap:6px">
             <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
-            <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
+            <button type="button" class="mode-btn" id="btnAutoTest" onclick="setMode(1)">Test cảm biến</button>
+            <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(2)">Tự hành</button>
+          </div>
+          <div id="backendStatusRow" style="display:none;margin-top:8px;text-align:center">
+            <span class="link-badge off" id="backendConnBadge">CHƯA KẾT NỐI</span>
+            <span style="margin-left:10px;font-size:.7rem;color:var(--muted)" id="wpStatusTxt"></span>
           </div>
           <div class="spd-block spd-block--manual">
             <div class="spd-block__head">
@@ -511,7 +516,7 @@ details pre{
             <div class="spd-block__head">
               <div>
                 <div class="spd-block__label">Tốc độ · Tự hành</div>
-                <div class="spd-block__hint">Demo né vật — LiDAR trước/sau (15–100%)</div>
+                <div class="spd-block__hint">Demo: bật <b>Test cảm biến</b> → đi thẳng + né vật cản. <b>Tự hành</b> = theo lộ trình Backend (waypoint).</div>
               </div>
               <span class="spd-block__badge" id="spdAutoVal">50%</span>
             </div>
@@ -865,8 +870,20 @@ function applyTelemetry(d){
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
-      ml.textContent=(d.mode===2)?'Waypoint':((d.mode===1)?'Tự hành':'Lái tay');
-      ml.className=(d.mode===1)?'mode-auto':((d.mode===2)?'mode-auto':'mode-manual');
+      const labels=['Lái tay','Test cảm biến','Tự hành'];
+      ml.textContent=labels[d.mode]||'Lái tay';
+      ml.className=d.mode===0?'mode-manual':'mode-auto';
+      /* Backend / waypoint status — chỉ hiện khi mode = Tự hành (2) */
+      const bRow=document.getElementById('backendStatusRow');
+      if(bRow){ bRow.style.display=(d.mode===2)?'':'none'; }
+      const bb=document.getElementById('backendConnBadge');
+      const bt=document.getElementById('wpStatusTxt');
+      if(bb){ const on=!!d.mqttConn; bb.textContent=on?'KẾT NỐI':'CHƯA KẾT NỐI'; bb.className='link-badge '+(on?'on':'off'); }
+      if(bt){
+        const ws=d.wpSt||'';
+        const wsMap={'idle':'chờ lộ trình','route_set':'đã nhận lộ trình','navigating':'đang điều hướng','oa_active':'đang tránh vật','blocked':'chờ reroute','done':'hoàn thành','aborted':'đã dừng'};
+        bt.textContent=wsMap[ws]||ws;
+      }
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
       if(d.tempC!=null && d.tempC>=0){
@@ -984,11 +1001,15 @@ function sendSpeedAuto(v){
   wsS({t:'spdAuto',v:parseInt(v,10)});
 }
 function setMode(m){
-  document.getElementById('btnManual').classList.toggle('active',m===0);
-  document.getElementById('btnAuto').classList.toggle('active',m===1);
+  [0,1,2].forEach(i=>{
+    const b=['btnManual','btnAutoTest','btnAuto'][i];
+    const el=document.getElementById(b);
+    if(el) el.classList.toggle('active',i===m);
+  });
   const ml=document.getElementById('modeLabel');
-  ml.textContent=m===1?'Tự hành (demo)':'Lái tay';
-  ml.className=m===1?'mode-auto':'mode-manual';
+  const labels=['Lái tay','Test cảm biến','Tự hành'];
+  ml.textContent=labels[m]||'Lái tay';
+  ml.className=m===0?'mode-manual':'mode-auto';
   wsS({t:'mode',m});
 }
 function sendEstop(){ wsS({t:'estop'}); }

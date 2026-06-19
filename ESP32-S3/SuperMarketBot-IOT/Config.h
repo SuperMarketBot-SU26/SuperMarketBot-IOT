@@ -85,26 +85,47 @@
 /** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
 #define US_MIN_VALID_CM     3
 /**
- * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
+ * 1 = 4× HC-SR04 (tầm gần, 4 góc xe) — luôn bật khi có hardware.
+ * 0 = không dùng HC-SR04.
  */
 #define USE_HC_SR04_HARDWARE  1
-/** 0 khi chỉ dùng SR04 — không mở UART LiDAR (giảm nhiễu / CPU). */
-#define USE_LIDAR_HARDWARE    (USE_HC_SR04_HARDWARE ? 0 : 1)
+/**
+ * 1 = 2× TF-Luna (tầm xa, trước/sau) — luôn bật khi có hardware.
+ * 0 = không dùng LiDAR.
+ * Sensor Fusion: CẢ HAI hệ thống chạy song song.
+ */
+#define USE_LIDAR_HARDWARE    1
+
+/**
+ * Ngưỡng LiDAR TF-Luna — dùng trong cruise để giảm tốc mượt trước khi SR04 phát hiện.
+ * Tầm xa: phát hiện sớm vật cản ở hành lang siêu thị trước khi SR04 đo được.
+ */
+#define LIDAR_DECEL_FAR_CM    200   // Bắt đầu giảm tốc nhẹ
+#define LIDAR_DECEL_NEAR_CM   60    // Giảm tốc mạnh
+/** Khoảng cách lý tưởng từ robot đến mặt kệ để chụp ảnh (cm). */
+#define LIDAR_SHELF_ALIGN_CM  45
 
 #if USE_HC_SR04_HARDWARE
-/** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 30 cm thì dừng. */
+/** Dừng cứng & khẩn cấp (cm). */
 #define US_STOP_CM            30
-/** Bắt đầu lách trước khi chạm vùng dừng. */
+/** Bắt đầu phát hiện vật cản — lách trước khi chạm dừng cứng. */
 #define US_OA_DETECT_CM       42
-/** Đủ xa để tiến / coi bên trống (SR04 không cần 1 m như LiDAR). */
+/** Đủ xa để tiến / coi bên trống (dùng cho OA streak). */
 #define US_PATH_CLEAR_CM      48
 #define OA_DETECT_CM          US_OA_DETECT_CM
 #define PATH_CLEAR_MIN_CM     US_PATH_CLEAR_CM
 #define OA_PATH_CLEAR_STREAK  6
-#else
-#define US_STOP_CM            30
-#define US_OA_DETECT_CM       42
-#define US_PATH_CLEAR_CM      48
+#endif
+
+#if USE_LIDAR_HARDWARE
+/** Ngưỡng dừng cứng LiDAR (tầm xa). */
+#define LIDAR_STOP_CM         30
+/** Phát hiện vật cản LiDAR — bắt đầu OA (tầm xa). */
+#define LIDAR_OA_DETECT_CM    70
+/** Đủ xa để coi path clear (LiDAR). */
+#define LIDAR_PATH_CLEAR_CM   100
+/** Streak để xác nhận path clear LiDAR. */
+#define LIDAR_OA_STREAK       12
 #endif
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
@@ -138,19 +159,26 @@
 /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
 #define SAFE_SIDE_AVOID_CM  14
 
-#if USE_HC_SR04_HARDWARE
-#define AUTO_LIDAR_BLOCK_CM     US_STOP_CM
-#else
-#define AUTO_LIDAR_BLOCK_CM     16
+/**
+ * Sensor Fusion: khi bật cả hai, dùng LiDAR cho tầm xa (giảm tốc sớm),
+ * dùng SR04 cho tầm gần (dừng cứng + bẻ cạnh).
+ */
+#if USE_HC_SR04_HARDWARE && USE_LIDAR_HARDWARE
+/** Khi fusion: dừng cứng = min(LiDAR, SR04). Dùng SR04 làm primary. */
+#define AUTO_LIDAR_BLOCK_CM   US_STOP_CM
+#elif USE_LIDAR_HARDWARE
+#define AUTO_LIDAR_BLOCK_CM   16
 #endif
-#if !USE_HC_SR04_HARDWARE
-/** Phát hiện vật cản — LiDAR (cm). */
-#define OA_DETECT_CM            70
-#define PATH_CLEAR_MIN_CM       100
-#define OA_PATH_CLEAR_STREAK    12
+
+/**
+ * OA trigger — dùng LiDAR nếu có để phát hiện sớm tầm xa.
+ * SR04 override: nếu SR04 đo < OA_DETECT_CM thì ưu tiên SR04.
+ */
+#if USE_LIDAR_HARDWARE
+#define OA_DETECT_CM            LIDAR_OA_DETECT_CM
+#define PATH_CLEAR_MIN_CM       LIDAR_PATH_CLEAR_CM
+#define OA_PATH_CLEAR_STREAK    LIDAR_OA_STREAK
 #endif
-#define OA_CLEAR_MIN_CM         PATH_CLEAR_MIN_CM
-#define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
 /** Robot nặng (tablet + pin >~1.5kg): giảm tốc, tăng mô-men tối thiểu. */
 #define ROBOT_HEAVY_LOAD        1
 #if ROBOT_HEAVY_LOAD
@@ -266,10 +294,17 @@
 
 /* -------------------- CHẾ ĐỘ HOẠT ĐỘNG ----------------------------- */
 enum RobotMode : uint8_t {
-  MODE_MANUAL   = 0,    // Lái tay
-  MODE_AUTO     = 1,    // Tự hành né vật cản (reactive FSM)
-  MODE_WAYPOINT = 2     // Tự hành bám waypoint (Pure Pursuit, Phase 3)
+  MODE_MANUAL     = 0,  // Lái tay (SR04/LiDAR không cần hoạt động)
+  MODE_AUTO_TEST  = 1,  // Test cảm biến: đi thẳng + né vật cản (roomba-style)
+  MODE_WAYPOINT   = 2   // Tự hành bám waypoint (Pure Pursuit, kết nối Backend)
 };
+
+/**
+ * SR04 / HC-SR04 chỉ bật polling khi vào MODE_AUTO_TEST hoặc MODE_WAYPOINT.
+ * Lái tay (MODE_MANUAL) → cảm biến ở chế độ ngủ → tránh đọc linh tinh / hỏng cảm biến.
+ */
+extern volatile bool g_usEnabled;
+extern volatile bool g_mqttConnected;
 
 /* -------------------- CẤU TRÚC CHIA SẺ GIỮA 2 CORE ----------------- */
 struct RobotState {

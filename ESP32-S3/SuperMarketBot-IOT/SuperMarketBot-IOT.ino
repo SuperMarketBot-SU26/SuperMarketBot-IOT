@@ -71,20 +71,27 @@ RobotState g_state = {
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────
 SemaphoreHandle_t g_stateMutex;
+volatile bool g_usEnabled = false;  // SR04 bật khi vào mode tự hành, tắt khi lái tay
 
 /* =====================================================================
- *  Tự hành (LiDAR trước/sau): CRUISE → chặn → STOP_HOLD → quét tìm hướng
- *  trống (xoay có ramp, CW rồi CCW tới khi đủ xa phía trước) → hãm nhẹ
- *  → CRUISE. SR04 bật thì thêm bẻ cạnh. (SLAM / bản đồ: sau này thay FSM.)
+ *  Tự hành Test cảm biến (MODE_AUTO_TEST):
+ *    AT_FORWARD → gặp vật → chọn bên trống → AT_TURNING (xoay nhanh)
+ *    AT_TURNING → đủ xa phía trước → AT_FORWARD
+ *    AT_BACKUP  → sau chặn khi đang lùi
+ *
+ *  SR04 bật khi g_usEnabled = true (mode tự hành).
  * =================================================================== */
-enum AutoNavFsm : uint8_t {
-  AN_CRUISE = 0,
-  AN_BACKUP   // Lùi khi OA blocked hoàn toàn
-};
 
 static OaContext s_autoOa;
 
-static AutoNavFsm s_auto_fsm = AN_CRUISE;
+/** FSM test cảm biến: AT_FORWARD → gặp vật → chọn bên → AT_TURNING → lại FORWARD */
+enum AutoTestFsm : uint8_t {
+  AT_FORWARD = 0,  // Đi thẳng
+  AT_TURNING = 1,  // Xoay tìm đường
+  AT_BACKUP  = 2   // Lùi an toàn
+};
+
+static AutoTestFsm s_auto_fsm = AT_FORWARD;
 volatile uint8_t g_autoFsmState = 0;  /* expose → WebSocket field "afs" */
 static uint32_t s_auto_t0 = 0;
 /* Phase 1 — Stuck detection */
@@ -106,106 +113,159 @@ static uint16_t autoSpeedPwm() {
 /* Timestamp cho PID CRUISE */
 static uint32_t s_pidLastMs = 0;
 
+/** Heading lưu lại khi xoay tìm đường */
+static float s_testBaseHeading = 0.f;
+
+/**
+ * MODE_AUTO_TEST — Test cảm biến (Roomba-style):
+ *
+ *  AT_FORWARD: đi thẳng + heading-hold. Gặp vật trước → chọn bên trống
+ *              hơn → chuyển AT_TURNING. Sau chặn → AT_BACKUP.
+ *
+ *  AT_TURNING: xoay tại chỗ nhanh sang bên đã chọn. Khi trước đủ xa
+ *              (≥ PATH_CLEAR_MIN_CM) → quay về AT_FORWARD.
+ *
+ *  AT_BACKUP:  lùi an toàn. Khi sau thông thoáng → AT_FORWARD.
+ */
 static void autoNavigateAvoidance() {
   const uint16_t spd = autoSpeedPwm();
   const uint32_t now = millis();
   const int16_t f = obsFrontCm();
   const int16_t b = obsBackCm();
+  const int16_t l = obsLeftCm();
+  const int16_t r = obsRightCm();
 
-  /* Telemetry: 0=CRUISE, 10+=OA sub-state */
-  g_autoFsmState = (s_autoOa.state == OA_IDLE) ? (uint8_t)s_auto_fsm
-                   : (uint8_t)(10 + (uint8_t)s_autoOa.state);
-
-  /* ── Local OA đang chạy (quét → lách → vượt) ─────────────────── */
-  if (s_autoOa.state != OA_IDLE) {
-    OaTickResult r = oaTick(s_autoOa, f, now);
-    if (r == OA_RES_DONE) {
-      s_auto_fsm = AN_CRUISE;
-      Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa)."));
-    } else if (r == OA_RES_BLOCKED) {
-      s_auto_fsm = AN_BACKUP;
-      s_auto_t0 = now;
-      Serial.println(F("[AUTO] OA blocked — backup."));
-    }
-    return;
-  }
+  g_autoFsmState = (uint8_t)s_auto_fsm;
 
   switch (s_auto_fsm) {
-    case AN_CRUISE: {
+
+    /* ── AT_FORWARD: đi thẳng + heading hold ────────────────────────── */
+    case AT_FORWARD: {
       if (obsFrontBlocked() || obsRearBlocked()) {
         botStop();
         pidSpeedReset();
         break;
       }
 
-      /* Gặp vật → quét 2 bên, cần ≥1m mới lách (LocalObstacleAvoid.h) */
+      /* Gặp vật cản → chọn bên trống hơn → xoay */
       if (obsOaTriggered(f)) {
-        s_autoOa.cruiseHeading = g_pose.headingRad;
-        if (oaBegin(s_autoOa, f, now)) {
-          return;
-        }
-      }
+        bool leftOk  = obsCmValid(l) && l >= (int16_t)US_PATH_CLEAR_CM;
+        bool rightOk = obsCmValid(r) && r >= (int16_t)US_PATH_CLEAR_CM;
 
-      /* Chỉ tiến khi phía trước ≥ PATH_CLEAR_MIN_CM (1m) ổn định */
-      if (!oaCruiseForward(s_autoOa, f, spd)) {
-        if (!obsPathClear(f)) {
-          s_autoOa.cruiseHeading = g_pose.headingRad;
-          oaBegin(s_autoOa, f, now);
+        int8_t turnDir = 0;
+        if (leftOk && rightOk) {
+          turnDir = (r >= l) ? 1 : -1;
+        } else if (rightOk) {
+          turnDir = 1;
+        } else if (leftOk) {
+          turnDir = -1;
+        } else {
+          s_auto_fsm = AT_BACKUP;
+          s_auto_t0 = now;
+          botStop();
+          Serial.println(F("[AUTO-TEST] Both sides blocked — backup."));
+          break;
         }
-      }
-      break;
-    }
-    case AN_BACKUP: {
-      /* Lùi an toàn: kiểm tra Luna sau trước khi lùi */
-      if (obsRearBlocked()) {
-        /* Sau cũng chặn → dừng hẳn, chờ người can thiệp */
-        botStop();
-        if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS * 3u) {
-          s_auto_fsm = AN_CRUISE;  // timeout → thử lại từ đầu
-        }
+
+        s_testBaseHeading = oaNorm(g_pose.headingRad + (float)turnDir * ((float)M_PI / 2.f));
+        s_auto_fsm = AT_TURNING;
+        s_auto_t0 = now;
+        pidSpeedReset();
+        Serial.printf("[AUTO-TEST] Obstacle %dcm — turn %s (L=%d R=%d)\n",
+                      (int)f, turnDir > 0 ? "RIGHT" : "LEFT", (int)l, (int)r);
         break;
       }
-      uint16_t bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
-      botBackward(bkSpd);
-      if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS) {
+
+      /* Heading-hold: bù drift để đi thẳng */
+      float dt_s = (float)SAFE_LOOP_MS * 0.001f;
+      float holdCorrection = pidHoldCompute(g_pose.headingRad, g_pose.headingRad, dt_s);
+
+      /* Speed PID */
+      float pidOut = pidSpeedCompute(pwmToEstMps(spd), robotActualSpeedMps(), dt_s);
+      int32_t run = (int32_t)spd + (int32_t)pidOut;
+      if (run < 0) run = 0;
+      if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
+
+      int16_t turn = (int16_t)holdCorrection;
+      if (turn >  100) turn =  100;
+      if (turn < -100) turn = -100;
+      botDriveMecanum(0, 80, turn, (uint16_t)run);
+      break;
+    }
+
+    /* ── AT_TURNING: xoay tìm đường ──────────────────────────────── */
+    case AT_TURNING: {
+      /* Sau chặn → dừng xoay, backup */
+      if (obsRearBlocked()) {
         botStop();
-        oaReset(s_autoOa);
-        s_auto_fsm = AN_CRUISE;
+        s_auto_fsm = AT_BACKUP;
         s_auto_t0 = now;
-        s_stuckCount = 0;
+        Serial.println(F("[AUTO-TEST] Rear blocked while turning — backup."));
+        break;
+      }
+
+      /* Đủ xa phía trước → quay về đi thẳng */
+      if (obsPathClear(f)) {
+        s_auto_fsm = AT_FORWARD;
         pidSpeedReset();
         pidHoldReset();
+        Serial.printf("[AUTO-TEST] Path clear (%dcm) — resume forward.\n", (int)f);
+        break;
       }
-      break;
-    }
-    default:
-      s_auto_fsm = AN_CRUISE;
-      break;
-  }
 
-  /* ── Stuck detection (chạy CRUISE mà không tiến được) ───────────── */
-  if (s_auto_fsm == AN_CRUISE && g_state.mode == MODE_AUTO) {
-    if (now - s_stuckCheckMs >= STUCK_CHECK_INTERVAL_MS) {
-      s_stuckCheckMs = now;
-      float currDist = g_state.distFL + g_state.distFR;
-      float currentPwm = (float)autoSpeedPwm();
-      if (currentPwm >= (float)STUCK_MIN_PWM) {
-        float moved = currDist - s_stuckLastDist;
-        if (moved < 0.f) moved = -moved;
-        if (moved < 0.001f) {
-          s_stuckCount++;
-          if (s_stuckCount >= STUCK_THRESHOLD) {
-            s_stuckCount = 0;
-            s_auto_fsm = AN_BACKUP;
-            s_auto_t0 = now;
-            botStop();
-          }
-        } else {
-          s_stuckCount = 0;
-        }
+      /* Timeout xoay 5s → thử bên kia */
+      if (now - s_auto_t0 >= 5000u) {
+        s_testBaseHeading = oaNorm(s_testBaseHeading + (float)M_PI);
+        s_auto_t0 = now;
+        Serial.println(F("[AUTO-TEST] Turn timeout — try opposite direction."));
       }
-      s_stuckLastDist = currDist;
+
+      /* Xoay tại chỗ nhanh về hướng đã chọn */
+      float targetH = s_testBaseHeading;
+      float err = oaAngleDiff(targetH, g_pose.headingRad);
+      if (fabsf(err) > 0.15f) {
+        uint16_t turnPwm = oaPct2Pwm(40);
+        if (err > 0) botRotateCW(turnPwm);
+        else         botRotateCCW(turnPwm);
+      } else {
+        /* Đã quay đúng hướng, vẫn tiếp tục cho đến khi đủ xa */
+        botStop();
+      }
+      break;
     }
+
+    /* ── AT_BACKUP: lùi an toàn rồi quay lại ──────────────── */
+    case AT_BACKUP: {
+      if (now - s_auto_t0 < AUTO_BACKUP_REVERSE_MS) {
+        uint16_t bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
+        botBackward(bkSpd);
+        break;
+      }
+      if (!obsRearBlocked()) {
+        botStop();
+        s_auto_fsm = AT_FORWARD;
+        pidSpeedReset();
+        pidHoldReset();
+        Serial.println(F("[AUTO-TEST] Rear clear — resume forward."));
+        break;
+      }
+      /* Sau vẫn chặn sau timeout dài → đảo hướng thử lại */
+      if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS * 4u) {
+        botStop();
+        s_testBaseHeading = oaNorm(g_pose.headingRad + (float)M_PI);
+        s_auto_fsm = AT_FORWARD;
+        pidSpeedReset();
+        pidHoldReset();
+        Serial.println(F("[AUTO-TEST] Rear blocked long — flip heading."));
+      } else {
+        botStop();
+      }
+      break;
+    }
+
+    default:
+      s_auto_fsm = AT_FORWARD;
+      break;
   }
 }
 
@@ -231,46 +291,62 @@ static void taskControl(void *pvParams) {
       }
     }
 
-    if (g_state.mode == MODE_AUTO && s_ctrl_prev_mode != MODE_AUTO) {
+    if (g_state.mode == MODE_AUTO_TEST && s_ctrl_prev_mode != MODE_AUTO_TEST) {
       g_state.estop = false;
-      s_auto_fsm = AN_CRUISE;
+      g_usEnabled = true;
+      s_auto_fsm = AT_FORWARD;
       s_auto_t0 = millis();
-      s_pidLastMs = millis();
       s_stuckCount = 0;
       oaReset(s_autoOa);
-      s_autoOa.cruiseHeading = g_pose.headingRad;
+      s_testBaseHeading = g_pose.headingRad;
       pidSpeedReset();
       pidHoldReset();
-      /* Báo backend chuyển mode */
-      strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
+      Serial.println(F("[AUTO-TEST] Mode entered — SR04 enabled, forward."));
+      strncpy((char *)g_mqttPendingStatus, "auto_test", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
     }
-    if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
-      s_auto_fsm = AN_CRUISE;
+    if (g_state.mode != MODE_AUTO_TEST && s_ctrl_prev_mode == MODE_AUTO_TEST) {
+      g_usEnabled = false;
+      s_auto_fsm = AT_FORWARD;
       oaReset(s_autoOa);
+      Serial.println(F("[AUTO-TEST] Mode exited — SR04 disabled."));
       strncpy((char *)g_mqttPendingStatus, "manual", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
     }
+    /* WAYPOINT: bật SR04 khi cần, tắt khi ra */
+    if (g_state.mode == MODE_WAYPOINT && s_ctrl_prev_mode != MODE_WAYPOINT) {
+      g_usEnabled = true;
+      s_wpFsm = WP_ROUTE_SET;
+      s_auto_fsm = AT_FORWARD;
+      oaReset(s_wpOa);
+      botStop();
+      strncpy(g_wpStatus, "route_set", sizeof(g_wpStatus) - 1);
+      Serial.println(F("[WP] Mode entered — SR04 enabled, waiting for route from backend."));
+    }
+    if (g_state.mode != MODE_WAYPOINT && s_ctrl_prev_mode == MODE_WAYPOINT) {
+      g_usEnabled = false;
+      Serial.println(F("[WP] Mode exited — SR04 disabled."));
+    }
     s_ctrl_prev_mode = g_state.mode;
 
-#if USE_LIDAR_HARDWARE
+    /* ── Sensor Fusion: poll cả hai hệ thống mỗi vòng loop ─── */
+    /* LiDAR (100Hz) — rất nhanh, đọc UART */
     sensorsPollLidar();
-    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
-        || wpNavOaActive()) {
-      sensorsPollLidar();
-      sensorsPollLidar();
-    }
-#endif
+    if (wpNavOaActive()) { sensorsPollLidar(); sensorsPollLidar(); }
 
-#if USE_HC_SR04_HARDWARE
+    /* HC-SR04 (tầm gần) — tuần tự 4 góc, chậm hơn */
     sensorsPollUS();
-    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
-        || wpNavOaActive()) {
-      sensorsPollUS();
+    if (wpNavOaActive()) { sensorsPollUS(); }
+
+    /* Debug: log cả LiDAR + SR04 mỗi 2 giây */
+    static uint32_t s_debugSensorMs = 0;
+    if (now - s_debugSensorMs >= 2000u) {
+      s_debugSensorMs = now;
+      Serial.printf("LiDAR F:%d B:%d | US F:%d B:%d L:%d R:%d\n",
+                    (int)g_state.lidarFront, (int)g_state.lidarBack,
+                    (int)g_state.usFront,   (int)g_state.usBack,
+                    (int)g_state.usLeft,    (int)g_state.usRight);
     }
-#else
-    sensorsPollUS();
-#endif
 
     if ((xTaskGetTickCount() - odomTick) >= pdMS_TO_TICKS(ODOM_PERIOD_MS)) {
       odomUpdate();
@@ -279,11 +355,11 @@ static void taskControl(void *pvParams) {
 
     if (g_state.estop) {
       botStop();
-      wpNavStop();   // Cũng abort waypoint nav nếu đang chạy
-      if (g_state.cmdX == 0 && g_state.cmdY == 0) g_state.estop = false;
+      wpNavStop();
+      if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) g_state.estop = false;
     } else if (g_state.mode == MODE_WAYPOINT) {
       wpNavTick();
-    } else if (g_state.mode == MODE_AUTO) {
+    } else if (g_state.mode == MODE_AUTO_TEST) {
       autoNavigateAvoidance();
     } else {
       if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {

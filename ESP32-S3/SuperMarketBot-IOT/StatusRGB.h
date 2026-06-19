@@ -39,7 +39,13 @@ inline void statusRgbUpdate() {
     const bool on = ((t / 100) & 1u) != 0;
     r = on ? 220 : 0;
     g = b = 0;
-  } else if (g_state.mode == MODE_AUTO) {
+  } else if (g_state.mode == MODE_AUTO_TEST) {
+    // Test cảm biến: vàng breathing nhanh
+    const float br = 0.4f + 0.6f * (0.5f + 0.5f * sinf(t * 0.012f));
+    r = (uint8_t)(220 * br);
+    g = (uint8_t)(160 * br);
+    b = 0;
+  } else if (g_state.mode == MODE_WAYPOINT) {
     // Tự hành: hơi sáng hơn, nhịp nhanh hơn, thêm ánh xanh
     const float br = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * 0.01f));
     r = (uint8_t)(SMB_COL_R * br);

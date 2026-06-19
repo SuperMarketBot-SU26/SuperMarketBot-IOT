@@ -59,6 +59,8 @@ static PubSubClient     g_mqttClient(g_wifiClient);
 static uint32_t         g_mqttLastReconnectMs = 0;
 static uint32_t         g_mqttLastTelemetryMs = 0;
 bool                    g_mqttEnabled = false; ///< true khi STA đã lên. Được set trong WebUI.h
+/** true khi MQTT client đã kết nối thành công tới broker. Core 1 đọc để hiển thị badge. */
+volatile bool           g_mqttConnected = false;
 
 /* ==================== FLAG THREAD-SAFE (Core 1 → Core 0) =========== */
 /** Core 1 set flag này để Core 0 publish status message */
@@ -87,7 +89,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 
   } else if (strcmp(cmd, "mode_auto") == 0) {
     if (millis() < BOOT_GUARD_MS) return;
-    g_state.mode = MODE_AUTO;
+    g_state.mode = MODE_AUTO_TEST;
 
   } else if (strcmp(cmd, "mode_manual") == 0) {
     robotForceManualStop();
@@ -100,13 +102,17 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 
   } else if (strcmp(cmd, "navigate") == 0) {
     if (millis() < BOOT_GUARD_MS) {
-      Serial.println(F("[MQTT] navigate ignored (boot guard — dung Manual truoc)."));
+      Serial.println(F("[MQTT] navigate ignored (boot guard)."));
       return;
     }
+    /* wpNavSetRoute nhận waypoints trước */
     const char *wpJson = doc["payload"] | "{}";
     if (!wpNavParseAndStart(wpJson)) {
-      Serial.println(F("[MQTT] navigate: parse/start failed"));
+      Serial.println(F("[MQTT] navigate: parse failed."));
+      return;
     }
+    /* Bắt đầu điều hướng (chuyển WP_ROUTE_SET → WP_NAVIGATING) */
+    wpNavStart();
 
   } else {
     Serial.printf("[MQTT] Unknown command: %s\n", cmd);
@@ -147,11 +153,13 @@ static void mqttReconnect() {
 
   if (ok) {
     g_mqttClient.subscribe(MQTT_TOPIC_COMMAND);
+    g_mqttConnected = true;
     Serial.printf(" OK. Subscribed: %s\n", MQTT_TOPIC_COMMAND);
     /* Publish online status ngay khi kết nối */
     strncpy((char *)g_mqttPendingStatus, "online", sizeof(g_mqttPendingStatus) - 1);
     g_mqttStatusPending = true;
   } else {
+    g_mqttConnected = false;
     Serial.printf(" FAIL rc=%d\n", g_mqttClient.state());
   }
 }
@@ -165,7 +173,7 @@ static void mqttCheckAutoDock(int batPct) {
 
   /* Pin yếu → hủy route hiện tại và yêu cầu backend điều hướng về trạm sạc */
   if (batPct < (int)DOCK_LOW_BAT_PCT && !s_dockRequested
-      && (g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO)) {
+      && (g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO_TEST)) {
     s_dockRequested = true;
     wpNavCancel();  // Hủy route đang chạy
     strncpy((char *)g_mqttPendingStatus, "low_battery",
@@ -205,7 +213,8 @@ static void mqttPublishTelemetry() {
   doc["Status"]        = "online";
   doc["CurrentNodeId"] = (const char *)nullptr;
   doc["Mode"]          = (g_state.mode == MODE_WAYPOINT) ? "waypoint"
-                       : (g_state.mode == MODE_AUTO)     ? "auto" : "manual";
+                       : (g_state.mode == MODE_AUTO_TEST) ? "auto"
+                       : "manual";
   doc["IsOnline"]      = true;
   doc["XCoord"]        = g_pose.x;
   doc["YCoord"]        = g_pose.y;
@@ -241,7 +250,9 @@ static void mqttPublishStatus(const char *status) {
 
   StaticJsonDocument<128> doc;
   doc["Status"]   = status;
-  doc["Mode"]     = (g_state.mode == MODE_AUTO) ? "auto" : "manual";
+  doc["Mode"]     = (g_state.mode == MODE_WAYPOINT) ? "waypoint"
+                 : (g_state.mode == MODE_AUTO_TEST) ? "auto"
+                 : "manual";
   doc["IsOnline"] = true;
 
   char buf[128];
@@ -259,7 +270,12 @@ static void mqttLoop() {
     g_mqttStatusPending = false;
   }
 
+  bool wasConnected = g_mqttClient.connected();
   mqttReconnect();
+  if (wasConnected && !g_mqttClient.connected()) {
+    g_mqttConnected = false;  // Mất kết nối MQTT
+    Serial.println(F("[MQTT] Disconnected."));
+  }
   if (g_mqttClient.connected()) {
     g_mqttClient.loop();
     mqttPublishTelemetry();

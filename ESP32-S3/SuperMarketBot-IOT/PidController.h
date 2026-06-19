@@ -1,5 +1,5 @@
 /* =====================================================================
- *  PidController.h — PID tốc độ cho AN_CRUISE (tự hành)
+ *  PidController.h — Speed PID + Heading Hold PID (tự hành)
  *
  *  Dùng 1 PID scalar cho tốc độ trung bình (speed PID):
  *    setpoint = vTargetMps (m/s mong muốn)

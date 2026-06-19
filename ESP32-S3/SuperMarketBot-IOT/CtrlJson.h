@@ -21,6 +21,7 @@ inline void robotForceManualStop() {
   g_state.cmdY = 0;
   g_state.cmdStrafe = 0;
   g_state.estop = false;
+  g_usEnabled = false;  // Tắt SR04 khi về lái tay
   botStop();
   wpNavCancel();
 }
