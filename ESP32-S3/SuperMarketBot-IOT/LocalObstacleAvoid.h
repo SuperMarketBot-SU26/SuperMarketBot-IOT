@@ -1,6 +1,6 @@
 /* =====================================================================
  *  LocalObstacleAvoid.h — Né vật: SR04 4 góc (chọn trái/phải) hoặc quét LiDAR
- *  Dùng chung MODE_AUTO_TEST và MODE_WAYPOINT.
+ *  Dùng chung MODE_AUTO và MODE_WAYPOINT.
  * =====================================================================*/
 #ifndef LOCAL_OBSTACLE_AVOID_H
 #define LOCAL_OBSTACLE_AVOID_H
@@ -212,34 +212,6 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
       ctx.stateT0 = now;
       return OA_RES_BLOCKED;
     }
-
-    /* Sensor Fusion: nếu cả hai cảm biến thấy đường thông
-     * → dùng Mecanum strafe (không cần xoay đầu, camera/tablet giữ hướng).
-     * Nếu không đủ khoảng trống → fallback quay heading rồi tiến. */
-    int16_t fCm = obsFrontCm();
-    int16_t bCm = obsBackCm();
-    int16_t lCm = obsLeftCm();
-    int16_t rCm = obsRightCm();
-
-    bool pathClear = !obsOaTriggered(fCm) && !obsOaTriggered(bCm);
-    bool lateralClear = (lCm > (int16_t)US_OA_DETECT_CM || !obsLidarValid())
-                     && (rCm > (int16_t)US_OA_DETECT_CM || !obsLidarValid());
-
-    if (pathClear && lateralClear) {
-      /* Strafe Mecanum: không đổi heading, dịch ngang qua vật cản.
-       * swerveDir = +1 → strafe phải, -1 → strafe trái.
-       * Chạy PWM 55 (strafe), 35 (tiến nhẹ để tránh bánh bị trượt).
-       * Heading hold giữ hướng gốc. */
-      float dt_s = (float)SAFE_LOOP_MS * 0.001f;
-      float holdCorr = pidHoldCompute(ctx.headingBefore, g_pose.headingRad, dt_s);
-      int16_t turn = (int16_t)holdCorr;
-      if (turn >  80) turn =  80;
-      if (turn < -80) turn = -80;
-      botDriveMecanum(ctx.swerveDir * 55, 35, turn, 100);
-      return OA_RES_RUNNING;
-    }
-
-    /* Fallback: xoay heading rồi tiến thẳng (phương án cũ) */
     float headingErr = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
     if (fabsf(headingErr) > 0.12f) {
       uint16_t rotPwm = oaPct2Pwm(OA_SCAN_SPEED_PCT);
@@ -257,12 +229,12 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
       return OA_RES_RUNNING;
     }
     uint16_t pwm = oaPct2Pwm(OA_SWERVE_SPEED_PCT);
-    float dt_s2 = (float)SAFE_LOOP_MS * 0.001f;
-    float pidOut = pidSpeedCompute(pwmToEstMps(pwm), robotActualSpeedMps(), dt_s2);
+    float dt_s = (float)SAFE_LOOP_MS * 0.001f;
+    float pidOut = pidSpeedCompute(pwmToEstMps(pwm), robotActualSpeedMps(), dt_s);
     int32_t run = (int32_t)pwm + (int32_t)pidOut;
     if (run < 0) run = 0;
     if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-    botDriveMecanum(0, 80, 0, (uint16_t)run);
+    botForward((uint16_t)run);
     return OA_RES_RUNNING;
   }
 
@@ -297,8 +269,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     int32_t run = (int32_t)pwm + (int32_t)pidOut;
     if (run < 0) run = 0;
     if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-    /* Mecanum tiến + heading hold */
-    botDriveMecanum(0, 80, 0, (uint16_t)run);
+    botForward((uint16_t)run);
     return OA_RES_RUNNING;
   }
 
@@ -329,16 +300,6 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
     return false;
   }
 
-  /* Sensor Fusion: giảm tốc sớm khi LiDAR phát hiện vật cản tầm xa.
-   * Khi đến gần (DECEL_NEAR), factor giảm về 0.15 → robot đi chậm lại
-   * trước khi SR04 đo được. */
-  float decel = lidarDecelFactor();
-  uint16_t effectivePwm = (uint16_t)((float)cruisePwm * decel);
-
-  /* Heading-hold PID: giữ hướng bằng encoder — "dò line ảo" */
-  float dt_s = (float)SAFE_LOOP_MS * 0.001f;
-  float holdCorrection = pidHoldCompute(ctx.cruiseHeading, g_pose.headingRad, dt_s);
-
   float err = oaAngleDiff(ctx.cruiseHeading, g_pose.headingRad);
   if (fabsf(err) > 0.18f) {
     uint16_t rotPwm = oaPct2Pwm(OA_SCAN_SPEED_PCT);
@@ -347,34 +308,36 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
     return true;
   }
 
-  /* Speed PID */
-  float pidOut = pidSpeedCompute(pwmToEstMps(effectivePwm), robotActualSpeedMps(), dt_s);
-  int32_t run = (int32_t)effectivePwm + (int32_t)pidOut;
-  if (run < 0) run = 0;
-  if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-
-  /* Side steering từ SR04 (tầm gần — bẻ lái khi sát tường) */
-  int16_t steer = 0;
 #if USE_HC_SR04_HARDWARE
-  if (obsLeftCm() > (int16_t)US_MIN_VALID_CM && obsLeftCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
+  int16_t steer = 0;
+  if (obsCmValid(obsLeftCm()) && obsLeftCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
     steer += 35;
   }
-  if (obsRightCm() > (int16_t)US_MIN_VALID_CM && obsRightCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
+  if (obsCmValid(obsRightCm()) && obsRightCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
     steer -= 35;
   }
-#endif
-  if (steer >  80) steer =  80;
+  if (steer > 80) steer = 80;
   if (steer < -80) steer = -80;
-
+  float dt_s = (float)SAFE_LOOP_MS * 0.001f;
+  float pidOut = pidSpeedCompute(pwmToEstMps(cruisePwm), robotActualSpeedMps(), dt_s);
+  int32_t run = (int32_t)cruisePwm + (int32_t)pidOut;
+  if (run < 0) run = 0;
+  if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
   if (steer != 0) {
-    int16_t turn = steer + (int16_t)holdCorrection;
-    if (turn >  100) turn =  100;
-    if (turn < -100) turn = -100;
-    botDriveMecanum(0, 80, turn, (uint16_t)run);
+    botDrive(steer, 80, (uint16_t)run);
   } else {
-    botDriveMecanum(0, 80, (int16_t)holdCorrection, (uint16_t)run);
+    botForward((uint16_t)run);
   }
   return true;
+#else
+  float dt_s = (float)SAFE_LOOP_MS * 0.001f;
+  float pidOut = pidSpeedCompute(pwmToEstMps(cruisePwm), robotActualSpeedMps(), dt_s);
+  int32_t run = (int32_t)cruisePwm + (int32_t)pidOut;
+  if (run < 0) run = 0;
+  if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
+  botForward((uint16_t)run);
+  return true;
+#endif
 }
 
 #endif // LOCAL_OBSTACLE_AVOID_H

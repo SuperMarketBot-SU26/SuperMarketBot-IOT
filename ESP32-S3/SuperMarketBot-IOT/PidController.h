@@ -1,5 +1,5 @@
 /* =====================================================================
- *  PidController.h — Speed PID + Heading Hold PID (tự hành)
+ *  PidController.h — PID tốc độ cho AN_CRUISE (tự hành)
  *
  *  Dùng 1 PID scalar cho tốc độ trung bình (speed PID):
  *    setpoint = vTargetMps (m/s mong muốn)
@@ -35,13 +35,6 @@
 #define PID_YAW_I_MAX   30.f
 #define PID_YAW_OUT_MAX 100.f  // cmdX range -100..100
 
-/** Heading-hold PID — cho đi thẳng giữ đà (ít gain hơn Yaw PID) */
-#define PID_HOLD_KP     60.f
-#define PID_HOLD_KI     0.f
-#define PID_HOLD_KD     8.f
-#define PID_HOLD_I_MAX  20.f
-#define PID_HOLD_OUT_MAX 100.f
-
 /* ==================== Struct PID =================================== */
 struct PidState {
   float kp, ki, kd;
@@ -60,12 +53,6 @@ static PidState s_pidSpeed = {
 static PidState s_pidYaw = {
   PID_YAW_KP, PID_YAW_KI, PID_YAW_KD,
   PID_YAW_I_MAX, PID_YAW_OUT_MAX,
-  0.f, 0.f, true
-};
-
-static PidState s_pidHold = {
-  PID_HOLD_KP, PID_HOLD_KI, PID_HOLD_KD,
-  PID_HOLD_I_MAX, PID_HOLD_OUT_MAX,
   0.f, 0.f, true
 };
 
@@ -151,27 +138,6 @@ inline float pidYawCompute(float targetRad, float actualRad, float dt_s) {
   while (err < -(float)M_PI) err += 2.f * (float)M_PI;
   s_pidYaw.prevError = err;  // override để pidCompute tính đúng derivative
   return pidCompute(s_pidYaw, actualRad + err, actualRad, dt_s); // pass err thông qua setpoint trick
-}
-
-/* ==================== Heading Hold PID ============================= */
-/**
- * Giữ heading ổn định khi đi thẳng.
- * @param targetRad  Heading mong muốn (rad)
- * @param actualRad  Heading thực từ g_pose.headingRad
- * @param dt_s       Chu kỳ điều khiển
- * @return cmdX delta [-100, 100] — cộng vào steer khi đi thẳng
- */
-inline float pidHoldCompute(float targetRad, float actualRad, float dt_s) {
-  float err = targetRad - actualRad;
-  while (err >  (float)M_PI) err -= 2.f * (float)M_PI;
-  while (err < -(float)M_PI) err += 2.f * (float)M_PI;
-  return pidCompute(s_pidHold, actualRad + err, actualRad, dt_s);
-}
-
-inline void pidHoldReset() {
-  s_pidHold.integral = 0.f;
-  s_pidHold.prevError = 0.f;
-  s_pidHold.firstRun = true;
 }
 
 #endif // PID_CONTROLLER_H

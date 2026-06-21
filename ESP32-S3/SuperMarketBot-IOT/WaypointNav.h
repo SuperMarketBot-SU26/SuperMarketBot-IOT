@@ -13,8 +13,8 @@
  *  Safety hardstop: LiDAR < AUTO_LIDAR_BLOCK_CM → dừng ngay trong MỌI state
  *
  *  API:
- *    wpNavSetRoute(pts, count)  — Đặt danh sách waypoint mới (chỉ lưu, chưa chạy)
- *    wpNavStart()               — Bắt đầu chạy (gọi SAU wpNavSetRoute)
+ *    wpNavSetRoute(pts, count)  — Đặt danh sách waypoint mới
+ *    wpNavStart()               — Bắt đầu (MODE_WAYPOINT)
  *    wpNavStop()                — Dừng, về MODE_MANUAL
  *    wpNavCancel()              — Hủy route (dùng cho auto-dock)
  *    wpNavTick()                — Gọi mỗi SAFE_LOOP_MS từ taskControl
@@ -56,9 +56,8 @@ struct Waypoint {
 
 enum WpFsmState : uint8_t {
   WP_IDLE = 0,
-  WP_ROUTE_SET,            // Vào mode Tự hành rồi nhưng chưa có lộ trình — chờ backend gửi navigate
-  WP_NAVIGATING,           // Pure Pursuit đang chạy
-  WP_OBSTACLE_HOLD,       // Không lách được → chờ / reroute MQTT
+  WP_NAVIGATING,            // Pure Pursuit (+ LocalObstacleAvoid.h khi gặp vật)
+  WP_OBSTACLE_HOLD,         // Không lách được → chờ / reroute MQTT
   WP_DONE,
   WP_ABORTED
 };
@@ -116,33 +115,25 @@ inline void wpNavSetRoute(const Waypoint *pts, uint8_t count) {
   s_wpCount  = count;
   s_wpIndex  = 0;
   oaReset(s_wpOa);
-  /* KHÔNG đổi FSM — chỉ lưu lộ trình, chờ wpNavStart() */
+  s_wpFsm    = WP_IDLE;
   strncpy(g_wpStatus, "route_set", sizeof(g_wpStatus) - 1);
   Serial.printf("[WP] Route set: %d waypoints\n", (int)count);
 }
 
-/**
- * Bắt đầu điều hướng — gọi sau khi backend gửi lệnh navigate.
- * Chỉ chạy khi đang ở WP_ROUTE_SET (tức đã bật mode Tự hành).
- */
 inline void wpNavStart() {
   if (s_wpCount == 0) {
-    Serial.println(F("[WP] No waypoints — ignore start."));
-    return;
-  }
-  if (s_wpFsm != WP_ROUTE_SET) {
-    Serial.println(F("[WP] Not waiting for route (WP_ROUTE_SET)."));
+    Serial.println(F("[WP] No waypoints — abort"));
     return;
   }
   s_wpIndex    = 0;
   oaReset(s_wpOa);
   s_wpFsm      = WP_NAVIGATING;
   s_wpT0       = millis();
+  g_state.mode = MODE_WAYPOINT;
   pidSpeedReset();
   pidYawReset();
-  pidHoldReset();
   strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
-  Serial.printf("[WP] Started → WP[0] (%.3f, %.3f)\n",
+  Serial.printf("[WP] Start → WP[0] (%.3f, %.3f)\n",
                 s_wpRoute[0].x, s_wpRoute[0].y);
 }
 
@@ -180,12 +171,6 @@ inline bool wpNavOaActive() {
 /* ==================== TICK ======================================== */
 inline void wpNavTick() {
   if (s_wpFsm == WP_IDLE || s_wpFsm == WP_DONE || s_wpFsm == WP_ABORTED) return;
-
-  /* WP_ROUTE_SET: chờ lộ trình từ backend — chỉ dừng motor, không chạy Pure Pursuit */
-  if (s_wpFsm == WP_ROUTE_SET) {
-    botStop();
-    return;
-  }
 
   const uint32_t now   = millis();
   const int16_t  fCm   = obsFrontCm();
@@ -289,9 +274,9 @@ inline void wpNavTick() {
       return;
     }
 
-    /* ── Pure Pursuit steering + heading hold (encoder "dò line ảo") ── */
+    /* ── Pure Pursuit steering ─────────────────────────────────── */
     float targetH = atan2f(dy, dx);
-    float alpha    = wpAngleDiff(targetH, g_pose.headingRad);
+    float alpha   = wpAngleDiff(targetH, g_pose.headingRad);
 
     /* Quá lệch → xoay tại chỗ */
     if (fabsf(alpha) > WP_MAX_STEER_RAD) {
@@ -301,33 +286,21 @@ inline void wpNavTick() {
       return;
     }
 
-    /* Pure Pursuit steer (góc lệch từ hướng robot tới waypoint) */
-    int16_t ppSteer = (int16_t)(WP_STEER_K * alpha);
-    if (ppSteer >  100) ppSteer =  100;
-    if (ppSteer < -100) ppSteer = -100;
+    int16_t steer = (int16_t)(WP_STEER_K * alpha);
+    if (steer >  100) steer =  100;
+    if (steer < -100) steer = -100;
 
-    /* Heading hold: bù drift encoder để đi thẳng chính xác hơn */
-    float dt_s     = (float)SAFE_LOOP_MS * 0.001f;
-    float holdCorr = pidHoldCompute(targetH, g_pose.headingRad, dt_s);
-
-    /* Speed: giảm khi gần waypoint */
     uint16_t spd = (dist < WP_SLOW_RADIUS_M)
                  ? wpPct2Pwm(WP_SLOW_SPEED_PCT)
                  : wpPct2Pwm(WP_CRUISE_SPEED_PCT);
 
-    /* Speed PID */
+    float dt_s    = (float)SAFE_LOOP_MS * 0.001f;
     float pidOut  = pidSpeedCompute(pwmToEstMps(spd), robotActualSpeedMps(), dt_s);
     int32_t runPwm = (int32_t)spd + (int32_t)pidOut;
     if (runPwm < 0) runPwm = 0;
     if (runPwm > (int32_t)PWM_MAX) runPwm = (int32_t)PWM_MAX;
 
-    /* Tổng steer: Pure Pursuit + heading hold */
-    int16_t turn = ppSteer + (int16_t)holdCorr;
-    if (turn >  100) turn =  100;
-    if (turn < -100) turn = -100;
-
-    /* Mecanum: strafe=0, fwd=80%, turn=correction */
-    botDriveMecanum(0, 80, turn, (uint16_t)runPwm);
+    botDrive(steer, 80, (uint16_t)runPwm);
     break;
   }
 
@@ -368,10 +341,7 @@ inline void wpNavTick() {
 
 /* ==================== Parse MQTT navigate payload ================= */
 /**
- * Parse JSON waypoints từ Backend — CHỈ lưu lộ trình, KHÔNG bắt đầu chạy.
- * Gọi wpNavStart() riêng sau khi xác nhận đang ở WP_ROUTE_SET.
- *
- * Format JSON từ Backend:
+ * Format JSON từ Backend (Phase 3 NavigationCommandService):
  *   {"waypoints":[{"x":1.2,"y":0.5,"nodeId":3}, ...]}
  *   hoặc {"waypoints":[nodeId1, nodeId2, ...]}  (dùng fake coord — test only)
  */
@@ -409,6 +379,7 @@ inline bool wpNavParseAndStart(const char *jsonPayload) {
   if (count == 0) return false;
 
   wpNavSetRoute(pts, count);
+  wpNavStart();
   return true;
 }
 

@@ -5,8 +5,7 @@
  *    motorsStandby(en)       — Bật/tắt STBY chung
  *    motorDrive(M_*, speed)  — speed ∈ [-PWM_MAX .. +PWM_MAX]
  *    botForward / Backward / RotateCW / RotateCCW / Stop
- *    botDriveMecanum(s,fwd,t,base) — Mecanum X-config kinematics
- *    botDrive(x, y, base)           — arcade mixing (backward-compatible)
+ *    botDrive(x, y, base)    — Lái kiểu joystick (arcade mixing)
  * =====================================================================*/
 #ifndef MOTORS_H
 #define MOTORS_H
@@ -115,16 +114,13 @@ inline void botRotateCCW(uint16_t s) {
 }
 
 /**
- * Điều khiển chuyển động đa hướng bằng bánh xe Mecanum (chuẩn chữ X).
- *
- * Công thức động học Mecanum (X-configuration):
+ * Lái Mecanum X-config (cho WebSocket joystick 3 trục).
  *   fl = fwd + strafe + turn
  *   rl = fwd - strafe + turn
  *   fr = fwd - strafe - turn
  *   rr = fwd + strafe - turn
- *
  * @param strafe  -100..100  tịnh tiến ngang (âm=trái, dương=phải)
- * @param fwd     -100..100  tiến/lùi  (âm=lùi,  dương=tiến)
+ * @param fwd     -100..100  tiến/lùi
  * @param turn    -100..100  xoay tại chỗ (âm=CCW, dương=CW)
  * @param base    0..PWM_MAX tốc độ nền tối đa
  */
@@ -132,13 +128,11 @@ inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
                              uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
 
-  // Tính tốc độ 4 bánh theo công thức X-config
   int32_t fl = (int32_t)fwd + (int32_t)strafe + (int32_t)turn;
   int32_t rl = (int32_t)fwd - (int32_t)strafe + (int32_t)turn;
   int32_t fr = (int32_t)fwd - (int32_t)strafe - (int32_t)turn;
   int32_t rr = (int32_t)fwd + (int32_t)strafe - (int32_t)turn;
 
-  // Chuẩn hóa (normalize) để không bánh nào vượt quá 'base'
   int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
   if (mag > (int32_t)base && mag > 0) {
     int32_t scale = (int32_t)base * 100 / mag;
@@ -153,10 +147,7 @@ inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
 }
 
 /**
- * Lái kiểu joystick (Arcade drive mixing) — tương thích ngược.
- * Chuyển tiếp sang botDriveMecanum: tay lái cũ x=xoay, y=tiến/lùi,
- * không có tịnh tiến ngang → strafe=0.
- *
+ * Lái kiểu joystick (Arcade drive mixing) — tương thích ngược bánh thường.
  * @param x    -100..100 (âm = xoay trái)
  * @param y    -100..100 (âm = lùi)
  * @param base 0..PWM_MAX — mức tốc độ nền tối đa
