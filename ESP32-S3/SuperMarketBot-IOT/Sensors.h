@@ -38,19 +38,49 @@ static int16_t s_usFiltered[4] = {
   (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM,
   (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM
 };
+/** Lịch sử 3 mẫu cho Median Filter mỗi cảm biến */
+static int16_t s_usHistory[4][3] = {
+  {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM},
+  {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM},
+  {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM},
+  {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM}
+};
 
-/** Lọc nhiễu SR04: giữ giá trị cũ nếu không echo hoặc nhảy >35cm một nhịp. */
+static inline int16_t getMedian3(int16_t a, int16_t b, int16_t c) {
+  if ((a <= b && b <= c) || (c <= b && b <= a)) return b;
+  if ((b <= a && a <= c) || (c <= a && a <= b)) return a;
+  return c;
+}
+
+/** Lọc nhiễu SR04 bằng Median Filter cửa sổ 3 — không bao giờ bị kẹt giá trị. */
 static inline int16_t usFilterSample(uint8_t idx, int16_t raw) {
-  if (raw <= 0) return s_usFiltered[idx];
+  if (raw <= 0) raw = (int16_t)US_PING_MAX_CM;
   if (raw > (int16_t)US_PING_MAX_CM) raw = (int16_t)US_PING_MAX_CM;
-  int16_t prev = s_usFiltered[idx];
-  const bool vPrev = (prev > (int16_t)US_MIN_VALID_CM && prev < (int16_t)US_PING_MAX_CM);
-  const bool vRaw  = (raw  > (int16_t)US_MIN_VALID_CM && raw  < (int16_t)US_PING_MAX_CM);
-  if (vPrev && vRaw && abs((int)raw - (int)prev) > 35) {
-    return prev;
+  if (raw < (int16_t)US_MIN_VALID_CM) raw = (int16_t)US_PING_MAX_CM;
+
+  // Nếu bộ lọc vừa bị reset (có giá trị -1)
+  if (s_usHistory[idx][0] == -1) {
+    s_usHistory[idx][0] = raw;
+    s_usHistory[idx][1] = raw;
+    s_usHistory[idx][2] = raw;
+  } else {
+    // Dịch chuyển lịch sử
+    s_usHistory[idx][0] = s_usHistory[idx][1];
+    s_usHistory[idx][1] = s_usHistory[idx][2];
+    s_usHistory[idx][2] = raw;
   }
-  s_usFiltered[idx] = raw;
-  return raw;
+
+  int16_t filtered = getMedian3(s_usHistory[idx][0], s_usHistory[idx][1], s_usHistory[idx][2]);
+  s_usFiltered[idx] = filtered;
+  return filtered;
+}
+
+inline void usFilterReset() {
+  for (int i = 0; i < 4; i++) {
+    s_usHistory[i][0] = -1;
+    s_usHistory[i][1] = -1;
+    s_usHistory[i][2] = -1;
+  }
 }
 #endif
 
@@ -151,24 +181,38 @@ inline void sensorsCommitPhyToState(const int16_t phy[4]) {
  */
 inline void sensorsPollUS() {
 #if USE_HC_SR04_HARDWARE
-  int16_t phy[4];
-  int16_t r;
-  r = (int16_t)g_sonarLF.ping_cm();
-  phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
-  if (r > 0) g_usPhyLastEchoMs[US_PHY_F] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  r = (int16_t)g_sonarRL.ping_cm();
-  phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
-  if (r > 0) g_usPhyLastEchoMs[US_PHY_B] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  r = (int16_t)g_sonarRF.ping_cm();
-  phy[US_PHY_L] = usFilterSample(US_PHY_L, r);
-  if (r > 0) g_usPhyLastEchoMs[US_PHY_L] = millis();
-  sensorsYieldMs(US_INTER_PING_MS);
-  r = (int16_t)g_sonarRR.ping_cm();
-  phy[US_PHY_R] = usFilterSample(US_PHY_R, r);
-  if (r > 0) g_usPhyLastEchoMs[US_PHY_R] = millis();
+  static int16_t phy[4] = {
+    (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM,
+    (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM
+  };
+  static uint8_t currentSensorIdx = 0;
+  int16_t r = 0;
+  
+  switch (currentSensorIdx) {
+    case US_PHY_F: // LF (Trái trước)
+      r = (int16_t)g_sonarLF.ping_cm();
+      phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
+      g_usPhyLastEchoMs[US_PHY_F] = millis();
+      break;
+    case US_PHY_B: // RL (Trái sau)
+      r = (int16_t)g_sonarRL.ping_cm();
+      phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
+      g_usPhyLastEchoMs[US_PHY_B] = millis();
+      break;
+    case US_PHY_L: // RF (Phải trước)
+      r = (int16_t)g_sonarRF.ping_cm();
+      phy[US_PHY_L] = usFilterSample(US_PHY_L, r);
+      g_usPhyLastEchoMs[US_PHY_L] = millis();
+      break;
+    case US_PHY_R: // RR (Phải sau)
+      r = (int16_t)g_sonarRR.ping_cm();
+      phy[US_PHY_R] = usFilterSample(US_PHY_R, r);
+      g_usPhyLastEchoMs[US_PHY_R] = millis();
+      break;
+  }
+
   sensorsCommitPhyToState(phy);
+  currentSensorIdx = (currentSensorIdx + 1) % 4;
 #else
   int16_t phy[4];
   phy[US_PHY_F] = g_state.lidarFront;
@@ -263,10 +307,10 @@ inline void sensorsPollLidar() {
 inline void sensorsLogBootSample() {
   delay(150);
 #if USE_HC_SR04_HARDWARE
-  Serial.println(F("[US] Boot ping 4 goc (8 vong)..."));
-  for (int i = 0; i < 8; i++) {
+  Serial.println(F("[US] Boot ping 4 goc (24 vong)..."));
+  for (int i = 0; i < 24; i++) {
     sensorsPollUS();
-    sensorsYieldMs(20);
+    sensorsYieldMs(30);
   }
   Serial.printf(
       "  US LF:%d RL:%d RF:%d RR:%d | F:%d B:%d L:%d R:%d cm (stop<%d)\n",

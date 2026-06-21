@@ -63,6 +63,13 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_prefs.begin(NVS_NAMESPACE, false);
     g_prefs.putUInt("autoBaseSpeed", g_state.autoBaseSpeed);
     g_prefs.end();
+  } else if (strcmp(t, "spdSwerve") == 0) {
+    uint16_t pct = doc["v"].as<uint16_t>();
+    if (pct > 100) pct = 100;
+    g_state.swerveBaseSpeed = (uint16_t)((uint32_t)pct * PWM_MAX / 100);
+    g_prefs.begin(NVS_NAMESPACE, false);
+    g_prefs.putUInt("swerveSpeed", g_state.swerveBaseSpeed);
+    g_prefs.end();
   } else if (strcmp(t, "mode") == 0) {
     uint8_t m = doc["m"].as<uint8_t>();
     Serial.printf("[WS-Mode] Yeu cau chuyen sang Mode: %d\n", m);

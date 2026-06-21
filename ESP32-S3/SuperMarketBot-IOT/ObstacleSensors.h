@@ -12,9 +12,26 @@ inline bool obsCmValid(int16_t cm) {
   return cm > (int16_t)US_MIN_VALID_CM && cm < (int16_t)US_PING_MAX_CM;
 }
 
-/** Trước = min(trái trước, phải trước); sau = min(trái sau, phải sau). */
-inline int16_t obsFrontCm() { return g_state.usFront; }
-inline int16_t obsBackCm()  { return g_state.usBack; }
+/** Trước = min(trái trước, phải trước, lidar trước); sau = min(trái sau, phải sau, lidar sau). */
+inline int16_t obsFrontCm() {
+  int16_t f = g_state.usFront;
+#if USE_LIDAR_HARDWARE
+  if (lidarCmValid(g_state.lidarFront)) {
+    if (g_state.lidarFront < f) f = g_state.lidarFront;
+  }
+#endif
+  return f;
+}
+
+inline int16_t obsBackCm() {
+  int16_t b = g_state.usBack;
+#if USE_LIDAR_HARDWARE
+  if (lidarCmValid(g_state.lidarBack)) {
+    if (g_state.lidarBack < b) b = g_state.lidarBack;
+  }
+#endif
+  return b;
+}
 inline int16_t obsLeftCm()  { return g_state.usLeft; }
 inline int16_t obsRightCm() { return g_state.usRight; }
 

@@ -63,6 +63,7 @@ RobotState g_state = {
   .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
+  .swerveBaseSpeed = 0,
   .mode = MODE_MANUAL,
   .estop = false,
   .lidarLastUpdateMs = 0,
@@ -72,6 +73,10 @@ RobotState g_state = {
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────
 SemaphoreHandle_t g_stateMutex;
 
+/** Hướng quay vật lý hiện tại của 4 động cơ (MID_FL, MID_RL, MID_FR, MID_RR)
+ *  Sử dụng để ký hiệu hóa số xung đếm từ encoder không chiều. */
+volatile int8_t g_motorDir[4] = {0, 0, 0, 0};
+
 /* =====================================================================
  *  Tự hành (LiDAR trước/sau): CRUISE → chặn → STOP_HOLD → quét tìm hướng
  *  trống (xoay có ramp, CW rồi CCW tới khi đủ xa phía trước) → hãm nhẹ
@@ -79,7 +84,8 @@ SemaphoreHandle_t g_stateMutex;
  * =================================================================== */
 enum AutoNavFsm : uint8_t {
   AN_CRUISE = 0,
-  AN_BACKUP   // Lùi khi OA blocked hoàn toàn
+  AN_BACKUP,   // Lùi khi OA blocked hoàn toàn
+  AN_SPIN_SEARCH // Xoay tìm hướng thoát khi kẹt 4 phía
 };
 
 static OaContext s_autoOa;
@@ -87,13 +93,14 @@ static OaContext s_autoOa;
 static AutoNavFsm s_auto_fsm = AN_CRUISE;
 volatile uint8_t g_autoFsmState = 0;  /* expose → WebSocket field "afs" */
 static uint32_t s_auto_t0 = 0;
+volatile uint32_t s_settleUntilMs = 0; // Trễ ổn định sau khi đổi hướng/trạng thái
 /* Phase 1 — Stuck detection */
 static uint32_t s_stuckCheckMs = 0;
 static float    s_stuckLastDist = 0.f;
 static uint8_t  s_stuckCount = 0;
 static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
 
-static uint16_t autoSpeedPwm() {
+uint16_t autoSpeedPwm() {
   uint16_t s = g_state.autoBaseSpeed;
   if (s == 0) s = g_state.baseSpeed;
   uint16_t cap = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_CRUISE_SPEED_PCT / 100u);
@@ -121,10 +128,13 @@ static void autoNavigateAvoidance() {
     OaTickResult r = oaTick(s_autoOa, f, now);
     if (r == OA_RES_DONE) {
       s_auto_fsm = AN_CRUISE;
-      Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa)."));
+      s_settleUntilMs = now + 450;
+      usFilterReset();
+      Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa). Settle 450ms."));
     } else if (r == OA_RES_BLOCKED) {
       s_auto_fsm = AN_BACKUP;
       s_auto_t0 = now;
+      oaReset(s_autoOa); // Reset s_autoOa state to OA_IDLE immediately so we can execute AN_BACKUP!
       Serial.println(F("[AUTO] OA blocked — backup."));
     }
     return;
@@ -132,9 +142,23 @@ static void autoNavigateAvoidance() {
 
   switch (s_auto_fsm) {
     case AN_CRUISE: {
-      if (obsFrontBlocked() || obsRearBlocked()) {
+      if (s_settleUntilMs > 0) {
+        if (now < s_settleUntilMs) {
+          botStop();
+          pidSpeedReset();
+          break;
+        } else {
+          s_settleUntilMs = 0;
+          Serial.println(F("[AUTO] Settle delay done — bat dau di tiep."));
+        }
+      }
+
+      if (obsFrontBlocked()) {
+        Serial.println(F("[AUTO] Phia truoc bi chan sat nut -> Chuyen sang AN_BACKUP de lui lai."));
         botStop();
         pidSpeedReset();
+        s_auto_fsm = AN_BACKUP;
+        s_auto_t0 = now;
         break;
       }
 
@@ -158,21 +182,52 @@ static void autoNavigateAvoidance() {
     case AN_BACKUP: {
       /* Lùi an toàn: kiểm tra Luna sau trước khi lùi */
       if (obsRearBlocked()) {
-        /* Sau cũng chặn → dừng hẳn, chờ người can thiệp */
+        /* Sau cũng chặn -> Chuyển sang xoay tại chỗ tìm hướng thoát! */
+        s_auto_fsm = AN_SPIN_SEARCH;
+        s_auto_t0 = now;
         botStop();
-        if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS * 3u) {
-          s_auto_fsm = AN_CRUISE;  // timeout → thử lại từ đầu
-        }
+        Serial.println(F("[AUTO] Sau cung bi chan -> Xoay tai cho tim huong thoat."));
         break;
       }
-      uint16_t bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
+      uint16_t bkSpd = g_state.swerveBaseSpeed;
+      if (bkSpd == 0) bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
       botBackward(bkSpd);
       if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS) {
         botStop();
         oaReset(s_autoOa);
+        usFilterReset();
         s_auto_fsm = AN_CRUISE;
         s_auto_t0 = now;
+        s_settleUntilMs = now + 450;
         s_stuckCount = 0;
+        Serial.println(F("[AUTO] Backup done -> Settle 450ms."));
+      }
+      break;
+    }
+    case AN_SPIN_SEARCH: {
+      // Xoay tại chỗ tìm hướng thoát
+      uint16_t spinSpd = g_state.swerveBaseSpeed;
+      if (spinSpd == 0) spinSpd = oaPct2Pwm(OA_SCAN_SPEED_PCT);
+      botRotateCW(spinSpd);
+      // Nếu hướng trước mặt đã thông thoáng
+      if (obsPathClear(f)) {
+        botStop();
+        oaReset(s_autoOa);
+        usFilterReset();
+        s_auto_fsm = AN_CRUISE;
+        s_auto_t0 = now;
+        s_settleUntilMs = now + 450;
+        Serial.println(F("[AUTO] Tim thay loi thoat khi xoay quet -> Settle 450ms."));
+      }
+      // Giới hạn xoay tối đa 6s tránh xoay vòng vô hạn nếu bị nhốt kín
+      if (now - s_auto_t0 >= 6000u) {
+        botStop();
+        oaReset(s_autoOa);
+        usFilterReset();
+        s_auto_fsm = AN_CRUISE;
+        s_auto_t0 = now;
+        s_settleUntilMs = now + 450;
+        Serial.println(F("[AUTO] Het 6s spin search -> Settle 450ms."));
       }
       break;
     }
@@ -238,6 +293,8 @@ static void taskControl(void *pvParams) {
       oaReset(s_autoOa);
       s_autoOa.cruiseHeading = g_pose.headingRad;
       pidSpeedReset();
+      usFilterReset();
+      s_settleUntilMs = millis() + 450;
       /* Báo backend chuyển mode */
       strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
       g_mqttStatusPending = true;
@@ -252,22 +309,9 @@ static void taskControl(void *pvParams) {
 
 #if USE_LIDAR_HARDWARE
     sensorsPollLidar();
-    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
-        || wpNavOaActive()) {
-      sensorsPollLidar();
-      sensorsPollLidar();
-    }
 #endif
 
-#if USE_HC_SR04_HARDWARE
     sensorsPollUS();
-    if ((g_state.mode == MODE_AUTO && s_autoOa.state != OA_IDLE)
-        || wpNavOaActive()) {
-      sensorsPollUS();
-    }
-#else
-    sensorsPollUS();
-#endif
 
     if ((xTaskGetTickCount() - odomTick) >= pdMS_TO_TICKS(ODOM_PERIOD_MS)) {
       odomUpdate();
@@ -350,17 +394,17 @@ void setup() {
   g_stateMutex = xSemaphoreCreateMutex();
 
   // ── Tạo FreeRTOS tasks ───────────────────────────────────────────
-  // Core 0: Web IO — stack 8KB, priority 1
+  // Core 0: Web IO — stack 10KB, priority 2 (tăng để WiFi/WS được xử lý kịp)
   xTaskCreatePinnedToCore(
     taskWebIO, "WebIO",
-    10240, nullptr, 1,
+    10240, nullptr, 2,
     nullptr, 0
   );
 
-  // Core 1: Điều khiển — stack 6KB, priority 5 (real-time)
+  // Core 1: Điều khiển — stack 8KB, priority 5 (real-time)
   xTaskCreatePinnedToCore(
     taskControl, "Control",
-    6144, nullptr, 5,
+    8192, nullptr, 5,
     nullptr, 1
   );
 

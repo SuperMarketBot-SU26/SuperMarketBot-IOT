@@ -78,29 +78,29 @@
 #define US_ECHO_B       US_ECHO_RL
 #define US_ECHO_L       US_ECHO_RF
 #define US_ECHO_R       US_ECHO_RR
-#define US_PING_MAX_CM    200
+#define US_PING_MAX_CM    100   // Giảm timeout ping: 200cm→1.7ms/ping, tránh block taskControl
 /** Nghỉ giữa hai ping (ms) — TRIG chung, tránh cross-talk. */
 #define US_INTER_PING_MS  16u
 #define US_DISPLAY_MAX_CM 160
 /** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
-#define US_MIN_VALID_CM     3
+#define US_MIN_VALID_CM     5
 /**
  * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
  */
 #define USE_HC_SR04_HARDWARE  1
-/** 0 khi chỉ dùng SR04 — không mở UART LiDAR (giảm nhiễu / CPU). */
-#define USE_LIDAR_HARDWARE    (USE_HC_SR04_HARDWARE ? 0 : 1)
+/** Bật cả hai phần cứng hoạt động song song để Fusion 5 cảm biến. */
+#define USE_LIDAR_HARDWARE    1
 
 #if USE_HC_SR04_HARDWARE
-/** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 30 cm thì dừng. */
-#define US_STOP_CM            30
+/** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
+#define US_STOP_CM            35
 /** Bắt đầu lách trước khi chạm vùng dừng. */
-#define US_OA_DETECT_CM       42
+#define US_OA_DETECT_CM       50
 /** Đủ xa để tiến / coi bên trống (SR04 không cần 1 m như LiDAR). */
-#define US_PATH_CLEAR_CM      48
+#define US_PATH_CLEAR_CM      50
 #define OA_DETECT_CM          US_OA_DETECT_CM
 #define PATH_CLEAR_MIN_CM     US_PATH_CLEAR_CM
-#define OA_PATH_CLEAR_STREAK  6
+#define OA_PATH_CLEAR_STREAK  18
 #else
 #define US_STOP_CM            30
 #define US_OA_DETECT_CM       42
@@ -128,15 +128,15 @@
 
 /* -------------------- AN TOÀN NÉ VẬT CẢN (không gian mở: siêu thị / hành lang) - */
 // Vùng "dừng cứng" (cm): dùng trong tự lái + né tránh. Tăng 26–35 nếu nhiễu/dừng sớm quá.
-#define SAFE_STOP_CM    28
+#define SAFE_STOP_CM    15
 // Bắt đầu giảm tốc khi vật trước gần hơn ngưỡng (cm). 80–120 = ít nhạy từ xa; 180–220 = nhả ga sớm.
 #define SAFE_SLOW_CM    100
 
 /** Đọc LiDAR dưới ngưỡng này (cm) coi là nhiễu / sàn / ngoài tầm tin cậy TF-Luna (~20cm min). */
 #define LIDAR_MIN_VALID_CM      18
-#define SAFE_LOOP_MS    30    // Chu kỳ vòng an toàn (ms)
+#define SAFE_LOOP_MS    50    // Chu kỳ vòng an toàn (ms) — 30→50ms để WebIO có CPU thở
 /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
-#define SAFE_SIDE_AVOID_CM  14
+#define SAFE_SIDE_AVOID_CM  30
 
 #if USE_HC_SR04_HARDWARE
 #define AUTO_LIDAR_BLOCK_CM     US_STOP_CM
@@ -151,10 +151,9 @@
 #endif
 #define OA_CLEAR_MIN_CM         PATH_CLEAR_MIN_CM
 #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
-/** Robot nặng (tablet + pin >~1.5kg): giảm tốc, tăng mô-men tối thiểu. */
 #define ROBOT_HEAVY_LOAD        1
 #if ROBOT_HEAVY_LOAD
-#define AUTO_CRUISE_SPEED_PCT   28
+#define AUTO_CRUISE_SPEED_PCT   55
 #define AUTO_MIN_PWM_FRAC       22
 #else
 #define AUTO_CRUISE_SPEED_PCT   42
@@ -171,7 +170,7 @@
 #define AUTO_TURN_MS         550u
 /** Phase 1 — Backup khi OA blocked (lùi thử) */
 #define AUTO_BACKUP_REVERSE_MS  600u   // Thời gian lùi (ms)
-#define AUTO_BACKUP_SPEED_PCT   30     // Tốc độ lùi (% của PWM_MAX)
+#define AUTO_BACKUP_SPEED_PCT   45     // Tốc độ lùi (% của PWM_MAX)
 
 /** Phase 1 — Stuck detection (motor chạy nhưng encoder không quay) */
 #define STUCK_CHECK_INTERVAL_MS  500u  // Kiểm tra mỗi 500ms
@@ -182,13 +181,13 @@
 /** Góc xoay tối đa mỗi chiều khi quét 2 bên (độ) */
 #define OA_SCAN_ANGLE_DEG       50.0f
 /** Tốc độ xoay khi scan (% PWM_MAX) — chậm để LiDAR đọc kịp */
-#define OA_SCAN_SPEED_PCT       25
+#define OA_SCAN_SPEED_PCT       42
 /** Góc lái chéo khi tránh vật cản (độ) */
 #define OA_SWERVE_ANGLE_DEG     35.0f
 /** Quãng đường lái chéo sang bên trống (m) — robot nặng cần lệch xa hơn */
 #define OA_SWERVE_DIST_M        (ROBOT_HEAVY_LOAD ? 0.52f : 0.40f)
 /** Tốc độ khi lái chéo và đi vượt (% PWM_MAX) */
-#define OA_SWERVE_SPEED_PCT     (ROBOT_HEAVY_LOAD ? 26 : 32)
+#define OA_SWERVE_SPEED_PCT     (ROBOT_HEAVY_LOAD ? 45 : 32)
 /** Quãng đường đi thẳng để vượt qua vật cản (m) */
 #define OA_PASS_DIST_M          (ROBOT_HEAVY_LOAD ? 0.65f : 0.50f)
 /** Số lần thử tự tránh tối đa trước khi fallback chờ/reroute */
@@ -244,7 +243,7 @@
  *  Ví dụ: 12V → R1(68k) → chân ADC → R2(10k) → GND
  *         Vadc = Vbat * R2/(R1+R2)  (đặt BAT_DIV_* khớp R thật của bạn)
  *  Bật BAT_MONITOR_ENABLE 1 và đặt BAT_ADC_PIN trùng chân còn trống + hỗ trợ ADC. */
-#define BAT_MONITOR_ENABLE  0
+#define BAT_MONITOR_ENABLE  1
 /** Mặc định tắt. Bật BAT thì đặt chân ADC trống (không trùng enc/LiDAR/UART). */
 #define BAT_ADC_PIN         15
 #define BAT_DIV_R1_KOHM     68.0f
@@ -288,6 +287,7 @@ struct RobotState {
   volatile int16_t cmdStrafe;  // -100..100 (trượt ngang, Mecanum)
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
+  volatile uint16_t swerveBaseSpeed; // 0..PWM_MAX — tốc độ riêng khi dạt tránh/lùi/xoay (slider web)
   volatile RobotMode mode;
   volatile bool estop;        // Cờ dừng khẩn cấp
   // Millis lần cuối có frame LiDAR hợp lệ / sau 1 vòng quét US (giám sát “tươi”)
@@ -323,6 +323,7 @@ extern volatile uint32_t g_luna1LastOkMs;
 extern volatile uint32_t g_luna2LastOkMs;
 extern volatile uint32_t g_usPhyLastEchoMs[4];
 extern volatile uint32_t g_encPhyLastPulseMs[4];
+extern volatile uint32_t s_settleUntilMs;
 
 /** Cửa sổ thời gian: sau bấy lâu không có tín hiệu thì web hiển thị OFF */
 #define SENSOR_LINK_MS_LIDAR  500u

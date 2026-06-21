@@ -46,6 +46,8 @@ inline void motorsInit() {
   motorsStandby(true);
 }
 
+extern volatile int8_t g_motorDir[4];
+
 /**
  * Điều khiển 1 động cơ.
  * @param id    chỉ số động cơ MID_*
@@ -56,14 +58,16 @@ inline void motorDrive(MotorId id, int32_t speed) {
   if (speed > 0) {
     digitalWrite(m.in1, HIGH);
     digitalWrite(m.in2, LOW);
+    g_motorDir[(uint8_t)id] = 1;
   } else if (speed < 0) {
     digitalWrite(m.in1, LOW);
     digitalWrite(m.in2, HIGH);
     speed = -speed;
+    g_motorDir[(uint8_t)id] = -1;
   } else {
-    // Phanh ngắn (short brake) để dừng dứt khoát
     digitalWrite(m.in1, HIGH);
     digitalWrite(m.in2, HIGH);
+    g_motorDir[(uint8_t)id] = 0;
   }
   if (speed > PWM_MAX) speed = PWM_MAX;
   ledcWrite(m.pwm, speed);
@@ -128,10 +132,21 @@ inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
                              uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
 
-  int32_t fl = (int32_t)fwd + (int32_t)strafe + (int32_t)turn;
-  int32_t rl = (int32_t)fwd - (int32_t)strafe + (int32_t)turn;
-  int32_t fr = (int32_t)fwd - (int32_t)strafe - (int32_t)turn;
-  int32_t rr = (int32_t)fwd + (int32_t)strafe - (int32_t)turn;
+  // Scale các đầu vào joystick (-100..100) theo tốc độ nền base
+  int32_t fwdScaled = (int32_t)fwd * (int32_t)base / 100;
+  int32_t strafeScaled = (int32_t)strafe * (int32_t)base / 100;
+  int32_t turnScaled = (int32_t)turn * (int32_t)base / 100;
+
+  // Mecanum con lăn tạo ma sát cao → nhân thêm để bù
+  // strafe yếu nhất → gain 1.35; fwd/turn gain 1.15
+  constexpr int32_t STRAFE_GAIN = 135;  // ×1.35
+  constexpr int32_t FWD_GAIN   = 115;  // ×1.15
+  constexpr int32_t TURN_GAIN  = 115;  // ×1.15
+
+  int32_t fl = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
+  int32_t rl = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
+  int32_t fr = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
+  int32_t rr = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
 
   int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
   if (mag > (int32_t)base && mag > 0) {

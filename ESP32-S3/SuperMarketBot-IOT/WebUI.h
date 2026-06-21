@@ -443,6 +443,7 @@ details pre{
           <div class="toggle-row">
             <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
             <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
+            <button type="button" class="mode-btn" id="btnRoute" onclick="setMode(2)">MQTT (Lộ trình)</button>
           </div>
           <div class="spd-block spd-block--manual">
             <div class="spd-block__head">
@@ -479,6 +480,18 @@ details pre{
             <input type="range" class="spd-range spd-range--auto" id="spdAutoSlider" min="15" max="100" value="50"
               oninput="sendSpeedAuto(this.value)" aria-label="Tốc độ tự hành phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
+          </div>
+          <div class="spd-block spd-block--auto">
+            <div class="spd-block__head">
+              <div>
+                <div class="spd-block__label">Tốc độ · Tránh vật</div>
+                <div class="spd-block__hint">Khi dạt chéo, đi lùi, xoay dò (15–100%)</div>
+              </div>
+              <span class="spd-block__badge" id="spdSwerveVal">45%</span>
+            </div>
+            <input type="range" class="spd-range spd-range--auto" id="spdSwerveSlider" min="15" max="100" value="45"
+              oninput="sendSpeedSwerve(this.value)" aria-label="Tốc độ tránh vật phần trăm"/>
+            <div class="spd-block__ticks"><span>15%</span><span>45%</span><span>100%</span></div>
           </div>
           <p class="hint" style="margin-top:8px;font-size:.68rem">Demo: <b>đi thẳng</b> → trước &lt; <code>AUTO_LIDAR_BLOCK_CM</code> thì <b>dừng</b> (<code>AUTO_STOP_HOLD_MS</code>) → <b>xoay quét</b> CW rồi CCW (<code>AUTO_SCAN_*_MS</code>) → lại <b>đi thẳng</b>. LiDAR sau vẫn đo trong lúc dừng. Không mắt ngang → không bẻ hông (trừ khi bật SR04).</p>
           <button type="button" class="estop" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
@@ -826,8 +839,14 @@ function applyTelemetry(d){
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
-      ml.textContent=(d.mode===2)?'Waypoint':((d.mode===1)?'Tự hành':'Lái tay');
-      ml.className=(d.mode===1)?'mode-auto':((d.mode===2)?'mode-auto':'mode-manual');
+      ml.textContent=(d.mode===2)?'MQTT (Lộ trình)':((d.mode===1)?'Tự hành':'Lái tay');
+      ml.className=(d.mode===1||d.mode===2)?'mode-auto':'mode-manual';
+      const btnMan = document.getElementById('btnManual');
+      const btnAut = document.getElementById('btnAuto');
+      const btnRot = document.getElementById('btnRoute');
+      if(btnMan) btnMan.classList.toggle('active', d.mode===0);
+      if(btnAut) btnAut.classList.toggle('active', d.mode===1);
+      if(btnRot) btnRot.classList.toggle('active', d.mode===2);
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
       if(d.tempC!=null && d.tempC>=0){
@@ -882,7 +901,8 @@ function applyTelemetry(d){
       if(d.lr2!=null)document.getElementById('dvLr2').textContent=String(d.lr2);
       if(d.spdPct!=null){
         const sl=document.getElementById('spdSlider');
-        if(sl && document.activeElement!==sl){
+        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
+        if(sl && document.activeElement!==sl && !touched){
           sl.value=d.spdPct;
           paintSpdTrack(sl,d.spdPct);
           document.getElementById('spdVal').textContent=String(d.spdPct)+'%';
@@ -890,11 +910,22 @@ function applyTelemetry(d){
       }
       if(d.spdAutoPct!=null){
         const sa=document.getElementById('spdAutoSlider');
-        if(sa && document.activeElement!==sa){
+        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
+        if(sa && document.activeElement!==sa && !touched){
           const av=Math.max(15,Math.min(100,d.spdAutoPct));
           sa.value=av;
           paintSpdTrack(sa,av);
           document.getElementById('spdAutoVal').textContent=String(d.spdAutoPct)+'%';
+        }
+      }
+      if(d.spdSwervePct!=null){
+        const ss=document.getElementById('spdSwerveSlider');
+        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
+        if(ss && document.activeElement!==ss && !touched){
+          const sv=Math.max(15,Math.min(100,d.spdSwervePct));
+          ss.value=sv;
+          paintSpdTrack(ss,sv);
+          document.getElementById('spdSwerveVal').textContent=String(d.spdSwervePct)+'%';
         }
       }
       if(!window._rawJTick) window._rawJTick=0;
@@ -925,23 +956,33 @@ function sendStrafe(v){
 }
 function wsS(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 function sendSpeed(v){
+  window._lastSliderTouch = Date.now();
   const el=document.getElementById('spdSlider');
   paintSpdTrack(el,v);
   document.getElementById('spdVal').textContent=v+'%';
   wsS({t:'spd',v:parseInt(v,10)});
 }
 function sendSpeedAuto(v){
+  window._lastSliderTouch = Date.now();
   const el=document.getElementById('spdAutoSlider');
   paintSpdTrack(el,v);
   document.getElementById('spdAutoVal').textContent=v+'%';
   wsS({t:'spdAuto',v:parseInt(v,10)});
 }
+function sendSpeedSwerve(v){
+  window._lastSliderTouch = Date.now();
+  const el=document.getElementById('spdSwerveSlider');
+  paintSpdTrack(el,v);
+  document.getElementById('spdSwerveVal').textContent=v+'%';
+  wsS({t:'spdSwerve',v:parseInt(v,10)});
+}
 function setMode(m){
   document.getElementById('btnManual').classList.toggle('active',m===0);
   document.getElementById('btnAuto').classList.toggle('active',m===1);
+  document.getElementById('btnRoute').classList.toggle('active',m===2);
   const ml=document.getElementById('modeLabel');
-  ml.textContent=m===1?'Tự hành (demo)':'Lái tay';
-  ml.className=m===1?'mode-auto':'mode-manual';
+  ml.textContent=(m===2)?'MQTT (Lộ trình)':((m===1)?'Tự hành (demo)':'Lái tay');
+  ml.className=(m===1||m===2)?'mode-auto':'mode-manual';
   wsS({t:'mode',m});
 }
 function sendEstop(){ wsS({t:'estop'}); }
@@ -1033,9 +1074,10 @@ initSecNav();
 buildLayoutGrid();
 buildMotorGrid();
 buildBump();
-(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider');
+(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider');
   if(a){paintSpdTrack(a,a.value);document.getElementById('spdVal').textContent=a.value+'%';}
-  if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}})();
+  if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}
+  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}})();
 connectWS();
 </script>
 </body>
@@ -1102,12 +1144,11 @@ inline void webUIBroadcast() {
   if (n >= sizeof(buf)) return;
   g_wsServer.broadcastTXT(buf);
 }
-
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
-  g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
-  g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", 0);
-  if (g_state.autoBaseSpeed == 0) g_state.autoBaseSpeed = g_state.baseSpeed;
+  g_state.baseSpeed = PWM_MAX * 50 / 100;
+  g_state.autoBaseSpeed = PWM_MAX * 40 / 100;
+  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 45 / 100);
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
   g_prefs.end();
@@ -1165,7 +1206,7 @@ inline void webUIInit() {
       if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\n[WiFi] STA OK! SSID=\"%s\"  IP=%s\n",
                       staList[si].ssid, WiFi.localIP().toString().c_str());
-        g_mqttEnabled = true;
+        g_mqttEnabled = false;
         staOk = true;
       }
     }
@@ -1206,6 +1247,22 @@ inline void webUILoop() {
   g_httpServer.handleClient();
   g_wsServer.loop();
 #if WIFI_STA_ENABLE
+  // Tự động bật/tắt MQTT dựa trên g_state.mode
+  if (g_state.mode == MODE_WAYPOINT) {
+    if (!g_mqttEnabled) {
+      g_mqttEnabled = true;
+      g_mqttLastReconnectMs = 0; // Buộc thử kết nối lại ngay lập tức
+      Serial.println(F("[MQTT] Che do Lo trinh kich hoat -> Bat ket noi MQTT..."));
+    }
+  } else {
+    if (g_mqttEnabled) {
+      g_mqttEnabled = false;
+      if (g_mqttClient.connected()) {
+        g_mqttClient.disconnect();
+        Serial.println(F("[MQTT] Thoat che do Lo trinh -> Ngat ket noi MQTT."));
+      }
+    }
+  }
   mqttLoop();
 #endif
 }

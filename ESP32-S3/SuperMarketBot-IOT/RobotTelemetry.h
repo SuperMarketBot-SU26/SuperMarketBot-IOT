@@ -152,6 +152,10 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
       g_state.autoBaseSpeed ? g_state.autoBaseSpeed : g_state.baseSpeed;
   doc["spdAutoPct"] =
       (autoSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
+  uint32_t swerveSpdUse =
+      g_state.swerveBaseSpeed ? g_state.swerveBaseSpeed : (PWM_MAX * 45 / 100);
+  doc["spdSwervePct"] =
+      (swerveSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
 
   const uint32_t nowMs = (uint32_t)millis();
   if (g_state.lidarLastUpdateMs == 0u) {

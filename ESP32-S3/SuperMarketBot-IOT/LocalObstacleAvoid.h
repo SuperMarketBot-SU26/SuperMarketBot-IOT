@@ -12,6 +12,8 @@
 #include "Motors.h"
 #include <math.h>
 
+extern uint16_t autoSpeedPwm();
+
 enum OaFsmState : uint8_t {
   OA_IDLE = 0,
   OA_SCAN_CW,
@@ -70,39 +72,48 @@ inline void oaReset(OaContext &ctx) {
 }
 
 #if USE_HC_SR04_HARDWARE
-/** SR04: đọc ngay trái/phải (4 góc) — không cần xoay quét. */
+/** SR04: Tính điểm 2 bên sườn và lách tránh về hướng rộng hơn. */
 static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
-  ctx.scanMaxLeft  = (float)obsLeftCm();
-  ctx.scanMaxRight = (float)obsRightCm();
-  const float need = (float)US_PATH_CLEAR_CM;
+  int16_t lf = g_state.usLF;
+  int16_t rf = g_state.usRF;
+  int16_t lr = g_state.usLR;
+  int16_t rr = g_state.usRR;
 
-  bool leftOk  = (ctx.scanMaxLeft  >= need);
-  bool rightOk = (ctx.scanMaxRight >= need);
+  // Tính điểm 2 bên sườn (bằng khoảng cách nhỏ nhất ở sườn bên đó)
+  int16_t leftScore  = min(lf, lr);
+  int16_t rightScore = min(rf, rr);
 
-  Serial.printf("[OA-US] L=%.0f R=%.0f cm (can>=%d)\n",
-                ctx.scanMaxLeft, ctx.scanMaxRight, (int)US_PATH_CLEAR_CM);
+  // Ngưỡng an toàn tối thiểu để có thể lách tránh (stop distance + 3cm dự phòng)
+  const int16_t minSwerveDist = (int16_t)(US_STOP_CM + 3);
 
+  bool leftOk  = (leftScore >= minSwerveDist);
+  bool rightOk = (rightScore >= minSwerveDist);
+
+  // Nếu cả 2 bên đều quá chật hẹp -> Chuyển sang Lùi xe
   if (!leftOk && !rightOk) {
     ctx.state = OA_BLOCKED;
     ctx.stateT0 = now;
     ctx.attempts = OA_MAX_ATTEMPTS;
-    Serial.println(F("[OA-US] Hai ben chat — blocked."));
+    Serial.printf("[OA-US] Ca 2 ben deu ket cung (<%dcm) -> Blocked (lui xe). Trai:%d Phai:%d\n", 
+                  (int)minSwerveDist, (int)leftScore, (int)rightScore);
     return false;
   }
 
-  if (leftOk && rightOk) {
-    ctx.swerveDir = (ctx.scanMaxRight >= ctx.scanMaxLeft) ? 1 : -1;
+  // So sánh điểm số để chọn hướng an toàn nhất (hướng rộng hơn)
+  if (rightScore >= leftScore) {
+    ctx.swerveDir = 1;  // Lách sang Phải
   } else {
-    ctx.swerveDir = rightOk ? 1 : -1;
+    ctx.swerveDir = -1; // Lách sang Trái
   }
 
-  float swerveRad = (float)OA_SWERVE_ANGLE_DEG * (float)M_PI / 180.f;
-  ctx.swerveTarget = oaNorm(ctx.headingBefore + ctx.swerveDir * swerveRad);
+  // Giữ nguyên heading khi strafe — không xoay xe
+  ctx.swerveTarget = ctx.headingBefore;
   ctx.poseXBefore = g_pose.x;
   ctx.poseYBefore = g_pose.y;
   ctx.state = OA_SWERVE;
   ctx.stateT0 = now;
-  Serial.printf("[OA-US] Lach %s\n", ctx.swerveDir > 0 ? "PHAI" : "TRAI");
+  Serial.printf("[OA-US] Quyet dinh trut ngang sang: %s (Diem Trai: %dcm, Diem Phai: %dcm)\n", 
+                ctx.swerveDir > 0 ? "PHAI" : "TRAI", (int)leftScore, (int)rightScore);
   return true;
 }
 #endif
@@ -205,81 +216,63 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
 #endif
 
   case OA_SWERVE: {
-    if (hardFront || obsAnyCornerBlocked()) {
+    // Nếu góc hoặc cảm biến bị chặn trong lúc strafe
+    if (obsAnyCornerBlocked()) {
       botStop();
-      pidSpeedReset();
       ctx.state = OA_BLOCKED;
       ctx.stateT0 = now;
       return OA_RES_BLOCKED;
     }
-    float headingErr = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    if (fabsf(headingErr) > 0.12f) {
-      uint16_t rotPwm = oaPct2Pwm(OA_SCAN_SPEED_PCT);
-      if (headingErr > 0) botRotateCW(rotPwm);
-      else botRotateCCW(rotPwm);
-      return OA_RES_RUNNING;
-    }
-    if (oaDistMoved(ctx) >= OA_SWERVE_DIST_M) {
-      botStop();
-      ctx.swerveTarget = ctx.headingBefore;
-      ctx.poseXBefore = g_pose.x;
-      ctx.poseYBefore = g_pose.y;
-      ctx.state = OA_PASS;
+    // Nếu đường phía trước đã thông thoáng
+    if (obsPathClear(frontCm)) {
+      ctx.state = OA_PASS; // trượt thêm 1 chút rồi tiếp tục thẳng
       ctx.stateT0 = now;
       return OA_RES_RUNNING;
     }
-    uint16_t pwm = oaPct2Pwm(OA_SWERVE_SPEED_PCT);
-    float dt_s = (float)SAFE_LOOP_MS * 0.001f;
-    float pidOut = pidSpeedCompute(pwmToEstMps(pwm), robotActualSpeedMps(), dt_s);
-    int32_t run = (int32_t)pwm + (int32_t)pidOut;
-    if (run < 0) run = 0;
-    if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-    botForward((uint16_t)run);
+    // Tiến chéo thông minh: dạt ngang tối đa lực, đi tiến nhẹ nếu phía trước còn trống tương đối
+    int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
+    int16_t fwdCmd = 0;
+    if (obsCmValid(frontCm) && frontCm >= 20) {
+      fwdCmd = 45; // Tiến chéo mượt mà
+    }
+    uint16_t spd = g_state.swerveBaseSpeed;
+    if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
+    botDriveMecanum(strafeCmd, fwdCmd, 0, spd);
     return OA_RES_RUNNING;
   }
 
   case OA_PASS: {
-    if (hardFront || obsAnyCornerBlocked()) {
+    if (obsAnyCornerBlocked()) {
       botStop();
-      pidSpeedReset();
       ctx.state = OA_BLOCKED;
       ctx.stateT0 = now;
       return OA_RES_BLOCKED;
     }
-    float headingErr = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    if (fabsf(headingErr) > 0.12f) {
-      uint16_t rotPwm = oaPct2Pwm(OA_SCAN_SPEED_PCT);
-      if (headingErr > 0) botRotateCW(rotPwm);
-      else botRotateCCW(rotPwm);
+    // Vật cản lại xuất hiện phía trước → quay lại strafe
+    if (!obsPathClear(frontCm)) {
+      ctx.state = OA_SWERVE;
+      ctx.stateT0 = now;
       return OA_RES_RUNNING;
     }
-    if (oaDistMoved(ctx) >= OA_PASS_DIST_M) {
+    // Trượt thêm 600ms để vượt bề rộng vật cản trước khi tiến thẳng
+    if (now - ctx.stateT0 >= 600u) {
       botStop();
-      pidSpeedReset();
-      ctx.cruiseHeading = ctx.headingBefore;
-      ctx.pathClearStreak = 0;
       ctx.state = OA_IDLE;
       ctx.attempts = 0;
-      Serial.println(F("[OA] Passed — resume."));
+      Serial.println(F("[OA] Vuot vat can bang strafe hoan tat."));
       return OA_RES_DONE;
     }
-    uint16_t pwm = oaPct2Pwm(OA_SWERVE_SPEED_PCT);
-    float dt_s = (float)SAFE_LOOP_MS * 0.001f;
-    float pidOut = pidSpeedCompute(pwmToEstMps(pwm), robotActualSpeedMps(), dt_s);
-    int32_t run = (int32_t)pwm + (int32_t)pidOut;
-    if (run < 0) run = 0;
-    if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-    botForward((uint16_t)run);
+    int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
+    int16_t fwdCmd = 45; // Vượt chướng ngại vật mượt mà
+    uint16_t spd = g_state.swerveBaseSpeed;
+    if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
+    botDriveMecanum(strafeCmd, fwdCmd, 0, spd);
     return OA_RES_RUNNING;
   }
 
   case OA_BLOCKED:
-    botStop();
-    if (obsPathClear(frontCm)) {
-      ctx.attempts = 0;
-      ctx.state = OA_IDLE;
-      return OA_RES_IDLE;
-    }
+    // Bị chặn cứng -> lập tức kích hoạt lùi xe (backup) để thoát kẹt ngay
+    oaReset(ctx);
     return OA_RES_BLOCKED;
 
   default:
@@ -300,31 +293,27 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
     return false;
   }
 
-  float err = oaAngleDiff(ctx.cruiseHeading, g_pose.headingRad);
-  if (fabsf(err) > 0.18f) {
-    uint16_t rotPwm = oaPct2Pwm(OA_SCAN_SPEED_PCT);
-    if (err > 0) botRotateCW(rotPwm);
-    else botRotateCCW(rotPwm);
-    return true;
-  }
-
 #if USE_HC_SR04_HARDWARE
-  int16_t steer = 0;
+  // Sử dụng trượt ngang (strafe) thay vì xoay khi né cạnh tường để đi thẳng mượt mà
+  int16_t strafe = 0;
   if (obsCmValid(obsLeftCm()) && obsLeftCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
-    steer += 35;
+    strafe += 40; // Trượt sang phải nếu bên trái gần tường
   }
   if (obsCmValid(obsRightCm()) && obsRightCm() < (int16_t)SAFE_SIDE_AVOID_CM) {
-    steer -= 35;
+    strafe -= 40; // Trượt sang trái nếu bên phải gần tường
   }
-  if (steer > 80) steer = 80;
-  if (steer < -80) steer = -80;
+  if (strafe > 80) strafe = 80;
+  if (strafe < -80) strafe = -80;
+
   float dt_s = (float)SAFE_LOOP_MS * 0.001f;
   float pidOut = pidSpeedCompute(pwmToEstMps(cruisePwm), robotActualSpeedMps(), dt_s);
   int32_t run = (int32_t)cruisePwm + (int32_t)pidOut;
   if (run < 0) run = 0;
   if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-  if (steer != 0) {
-    botDrive(steer, 80, (uint16_t)run);
+
+  if (strafe != 0) {
+    // Tiến thẳng đồng thời trượt ngang né tường, không xoay hướng xe
+    botDriveMecanum(strafe, 100, 0, (uint16_t)run);
   } else {
     botForward((uint16_t)run);
   }

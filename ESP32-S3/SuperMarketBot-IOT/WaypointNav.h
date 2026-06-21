@@ -37,6 +37,9 @@
 extern volatile bool g_mqttStatusPending;
 extern volatile char g_mqttPendingStatus[32];
 
+/* Forward declaration — Sensors.h (tránh phụ thuộc thứ tự include) */
+extern void usFilterReset();
+
 /* ==================== Tham số điều hướng =========================== */
 #define WP_ARRIVE_THRESH_M    0.12f   // Ngưỡng "đến nơi" (m)
 #define WP_STEER_K            55.f    // Hệ số steer Pure Pursuit
@@ -72,6 +75,9 @@ static uint32_t   s_wpT0    = 0;          // Millis khi bắt đầu waypoint hi
 /* Obstacle-hold fallback */
 static uint32_t   s_wpObstHoldStart = 0;
 static OaContext  s_wpOa;
+
+/* Settle delay sau khi OA xong — tránh lao ngay vào hướng mới */
+static uint32_t   s_wpSettleUntilMs = 0;
 
 /* Status string cho MQTT telemetry */
 char g_wpStatus[32] = "idle";
@@ -193,8 +199,10 @@ inline void wpNavTick() {
     OaTickResult r = oaTick(s_wpOa, fCm, now);
     if (r == OA_RES_DONE) {
       s_wpT0 = now;
+      s_wpSettleUntilMs = now + 450;  // Pause 450ms để filter sensor ổn định
+      usFilterReset();
       strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
-      Serial.println(F("[WP] OA done — resume Pure Pursuit."));
+      Serial.println(F("[WP] OA done — settle 450ms sau do resume Pure Pursuit."));
     } else if (r == OA_RES_BLOCKED) {
       wpSetState(WP_OBSTACLE_HOLD, now, "blocked");
       s_wpObstHoldStart = now;
@@ -257,6 +265,18 @@ inline void wpNavTick() {
       return;
     }
 
+    /* ── Settle delay sau OA: dừng chờ filter sensor ổn định ──── */
+    if (s_wpSettleUntilMs > 0) {
+      if (now < s_wpSettleUntilMs) {
+        botStop();
+        pidSpeedReset();
+        return;
+      } else {
+        s_wpSettleUntilMs = 0;
+        Serial.println(F("[WP] Settle done — tiep tuc Pure Pursuit."));
+      }
+    }
+
     /* Gặp vật → quét/lách (≥1m mới coi bên trống) */
     if (obsOaTriggered(fCm)) {
       if (oaBegin(s_wpOa, fCm, now)) {
@@ -316,8 +336,10 @@ inline void wpNavTick() {
     if (pathClear) {
       pidSpeedReset();
       oaReset(s_wpOa);
+      usFilterReset();
+      s_wpSettleUntilMs = now + 450;  // Settle trước khi Pure Pursuit lại
       wpSetState(WP_NAVIGATING, now, "navigating");
-      Serial.println(F("[WP] Duong truoc du xa — resuming."));
+      Serial.println(F("[WP] Duong truoc du xa — settle 450ms roi resume."));
       return;
     }
 

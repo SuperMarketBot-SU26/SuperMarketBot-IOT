@@ -36,6 +36,9 @@ struct Pose2D {
 
 Pose2D g_pose = {0.f, 0.f, 0.f};
 
+/** Chiều vật lý từ Motors.h — ký hiệu hóa ticks để phân biệt tiến/lùi/xoay */
+extern volatile int8_t g_motorDir[4];
+
 /* -------------------- Biến tích lũy ticks (Phase 2 bổ sung) ------- */
 /** Tổng ticks trên từng bánh kể từ lần locUpdate() cuối — được cộng bởi ISR qua odomUpdate() */
 static uint32_t s_locTotalFL = 0;
@@ -69,10 +72,16 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   s_locTotalRL = totalRL;
   s_locTotalRR = totalRR;
 
+  /* Ký hiệu hóa delta bằng hướng vật lý (g_motorDir) — phân biệt tiến/lùi */
+  int32_t sdFL = (int32_t)dFL * g_motorDir[0]; // MID_FL
+  int32_t sdFR = (int32_t)dFR * g_motorDir[2]; // MID_FR
+  int32_t sdRL = (int32_t)dRL * g_motorDir[1]; // MID_RL
+  int32_t sdRR = (int32_t)dRR * g_motorDir[3]; // MID_RR
+
   /* Quãng đường mỗi bên (m) — trung bình trước + sau */
   const float ticksToM = WHEEL_CIRC_M / ENC_PPR;
-  float dLeft  = ((float)(dFL + dRL) * 0.5f) * ticksToM;
-  float dRight = ((float)(dFR + dRR) * 0.5f) * ticksToM;
+  float dLeft  = ((float)(sdFL + sdRL) * 0.5f) * ticksToM;
+  float dRight = ((float)(sdFR + sdRR) * 0.5f) * ticksToM;
 
   /* Tính ds và dθ */
   float ds     = (dLeft + dRight) * 0.5f;
