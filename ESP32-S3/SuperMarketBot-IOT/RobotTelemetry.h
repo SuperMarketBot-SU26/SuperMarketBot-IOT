@@ -67,14 +67,14 @@ inline void batteryRead(float &voltsOut, int &pctOut) {
  * @param includeSlow true = thêm heap/nhiệt/pin/map (nặng); false = gói nhẹ cho HMI.
  */
 inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
-#if USE_HC_SR04_HARDWARE
-  doc["lf"] = g_state.usFront;
-  doc["lb"] = g_state.usBack;
-  doc["senMode"] = "us4";
-#else
+#if USE_LIDAR_HARDWARE
   doc["lf"] = g_state.lidarFront;
   doc["lb"] = g_state.lidarBack;
   doc["senMode"] = "lidar";
+#else
+  doc["lf"] = g_state.usFront;
+  doc["lb"] = g_state.usBack;
+  doc["senMode"] = "us4";
 #endif
   doc["uf"] = g_state.usFront;
   doc["ub"] = g_state.usBack;
@@ -111,10 +111,10 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
   doc["afs"]  = g_autoFsmState;   /* 0=CRUISE 1=STOP 2=SCAN 3=DECEL 4=BACKUP */
   doc["wpSt"] = (const char *)g_wpStatus;
   doc["estop"] = g_state.estop;
-
+ 
   doc["upMs"] = (uint32_t)millis();
   doc["apCli"] = WiFi.softAPgetStationNum();
-
+ 
   if (includeSlow) {
     float tC = readChipTempCelsius();
     if (tC == tC && tC >= -40.f && tC <= 125.f) {
@@ -141,7 +141,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
     doc["hMin"] = (uint32_t)heap_caps_get_minimum_free_size(
         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   }
-
+ 
   doc["cx"] = (int)g_state.cmdX;
   doc["cy"] = (int)g_state.cmdY;
   doc["cstr"] = (int)g_state.cmdStrafe;
@@ -156,7 +156,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
       g_state.swerveBaseSpeed ? g_state.swerveBaseSpeed : (PWM_MAX * 45 / 100);
   doc["spdSwervePct"] =
       (swerveSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
-
+ 
   const uint32_t nowMs = (uint32_t)millis();
   if (g_state.lidarLastUpdateMs == 0u) {
     doc["lfAge"] = -1;
@@ -170,7 +170,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
     uint32_t ageU = nowMs - g_state.usLastUpdateMs;
     doc["usAge"] = (int32_t)(ageU > 86400000u ? 86400000 : ageU);
   }
-
+ 
   if (includeSlow) {
     float batVolts = -1.f;
     int batPct = -1;
@@ -185,23 +185,23 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
     doc["lr1"] = (uint32_t)g_lunaRxBytes1;
     doc["lr2"] = (uint32_t)g_lunaRxBytes2;
   }
-
+ 
   /* HMI: có tín hiệu thật gần đây → web hiển thị ON (không thì OFF) */
   auto recentOk = [nowMs](uint32_t lastMs, uint32_t winMs) -> bool {
     return lastMs != 0u && (nowMs - lastMs) < winMs;
   };
-#if USE_HC_SR04_HARDWARE
+#if USE_LIDAR_HARDWARE
+  bool l1ok = recentOk(g_luna1LastOkMs, SENSOR_LINK_MS_LIDAR);
+  bool l2ok = recentOk(g_luna2LastOkMs, SENSOR_LINK_MS_LIDAR);
+  doc["lfOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l1ok : l2ok);
+  doc["lbOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l2ok : l1ok);
+#else
   bool usFok = recentOk(g_usPhyLastEchoMs[US_PHY_F], SENSOR_LINK_MS_US)
             || recentOk(g_usPhyLastEchoMs[US_PHY_L], SENSOR_LINK_MS_US);
   bool usBok = recentOk(g_usPhyLastEchoMs[US_PHY_B], SENSOR_LINK_MS_US)
             || recentOk(g_usPhyLastEchoMs[US_PHY_R], SENSOR_LINK_MS_US);
   doc["lfOn"] = (uint8_t)usFok;
   doc["lbOn"] = (uint8_t)usBok;
-#else
-  bool l1ok = recentOk(g_luna1LastOkMs, SENSOR_LINK_MS_LIDAR);
-  bool l2ok = recentOk(g_luna2LastOkMs, SENSOR_LINK_MS_LIDAR);
-  doc["lfOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l1ok : l2ok);
-  doc["lbOn"] = (uint8_t)((g_lidarFrontUart == 0u) ? l2ok : l1ok);
 #endif
   JsonArray jUsOn = doc["usOn"].to<JsonArray>();
   JsonArray jEnOn = doc["encOn"].to<JsonArray>();

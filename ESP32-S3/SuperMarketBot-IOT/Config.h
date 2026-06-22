@@ -78,10 +78,10 @@
 #define US_ECHO_B       US_ECHO_RL
 #define US_ECHO_L       US_ECHO_RF
 #define US_ECHO_R       US_ECHO_RR
-#define US_PING_MAX_CM    100   // Giảm timeout ping: 200cm→1.7ms/ping, tránh block taskControl
+#define US_PING_MAX_CM    200   // Max range for HC-SR04 (200cm = ~11.4ms timeout per ping, safe for 50ms loop)
 /** Nghỉ giữa hai ping (ms) — TRIG chung, tránh cross-talk. */
 #define US_INTER_PING_MS  16u
-#define US_DISPLAY_MAX_CM 160
+#define US_DISPLAY_MAX_CM 200
 /** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
 #define US_MIN_VALID_CM     5
 /**

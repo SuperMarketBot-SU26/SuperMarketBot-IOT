@@ -45,6 +45,11 @@ static int16_t s_usHistory[4][3] = {
   {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM},
   {(int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM}
 };
+/** Bộ lọc thông thấp EMA cho cảm biến siêu âm */
+static float s_usEma[4] = {
+  (float)US_PING_MAX_CM, (float)US_PING_MAX_CM,
+  (float)US_PING_MAX_CM, (float)US_PING_MAX_CM
+};
 
 static inline int16_t getMedian3(int16_t a, int16_t b, int16_t c) {
   if ((a <= b && b <= c) || (c <= b && b <= a)) return b;
@@ -52,7 +57,7 @@ static inline int16_t getMedian3(int16_t a, int16_t b, int16_t c) {
   return c;
 }
 
-/** Lọc nhiễu SR04 bằng Median Filter cửa sổ 3 — không bao giờ bị kẹt giá trị. */
+/** Lọc nhiễu SR04 bằng kết hợp Median Filter và EMA (Exponential Moving Average) */
 static inline int16_t usFilterSample(uint8_t idx, int16_t raw) {
   if (raw <= 0) raw = (int16_t)US_PING_MAX_CM;
   if (raw > (int16_t)US_PING_MAX_CM) raw = (int16_t)US_PING_MAX_CM;
@@ -63,6 +68,7 @@ static inline int16_t usFilterSample(uint8_t idx, int16_t raw) {
     s_usHistory[idx][0] = raw;
     s_usHistory[idx][1] = raw;
     s_usHistory[idx][2] = raw;
+    s_usEma[idx] = (float)raw;
   } else {
     // Dịch chuyển lịch sử
     s_usHistory[idx][0] = s_usHistory[idx][1];
@@ -70,7 +76,17 @@ static inline int16_t usFilterSample(uint8_t idx, int16_t raw) {
     s_usHistory[idx][2] = raw;
   }
 
-  int16_t filtered = getMedian3(s_usHistory[idx][0], s_usHistory[idx][1], s_usHistory[idx][2]);
+  int16_t median = getMedian3(s_usHistory[idx][0], s_usHistory[idx][1], s_usHistory[idx][2]);
+  
+  // EMA Filter: phản hồi nhanh khi tiến lại gần vật cản, mịn khi ở xa
+  float rawF = (float)median;
+  if (rawF < s_usEma[idx]) {
+    s_usEma[idx] = 0.7f * rawF + 0.3f * s_usEma[idx]; // Gặp vật cản: bám nhanh (tránh trễ)
+  } else {
+    s_usEma[idx] = 0.2f * rawF + 0.8f * s_usEma[idx]; // Rút xa: hồi phục mịn màng
+  }
+
+  int16_t filtered = (int16_t)(s_usEma[idx] + 0.5f);
   s_usFiltered[idx] = filtered;
   return filtered;
 }
@@ -80,6 +96,7 @@ inline void usFilterReset() {
     s_usHistory[i][0] = -1;
     s_usHistory[i][1] = -1;
     s_usHistory[i][2] = -1;
+    s_usEma[i] = (float)US_PING_MAX_CM;
   }
 }
 #endif
@@ -277,18 +294,36 @@ inline void sensorsPollLidar() {
   static uint8_t idx1 = 0, idx2 = 0;
   static int16_t rawD1 = (int16_t)LIDAR_MAX_CM;
   static int16_t rawD2 = (int16_t)LIDAR_MAX_CM;
+  static float emaL1 = (float)LIDAR_MAX_CM;
+  static float emaL2 = (float)LIDAR_MAX_CM;
   int16_t d;
   if (readTfLunaStream(Serial1, buf1, idx1, g_lunaRxBytes1, d)) {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
-    rawD1 = d;
+    
+    // EMA Filter cho LiDAR 1 (TF-Luna 100Hz)
+    float rawF = (float)d;
+    if (rawF < emaL1) {
+      emaL1 = 0.8f * rawF + 0.2f * emaL1; // Vật cản tiến lại gần: bám nhanh bảo vệ an toàn
+    } else {
+      emaL1 = 0.15f * rawF + 0.85f * emaL1; // Rút xa: mượt mà chống nhảy số
+    }
+    rawD1 = (int16_t)(emaL1 + 0.5f);
     g_luna1LastOkMs = (uint32_t)millis();
     g_state.lidarLastUpdateMs = millis();
   }
   if (readTfLunaStream(Serial2, buf2, idx2, g_lunaRxBytes2, d)) {
     if (d < 0) d = 0;
     if (d > (int16_t)LIDAR_MAX_CM) d = (int16_t)LIDAR_MAX_CM;
-    rawD2 = d;
+    
+    // EMA Filter cho LiDAR 2
+    float rawF = (float)d;
+    if (rawF < emaL2) {
+      emaL2 = 0.8f * rawF + 0.2f * emaL2;
+    } else {
+      emaL2 = 0.15f * rawF + 0.85f * emaL2;
+    }
+    rawD2 = (int16_t)(emaL2 + 0.5f);
     g_luna2LastOkMs = (uint32_t)millis();
     g_state.lidarLastUpdateMs = millis();
   }
