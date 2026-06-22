@@ -211,8 +211,8 @@
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
 /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
  *  Thêm hotspot điện thoại vào STA_SSID_2/3 để demo ở bất kỳ đâu mà không cần reflash. */
-#define STA_SSID               "FPTH_Home"       // WiFi lab FPT
-#define STA_PASS               "hoithanghieu"
+#define STA_SSID               "0917"       // WiFi lab FPT
+#define STA_PASS               "vinhhung.125"
 #define STA_SSID_2             "SMB-Demo"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "12345678"
 #define STA_SSID_3             ""                // Dự phòng 3 (để trống nếu không dùng)
@@ -232,7 +232,7 @@
 /** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */
 #define BOOT_GUARD_MS           12000u
 /** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (HiveMQ Cloud hoặc local broker). */
-#define WIFI_STA_ENABLE         0
+#define WIFI_STA_ENABLE         1
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
