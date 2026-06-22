@@ -28,6 +28,7 @@ volatile uint32_t g_lunaRxBytes2 = 0;
 volatile uint32_t g_luna1LastOkMs = 0;
 volatile uint32_t g_luna2LastOkMs = 0;
 volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
+int g_batPct = -1; // Biến toàn cục lưu phần trăm pin cho MQTT và AutoDock
 
 #if USE_HC_SR04_HARDWARE
 static NewPing g_sonarLF(US_TRIG, US_ECHO_LF, US_PING_MAX_CM);

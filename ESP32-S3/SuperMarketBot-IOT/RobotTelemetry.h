@@ -175,6 +175,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
     float batVolts = -1.f;
     int batPct = -1;
     batteryRead(batVolts, batPct);
+    g_batPct = batPct; // Cập nhật biến toàn cục để MQTT/AutoDock sử dụng
     if (batPct >= 0 && batVolts >= 0.f) {
       doc["batV"] = (double)((int)(batVolts * 10.f + 0.5f)) / 10.0;
       doc["batPct"] = batPct;
