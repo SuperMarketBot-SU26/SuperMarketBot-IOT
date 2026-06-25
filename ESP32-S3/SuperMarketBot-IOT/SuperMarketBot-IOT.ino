@@ -33,6 +33,7 @@
 #include "ObstacleSensors.h"
 #include "WebUI.h"
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
+#include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -308,6 +309,13 @@ static void taskControl(void *pvParams) {
     }
     s_ctrl_prev_mode = g_state.mode;
 
+#if USE_IMU_MPU6050
+    float imuHeading = g_pose.headingRad;
+    if (imuMpu6050Update(imuHeading)) {
+      g_pose.headingRad = imuHeading;
+    }
+#endif
+
 #if USE_LIDAR_HARDWARE
     sensorsPollLidar();
 #endif
@@ -382,6 +390,7 @@ void setup() {
   sensorsLogBootSample();
   odomInit();
   locInit();
+  imuMpu6050Init();
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();

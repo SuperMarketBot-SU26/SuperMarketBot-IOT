@@ -87,9 +87,9 @@
 /**
  * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
  */
-#define USE_HC_SR04_HARDWARE  0
+#define USE_HC_SR04_HARDWARE  1
 /** Bật cả hai phần cứng hoạt động song song để Fusion 5 cảm biến. */
-#define USE_LIDAR_HARDWARE    0
+#define USE_LIDAR_HARDWARE    1
 
 #if USE_HC_SR04_HARDWARE
 /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
@@ -106,6 +106,11 @@
 #define US_OA_DETECT_CM       42
 #define US_PATH_CLEAR_CM      48
 #endif
+
+/* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
+#define USE_IMU_MPU6050  1
+#define IMU_I2C_SDA      35    // Chân I2C SDA
+#define IMU_I2C_SCL      36    // Chân I2C SCL
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
@@ -153,10 +158,10 @@
 #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
 #define ROBOT_HEAVY_LOAD        1
 #if ROBOT_HEAVY_LOAD
-#define AUTO_CRUISE_SPEED_PCT   100
+#define AUTO_CRUISE_SPEED_PCT   50
 #define AUTO_MIN_PWM_FRAC       22
 #else
-#define AUTO_CRUISE_SPEED_PCT   100
+#define AUTO_CRUISE_SPEED_PCT   40
 #define AUTO_MIN_PWM_FRAC       12
 #endif
 /** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */

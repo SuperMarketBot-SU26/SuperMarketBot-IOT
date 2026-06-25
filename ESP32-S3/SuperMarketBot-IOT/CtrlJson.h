@@ -91,6 +91,28 @@ inline void robotApplyControlJson(JsonDocument &doc) {
   } else if (strcmp(t, "odomReset") == 0) {
     extern void odomResetDistance();
     odomResetDistance();
+  } else if (strcmp(t, "test_motor") == 0) {
+    const char *payloadStr = doc["payload"] | "";
+    int slot = -1;
+    int speedPct = 0;
+    if (sscanf(payloadStr, "%d_%d", &slot, &speedPct) == 2) {
+      robotForceManualStop(); // Chuyển về lái tay và dừng các động cơ khác
+      if (slot >= 0 && slot < 4) {
+        int32_t speedVal = (int32_t)PWM_MAX * speedPct / 100;
+        int32_t sp[4] = {0, 0, 0, 0};
+        sp[slot] = speedVal;
+        extern void motorApplyLayout(const int32_t speedBySlot[4]);
+        motorApplyLayout(sp);
+        Serial.printf("[WS-TestMotor] Slot %d, Speed %d%%\n", slot, speedPct);
+      }
+    }
+  } else if (strcmp(t, "navigate") == 0) {
+    const char *payloadStr = doc["payload"] | "";
+    Serial.printf("[WS-Navigate] Nhan lo trinh tu WebSocket! Payload: %s\n", payloadStr);
+    extern bool wpNavParseAndStart(const char *jsonPayload);
+    if (!wpNavParseAndStart(payloadStr)) {
+      Serial.println(F("[WS-Navigate ERROR] Loi parse hoac start lo trinh tu WebSocket!"));
+    }
   }
 }
 
