@@ -38,7 +38,7 @@
 #define MQTT_BROKER_HOST   "60922debd474446a84747b871c4a8182.s1.eu.hivemq.cloud"
 #define MQTT_BROKER_PORT   8883
 /** Mã robot — dùng làm client ID và tên topic */
-#define MQTT_CLIENT_ID     "ROBOT-01"
+#define MQTT_CLIENT_ID     "RB001"
 #define MQTT_USER          "Smartmarketbot"
 #define MQTT_PASS          "Passsep490"
 #define MQTT_RECONNECT_MS  5000u       // Thời gian giữa 2 lần thử kết nối lại
@@ -75,42 +75,107 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, buf) != DeserializationError::Ok) {
-    Serial.printf("[MQTT] JSON parse error. Topic: %s\n", topic);
+    Serial.printf("[MQTT ERROR] JSON parse failed on topic: %s\n", topic);
     return;
   }
 
   const char *cmd = doc["command"] | "";
-  Serial.printf("[MQTT] CMD: %s\n", cmd);
+  Serial.printf("\n--- [MQTT RECEIVED COMMAND] ---\nCommand: '%s'\n", cmd);
 
   if (strcmp(cmd, "stop") == 0) {
+    Serial.println(F(">>> LỆNH: DỪNG KHẨN CẤP (STOP) từ Backend! Thiết lập ESTOP = true."));
     g_state.estop = true;
 
   } else if (strcmp(cmd, "mode_auto") == 0) {
-    if (millis() < BOOT_GUARD_MS) return;
+    if (millis() < BOOT_GUARD_MS) {
+      Serial.println(F("[MQTT WARNING] Bỏ qua lệnh mode_auto do đang trong thời gian Boot Guard."));
+      return;
+    }
+    Serial.println(F(">>> LỆNH: CHUYỂN MODE TỰ HÀNH (AUTO NE VAT CAN) từ Backend!"));
     g_state.mode = MODE_AUTO;
 
   } else if (strcmp(cmd, "mode_manual") == 0) {
+    Serial.println(F(">>> LỆNH: CHUYỂN MODE LÁI TAY (MANUAL) từ Backend!"));
     robotForceManualStop();
 
-  } else if (strcmp(cmd, "set_speed") == 0) {
-    int v = doc["payload"] | -1;
+  } else if (strcmp(cmd, "set_speed") == 0 || strcmp(cmd, "set_speed_manual") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ LÁI TAY (SET_SPEED_MANUAL) từ Backend! Tốc độ: %d%%\n", v);
+    if (v >= 0 && v <= 100) {
+      g_state.baseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
+    }
+
+  } else if (strcmp(cmd, "set_speed_auto") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ TỰ HÀNH (SET_SPEED_AUTO) từ Backend! Tốc độ: %d%%\n", v);
     if (v >= 0 && v <= 100) {
       g_state.autoBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
     }
 
+  } else if (strcmp(cmd, "set_speed_swerve") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ TRÁNH VẬT (SET_SPEED_SWERVE) từ Backend! Tốc độ: %d%%\n", v);
+    if (v >= 0 && v <= 100) {
+      g_state.swerveBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
+    }
+
+  } else if (strcmp(cmd, "set_strafe") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TRƯỢT NGANG (SET_STRAFE) từ Backend! %d%%\n", v);
+    if (v >= 0 && v <= 100) {
+      g_state.cmdStrafe = (int16_t)constrain((int)(v - 50) * 2, -100, 100);
+    }
+
+  } else if (strcmp(cmd, "test_motor") == 0) {
+    const char *payloadStr = doc["payload"] | "";
+    int slot = -1;
+    int speedPct = 0;
+    if (sscanf(payloadStr, "%d_%d", &slot, &speedPct) == 2) {
+      robotForceManualStop(); // Chuyển về lái tay và dừng các động cơ khác
+      if (slot >= 0 && slot < 4) {
+        int32_t speedVal = (int32_t)PWM_MAX * speedPct / 100;
+        int32_t sp[4] = {0, 0, 0, 0};
+        sp[slot] = speedVal;
+        motorApplyLayout(sp);
+        Serial.printf(">>> LỆNH: TEST ĐỘNG CƠ SLOT %d (chỉ số %d) ở tốc độ %d%%\n", slot, slot, speedPct);
+      }
+    }
+
   } else if (strcmp(cmd, "navigate") == 0) {
     if (millis() < BOOT_GUARD_MS) {
-      Serial.println(F("[MQTT] navigate ignored (boot guard — dung Manual truoc)."));
+      Serial.println(F("[MQTT WARNING] Bỏ qua lệnh navigate do đang trong thời gian Boot Guard."));
       return;
     }
     const char *wpJson = doc["payload"] | "{}";
+    Serial.printf(">>> LỆNH: TỰ HÀNH LỘ TRÌNH (NAVIGATE) từ Backend!\nWaypoints: %s\n", wpJson);
     if (!wpNavParseAndStart(wpJson)) {
-      Serial.println(F("[MQTT] navigate: parse/start failed"));
+      Serial.println(F("[MQTT ERROR] Lỗi parse hoặc start lộ trình Waypoints!"));
     }
 
   } else {
-    Serial.printf("[MQTT] Unknown command: %s\n", cmd);
+    Serial.printf("[MQTT WARNING] Lệnh không xác định: %s\n", cmd);
   }
+  Serial.println("-------------------------------\n");
 }
 
 /* ==================== INIT ========================================= */
@@ -147,12 +212,16 @@ static void mqttReconnect() {
 
   if (ok) {
     g_mqttClient.subscribe(MQTT_TOPIC_COMMAND);
-    Serial.printf(" OK. Subscribed: %s\n", MQTT_TOPIC_COMMAND);
+    Serial.printf(" OK. Subscribed to topic: %s\n", MQTT_TOPIC_COMMAND);
+    Serial.println(F("\n======================================================="));
+    Serial.println(F("[MQTT] >>> ĐÃ KẾT NỐI VỚI BACKEND THÀNH CÔNG! <<<"));
+    Serial.println(F("[MQTT] Sẵn sàng nhận lệnh từ: https://interiorly-pinnatisect-adalyn.ngrok-free.dev/"));
+    Serial.println(F("=======================================================\n"));
     /* Publish online status ngay khi kết nối */
     strncpy((char *)g_mqttPendingStatus, "online", sizeof(g_mqttPendingStatus) - 1);
     g_mqttStatusPending = true;
   } else {
-    Serial.printf(" FAIL rc=%d\n", g_mqttClient.state());
+    Serial.printf(" FAIL rc=%d. Sẽ tự động thử lại sau 5 giây...\n", g_mqttClient.state());
   }
 }
 

@@ -100,6 +100,8 @@ inline void usFilterReset() {
     s_usEma[i] = (float)US_PING_MAX_CM;
   }
 }
+#else
+inline void usFilterReset() {}
 #endif
 
 /** Nghỉ giữa các ping (gọi từ task điều khiển / setup — dùng vTaskDelay, không busy-wait). */

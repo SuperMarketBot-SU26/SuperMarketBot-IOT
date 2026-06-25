@@ -301,18 +301,24 @@ inline void wpNavTick() {
     /* Quá lệch → xoay tại chỗ */
     if (fabsf(alpha) > WP_MAX_STEER_RAD) {
       uint16_t turnPwm = wpPct2Pwm(30);
-      if (alpha > 0) { botRotateCW(turnPwm); }
-      else           { botRotateCCW(turnPwm); }
+      if (alpha > 0) { botRotateCCW(turnPwm); } // alpha > 0 là đích bên trái -> xoay trái CCW
+      else           { botRotateCW(turnPwm); }  // alpha < 0 là đích bên phải -> xoay phải CW
       return;
     }
 
-    int16_t steer = (int16_t)(WP_STEER_K * alpha);
+    int16_t steer = -(int16_t)(WP_STEER_K * alpha); // Đảo dấu để quay về hướng waypoint
     if (steer >  100) steer =  100;
     if (steer < -100) steer = -100;
 
-    uint16_t spd = (dist < WP_SLOW_RADIUS_M)
-                 ? wpPct2Pwm(WP_SLOW_SPEED_PCT)
-                 : wpPct2Pwm(WP_CRUISE_SPEED_PCT);
+    uint16_t cruiseSpd = g_state.autoBaseSpeed;
+    if (cruiseSpd == 0) cruiseSpd = g_state.baseSpeed;
+    if (cruiseSpd == 0) cruiseSpd = wpPct2Pwm(WP_CRUISE_SPEED_PCT);
+
+    // Tỉ lệ giảm tốc khi gần đích (WP_SLOW_SPEED_PCT / WP_CRUISE_SPEED_PCT = 25 / 28)
+    uint16_t slowSpd = (uint16_t)((uint32_t)cruiseSpd * 25u / 28u);
+    if (slowSpd < wpPct2Pwm(15)) slowSpd = wpPct2Pwm(15); 
+
+    uint16_t spd = (dist < WP_SLOW_RADIUS_M) ? slowSpd : cruiseSpd;
 
     float dt_s    = (float)SAFE_LOOP_MS * 0.001f;
     float pidOut  = pidSpeedCompute(pwmToEstMps(spd), robotActualSpeedMps(), dt_s);

@@ -87,9 +87,9 @@
 /**
  * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
  */
-#define USE_HC_SR04_HARDWARE  1
+#define USE_HC_SR04_HARDWARE  0
 /** Bật cả hai phần cứng hoạt động song song để Fusion 5 cảm biến. */
-#define USE_LIDAR_HARDWARE    1
+#define USE_LIDAR_HARDWARE    0
 
 #if USE_HC_SR04_HARDWARE
 /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
@@ -153,10 +153,10 @@
 #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
 #define ROBOT_HEAVY_LOAD        1
 #if ROBOT_HEAVY_LOAD
-#define AUTO_CRUISE_SPEED_PCT   55
+#define AUTO_CRUISE_SPEED_PCT   100
 #define AUTO_MIN_PWM_FRAC       22
 #else
-#define AUTO_CRUISE_SPEED_PCT   42
+#define AUTO_CRUISE_SPEED_PCT   100
 #define AUTO_MIN_PWM_FRAC       12
 #endif
 /** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */
@@ -194,7 +194,6 @@
 #define OA_MAX_ATTEMPTS         2
 /** Thời gian fallback chờ trước khi xin reroute (ms) */
 #define OA_FALLBACK_WAIT_MS     10000u
-
 /* -------------------- AUTO-DOCKING (Phase 3.5) --------------------- */
 /** Node ID trạm sạc trong database (phải khớp seed data) */
 #define DOCK_NODE_ID            2
@@ -215,8 +214,8 @@
 #define STA_PASS               "vinhhung.125"
 #define STA_SSID_2             "SMB-Demo"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "12345678"
-#define STA_SSID_3             ""                // Dự phòng 3 (để trống nếu không dùng)
-#define STA_PASS_3             ""
+#define STA_SSID_3             "Tran Coffee 1"                // Dự phòng 3 (để trống nếu không dùng)
+#define STA_PASS_3             "xincamon@"
 #define STA_CONNECT_TIMEOUT_MS 10000u   // Timeout mỗi SSID (ms) — giảm xuống để thử nhanh hơn
 #define STA_MAX_RETRIES        3        // Số lần thử mỗi SSID trước khi sang SSID tiếp theo
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */

@@ -54,6 +54,20 @@ inline void locInit() {
   s_locTotalFL = s_locTotalFR = s_locTotalRL = s_locTotalRR = 0;
 }
 
+extern uint8_t g_mapMotSlot[4];
+extern uint8_t g_motInv[4];
+
+static inline int8_t locGetPhysicalDir(uint8_t p) {
+  for (int s = 0; s < 4; s++) {
+    if (g_mapMotSlot[s] == p) {
+      int8_t d = g_motorDir[p];
+      if (g_motInv[s]) return -d;
+      return d;
+    }
+  }
+  return g_motorDir[p];
+}
+
 /* =====================================================================
  *  locUpdate() — Cập nhật pose dựa trên Δticks từ lần gọi trước.
  *
@@ -72,11 +86,11 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   s_locTotalRL = totalRL;
   s_locTotalRR = totalRR;
 
-  /* Ký hiệu hóa delta bằng hướng vật lý (g_motorDir) — phân biệt tiến/lùi */
-  int32_t sdFL = (int32_t)dFL * g_motorDir[0]; // MID_FL
-  int32_t sdFR = (int32_t)dFR * g_motorDir[2]; // MID_FR
-  int32_t sdRL = (int32_t)dRL * g_motorDir[1]; // MID_RL
-  int32_t sdRR = (int32_t)dRR * g_motorDir[3]; // MID_RR
+  /* Ký hiệu hóa delta bằng hướng vật lý (g_motorDir) — phân biệt tiến/lùi (có xét đảo chiều) */
+  int32_t sdFL = (int32_t)dFL * locGetPhysicalDir(0); // MID_FL
+  int32_t sdFR = (int32_t)dFR * locGetPhysicalDir(2); // MID_FR
+  int32_t sdRL = (int32_t)dRL * locGetPhysicalDir(1); // MID_RL
+  int32_t sdRR = (int32_t)dRR * locGetPhysicalDir(3); // MID_RR
 
   /* Quãng đường mỗi bên (m) — trung bình trước + sau */
   const float ticksToM = WHEEL_CIRC_M / ENC_PPR;

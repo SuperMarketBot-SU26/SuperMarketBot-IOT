@@ -1211,7 +1211,8 @@ inline void webUIInit() {
       if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\n[WiFi] STA OK! SSID=\"%s\"  IP=%s\n",
                       staList[si].ssid, WiFi.localIP().toString().c_str());
-        g_mqttEnabled = false;
+        // Luôn bật sẵn MQTT để robot có thể nhận tín hiệu điều hướng từ Backend / Web Manager
+        g_mqttEnabled = true;
         staOk = true;
       }
     }
@@ -1227,14 +1228,13 @@ inline void webUIInit() {
     g_httpServer.send_P(200, "text/html; charset=utf-8", HTML_PAGE);
   });
   g_httpServer.on("/vision", HTTP_GET, []() {
-    String loc = String("https://") + WiFi.softAPIP().toString() + "/vision";
+    String loc = String("https://") + WiFi.localIP().toString() + "/vision";
     g_httpServer.sendHeader("Location", loc);
     g_httpServer.send(302, "text/plain", "Camera can HTTPS — redirecting");
   });
   g_httpServer.on("/status", HTTP_GET, []() {
-    String j = "{\"ip\":\"" + WiFi.softAPIP().toString() +
-               "\",\"wifi\":null,\"camera\":\"tablet\",\"clients\":" +
-               String(WiFi.softAPgetStationNum()) + "}";
+    String j = "{\"ip\":\"" + WiFi.localIP().toString() +
+               "\",\"wifi\":\"" + WiFi.SSID() + "\",\"camera\":\"tablet\",\"clients\":0}";
     g_httpServer.send(200, "application/json", j);
   });
   g_httpServer.begin();
@@ -1260,13 +1260,8 @@ inline void webUILoop() {
       Serial.println(F("[MQTT] Che do Lo trinh kich hoat -> Bat ket noi MQTT..."));
     }
   } else {
-    if (g_mqttEnabled) {
-      g_mqttEnabled = false;
-      if (g_mqttClient.connected()) {
-        g_mqttClient.disconnect();
-        Serial.println(F("[MQTT] Thoat che do Lo trinh -> Ngat ket noi MQTT."));
-      }
-    }
+    // Để nhận lệnh từ Web Manager (Gửi Test Lộ trình), ta không bao giờ tắt MQTT nữa
+    // (Đã xoá logic ngắt kết nối MQTT khi về chế độ Manual)
   }
   mqttLoop();
 #endif

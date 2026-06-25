@@ -32,6 +32,7 @@
 #include "LocalObstacleAvoid.h"
 #include "ObstacleSensors.h"
 #include "WebUI.h"
+#include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -350,6 +351,7 @@ static void taskWebIO(void *pvParams) {
 
   while (true) {
     webUILoop();  // handleClient + ws.loop()
+    lidarStreamLoop(); // ← Gửi Lidar frame sang Tablet (10 Hz, ~8KB/s)
 
     if ((xTaskGetTickCount() - lastBroadcast) >= broadcastPeriod) {
       webUIBroadcast();
@@ -389,6 +391,12 @@ void setup() {
 
   // ── WiFi + Web ───────────────────────────────────────────────────
   webUIInit();
+
+  // ── LiDAR Stream WebSocket (port 82 → Tablet Android) ────────────
+  //    Chạy sau webUIInit() để WiFi SoftAP đã sẵn sàng.
+  //    Tablet kết nối ws://192.168.4.1:82 để nhận Lidar + Pose.
+  lidarStreamInit();
+  lidarStreamRegisterHttpEndpoint(g_httpServer); // truyền trực tiếp, không extern
 
   // ── Mutex ────────────────────────────────────────────────────────
   g_stateMutex = xSemaphoreCreateMutex();
