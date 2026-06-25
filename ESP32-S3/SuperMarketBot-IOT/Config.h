@@ -334,4 +334,6 @@ extern volatile uint32_t s_settleUntilMs;
 #define SENSOR_LINK_MS_US     2000u
 #define SENSOR_LINK_MS_ENC    3500u
 
+#include "LogStream.h"
+
 #endif // CONFIG_H

@@ -56,6 +56,11 @@ static void printMemInfo() {
 }
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
+#undef Serial
+LoggerSerial logger(Serial);
+#define Serial logger
+QueueHandle_t g_logQueue = NULL;
+
 RobotState g_state = {
   .usFront = LIDAR_MAX_CM, .usBack = LIDAR_MAX_CM, .usLeft = LIDAR_MAX_CM, .usRight = LIDAR_MAX_CM,
   .usLF = LIDAR_MAX_CM, .usLR = LIDAR_MAX_CM, .usRF = LIDAR_MAX_CM, .usRR = LIDAR_MAX_CM,
@@ -361,6 +366,32 @@ static void taskWebIO(void *pvParams) {
     webUILoop();  // handleClient + ws.loop()
     lidarStreamLoop(); // ← Gửi Lidar frame sang Tablet (10 Hz, ~8KB/s)
 
+    // Đọc hàng đợi log và truyền đi
+    if (g_logQueue != NULL) {
+      LogMessage logMsg;
+      int processed = 0;
+      while (processed < 8 && xQueueReceive(g_logQueue, &logMsg, 0) == pdTRUE) {
+        processed++;
+        // 1. Gửi qua WebSocket (Cục bộ)
+        if (g_wsServer.connectedClients() > 0) {
+          StaticJsonDocument<256> doc;
+          doc["type"] = "log";
+          doc["message"] = logMsg.text;
+          char buf[256];
+          serializeJson(doc, buf);
+          g_wsServer.broadcastTXT(buf);
+        }
+        // 2. Gửi qua MQTT (Cloud/Backend)
+        if (g_mqttClient.connected()) {
+          StaticJsonDocument<256> doc;
+          doc["msg"] = logMsg.text;
+          char buf[256];
+          serializeJson(doc, buf);
+          g_mqttClient.publish(MQTT_TOPIC_LOG, buf);
+        }
+      }
+    }
+
     if ((xTaskGetTickCount() - lastBroadcast) >= broadcastPeriod) {
       webUIBroadcast();
       lastBroadcast = xTaskGetTickCount();
@@ -377,6 +408,7 @@ static void taskWebIO(void *pvParams) {
  *  setup() — Chạy trên Core 1 (Arduino default)
  * =================================================================== */
 void setup() {
+  g_logQueue = xQueueCreate(64, sizeof(LogMessage));
   Serial.begin(115200);
   // USB CDC trên S3 xuất hiện sau vài trăm ms — delay giúp log app không lẫn với boot ROM
   delay(300);

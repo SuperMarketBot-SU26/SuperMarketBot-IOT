@@ -48,6 +48,7 @@
 #define MQTT_TOPIC_TELEMETRY  "smartmarketbot/robot/" MQTT_CLIENT_ID "/telemetry"
 #define MQTT_TOPIC_STATUS     "smartmarketbot/robot/" MQTT_CLIENT_ID "/status"
 #define MQTT_TOPIC_COMMAND    "smartmarketbot/robot/" MQTT_CLIENT_ID "/command"
+#define MQTT_TOPIC_LOG        "smartmarketbot/robot/" MQTT_CLIENT_ID "/log"
 
 /* ==================== BIẾN NỘI BỘ ================================== */
 #if MQTT_USE_TLS
@@ -279,6 +280,7 @@ static void mqttPublishTelemetry() {
   doc["XCoord"]        = g_pose.x;
   doc["YCoord"]        = g_pose.y;
   doc["HeadingRad"]    = g_pose.headingRad;
+  doc["Ip"]            = WiFi.localIP().toString();
 
   /* Sensor data */
   doc["lidarFront"] = obsFrontCm();
@@ -312,6 +314,7 @@ static void mqttPublishStatus(const char *status) {
   doc["Status"]   = status;
   doc["Mode"]     = (g_state.mode == MODE_AUTO) ? "auto" : "manual";
   doc["IsOnline"] = true;
+  doc["Ip"]       = WiFi.localIP().toString();
 
   char buf[128];
   size_t n = serializeJson(doc, buf, sizeof(buf));
