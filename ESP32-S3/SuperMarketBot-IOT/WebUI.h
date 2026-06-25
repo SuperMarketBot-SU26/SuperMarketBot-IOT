@@ -1187,6 +1187,8 @@ inline void webUIInit() {
       { STA_SSID,   STA_PASS   },
       { STA_SSID_2, STA_PASS_2 },
       { STA_SSID_3, STA_PASS_3 },
+      { STA_SSID_4, STA_PASS_4 },
+      { STA_SSID_5, STA_PASS_5 },
     };
     constexpr int STA_LIST_COUNT = sizeof(staList) / sizeof(staList[0]);
     bool staOk = false;

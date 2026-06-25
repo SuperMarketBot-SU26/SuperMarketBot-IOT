@@ -462,8 +462,8 @@ void setup() {
   Serial.printf("[Boot] Camera:     https://%s/vision\n", WiFi.softAPIP().toString().c_str());
 #if WIFI_STA_ENABLE
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n",
-                  WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+    Serial.printf(F("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n"),
+                  WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, (int)MQTT_BROKER_PORT);
   } else {
     Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
   }
