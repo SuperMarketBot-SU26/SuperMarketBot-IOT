@@ -74,7 +74,7 @@ extern volatile uint32_t   s_wpT0;          // Millis khi bắt đầu waypoint 
 
 /* Obstacle-hold fallback */
 extern volatile uint32_t   s_wpObstHoldStart;
-extern volatile OaContext  s_wpOa;
+extern OaContext           s_wpOa;
 
 /* Settle delay sau khi OA xong — tránh lao ngay vào hướng mới */
 extern volatile uint32_t   s_wpSettleUntilMs;

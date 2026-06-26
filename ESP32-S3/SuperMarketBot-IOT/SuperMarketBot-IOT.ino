@@ -68,7 +68,7 @@ volatile uint8_t    s_wpIndex = 0;
 volatile WpFsmState s_wpFsm   = WP_IDLE;
 volatile uint32_t   s_wpT0    = 0;
 volatile uint32_t   s_wpObstHoldStart = 0;
-volatile OaContext  s_wpOa;
+OaContext            s_wpOa;
 volatile uint32_t   s_wpSettleUntilMs = 0;
 
 RobotState g_state = {
