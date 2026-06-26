@@ -17,7 +17,7 @@
 
 static float    s_gyroBiasZ = 0.f;
 static uint32_t s_lastImuTimeMs = 0;
-static bool     s_imuEnabled = false;
+inline bool     g_imuEnabled = false;
 
 // Đọc 2 byte từ một thanh ghi I2C
 static inline int16_t mpu6050Read16(uint8_t reg) {
@@ -74,14 +74,14 @@ inline void imuMpu6050Init() {
   }
   s_gyroBiasZ = (float)sumZ / (float)numSamples;
   s_lastImuTimeMs = millis();
-  s_imuEnabled = true;
+  g_imuEnabled = true;
   Serial.printf("[IMU] Hiệu chuẩn xong. Gyro Bias Z: %.3f\n", s_gyroBiasZ);
 }
 
 // Cập nhật góc Heading từ cảm biến Gyroscope
 // Trả về true nếu có cập nhật mới thành công
 inline bool imuMpu6050Update(float &headingRad) {
-  if (!s_imuEnabled) return false;
+  if (!g_imuEnabled) return false;
 
   uint32_t now = millis();
   float dt = (float)(now - s_lastImuTimeMs) * 0.001f;

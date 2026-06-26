@@ -22,10 +22,10 @@
 
 /* ==================== Hằng số mặc định ============================= */
 /** Speed PID — điều chỉnh PWM để đạt v mong muốn trong AUTO CRUISE */
-#define PID_SPEED_KP    1.8f
-#define PID_SPEED_KI    0.6f
-#define PID_SPEED_KD    0.05f
-#define PID_SPEED_I_MAX 200.f  // anti-windup (giới hạn tích phân, đơn vị PWM)
+#define PID_SPEED_KP    600.f
+#define PID_SPEED_KI    300.f
+#define PID_SPEED_KD    15.f
+#define PID_SPEED_I_MAX 0.8f  // anti-windup (giới hạn tích phân, đơn vị mét)
 #define PID_SPEED_OUT_MAX ((float)PWM_MAX)
 
 /** Yaw/Heading PID — steer sang trái/phải khi bám heading (Phase 3) */

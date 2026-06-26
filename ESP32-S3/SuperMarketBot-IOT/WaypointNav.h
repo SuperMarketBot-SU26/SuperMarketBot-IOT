@@ -43,9 +43,9 @@ extern void usFilterReset();
 /* ==================== Tham số điều hướng =========================== */
 #define WP_ARRIVE_THRESH_M    0.12f   // Ngưỡng "đến nơi" (m)
 #define WP_STEER_K            55.f    // Hệ số steer Pure Pursuit
-#define WP_CRUISE_SPEED_PCT   (ROBOT_HEAVY_LOAD ? 28 : 45)
+#define WP_CRUISE_SPEED_PCT   (ROBOT_HEAVY_LOAD ? 50 : 40)
 #define WP_SLOW_RADIUS_M      0.4f    // Bán kính giảm tốc (m)
-#define WP_SLOW_SPEED_PCT     25      // Tốc độ khi gần waypoint
+#define WP_SLOW_SPEED_PCT     (ROBOT_HEAVY_LOAD ? 35 : 28)
 #define WP_MAX_STEER_RAD      1.2f    // ~70° — quá lệch thì xoay tại chỗ trước
 #define WP_TIMEOUT_MS         20000u  // Timeout mỗi waypoint (ms)
 #define WP_MAX_WAYPOINTS      32      // Số waypoint tối đa trong 1 route
@@ -323,7 +323,8 @@ inline void wpNavTick() {
 
     /* Quá lệch → xoay tại chỗ */
     if (fabsf(alpha) > WP_MAX_STEER_RAD) {
-      uint16_t turnPwm = wpPct2Pwm(30);
+      uint16_t turnPwm = g_state.swerveBaseSpeed;
+      if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 45 : 35);
       if (alpha > 0) { botRotateCCW(turnPwm); } // alpha > 0 là đích bên trái -> xoay trái CCW
       else           { botRotateCW(turnPwm); }  // alpha < 0 là đích bên phải -> xoay phải CW
       return;
@@ -337,9 +338,11 @@ inline void wpNavTick() {
     if (cruiseSpd == 0) cruiseSpd = g_state.baseSpeed;
     if (cruiseSpd == 0) cruiseSpd = wpPct2Pwm(WP_CRUISE_SPEED_PCT);
 
-    // Tỉ lệ giảm tốc khi gần đích (WP_SLOW_SPEED_PCT / WP_CRUISE_SPEED_PCT = 25 / 28)
-    uint16_t slowSpd = (uint16_t)((uint32_t)cruiseSpd * 25u / 28u);
-    if (slowSpd < wpPct2Pwm(15)) slowSpd = wpPct2Pwm(15); 
+    // Tỉ lệ giảm tốc khi gần đích
+    uint16_t slowSpd = (uint16_t)((uint32_t)cruiseSpd * (uint32_t)WP_SLOW_SPEED_PCT / (uint32_t)WP_CRUISE_SPEED_PCT);
+    if (slowSpd < wpPct2Pwm(ROBOT_HEAVY_LOAD ? 30 : 20)) {
+      slowSpd = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 30 : 20);
+    }
 
     uint16_t spd = (dist < WP_SLOW_RADIUS_M) ? slowSpd : cruiseSpd;
 
@@ -349,7 +352,7 @@ inline void wpNavTick() {
     if (runPwm < 0) runPwm = 0;
     if (runPwm > (int32_t)PWM_MAX) runPwm = (int32_t)PWM_MAX;
 
-    botDrive(steer, 80, (uint16_t)runPwm);
+    botDrive(steer, 100, (uint16_t)runPwm);
     break;
   }
 

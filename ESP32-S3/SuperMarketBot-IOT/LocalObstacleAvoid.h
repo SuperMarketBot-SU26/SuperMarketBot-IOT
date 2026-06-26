@@ -328,11 +328,22 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
   if (run < 0) run = 0;
   if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
 
+  // Closed-loop yaw control using IMU (if enabled) to keep robot driving straight
+  int16_t steer = 0;
+#if USE_IMU_MPU6050
+  extern bool g_imuEnabled;
+  if (g_imuEnabled) {
+    float yawOut = pidYawCompute(ctx.cruiseHeading, g_pose.headingRad, dt_s);
+    steer = (int16_t)constrain(yawOut, -100, 100);
+  }
+#endif
+
   if (strafe != 0) {
-    // Tiến thẳng đồng thời trượt ngang né tường, không xoay hướng xe
-    botDriveMecanum(strafe, 100, 0, (uint16_t)run);
+    // Tiến thẳng đồng thời trượt ngang né tường và bù góc xoay
+    botDriveMecanum(strafe, 100, steer, (uint16_t)run);
   } else {
-    botForward((uint16_t)run);
+    // Tiến thẳng đồng thời bù góc xoay để giữ hướng đi hoàn toàn thẳng
+    botDriveMecanum(0, 100, steer, (uint16_t)run);
   }
   return true;
 #else
@@ -341,7 +352,18 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
   int32_t run = (int32_t)cruisePwm + (int32_t)pidOut;
   if (run < 0) run = 0;
   if (run > (int32_t)PWM_MAX) run = (int32_t)PWM_MAX;
-  botForward((uint16_t)run);
+
+  // Closed-loop yaw control using IMU (if enabled) to keep robot driving straight
+  int16_t steer = 0;
+#if USE_IMU_MPU6050
+  extern bool g_imuEnabled;
+  if (g_imuEnabled) {
+    float yawOut = pidYawCompute(ctx.cruiseHeading, g_pose.headingRad, dt_s);
+    steer = (int16_t)constrain(yawOut, -100, 100);
+  }
+#endif
+
+  botDriveMecanum(0, 100, steer, (uint16_t)run);
   return true;
 #endif
 }

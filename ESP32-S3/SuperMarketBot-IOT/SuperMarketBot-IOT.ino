@@ -147,6 +147,8 @@ static void autoNavigateAvoidance() {
       s_auto_fsm = AN_CRUISE;
       s_settleUntilMs = now + 450;
       usFilterReset();
+      s_autoOa.cruiseHeading = g_pose.headingRad;
+      pidYawReset();
       Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa). Settle 450ms."));
     } else if (r == OA_RES_BLOCKED) {
       s_auto_fsm = AN_BACKUP;
@@ -217,6 +219,8 @@ static void autoNavigateAvoidance() {
         s_auto_t0 = now;
         s_settleUntilMs = now + 450;
         s_stuckCount = 0;
+        s_autoOa.cruiseHeading = g_pose.headingRad;
+        pidYawReset();
         Serial.println(F("[AUTO] Backup done -> Settle 450ms."));
       }
       break;
@@ -234,6 +238,8 @@ static void autoNavigateAvoidance() {
         s_auto_fsm = AN_CRUISE;
         s_auto_t0 = now;
         s_settleUntilMs = now + 450;
+        s_autoOa.cruiseHeading = g_pose.headingRad;
+        pidYawReset();
         Serial.println(F("[AUTO] Tim thay loi thoat khi xoay quet -> Settle 450ms."));
       }
       // Giới hạn xoay tối đa 6s tránh xoay vòng vô hạn nếu bị nhốt kín
@@ -244,6 +250,8 @@ static void autoNavigateAvoidance() {
         s_auto_fsm = AN_CRUISE;
         s_auto_t0 = now;
         s_settleUntilMs = now + 450;
+        s_autoOa.cruiseHeading = g_pose.headingRad;
+        pidYawReset();
         Serial.println(F("[AUTO] Het 6s spin search -> Settle 450ms."));
       }
       break;
@@ -310,6 +318,7 @@ static void taskControl(void *pvParams) {
       oaReset(s_autoOa);
       s_autoOa.cruiseHeading = g_pose.headingRad;
       pidSpeedReset();
+      pidYawReset();
       usFilterReset();
       s_settleUntilMs = millis() + 450;
       /* Báo backend chuyển mode */
