@@ -260,6 +260,13 @@ inline void wpNavTick() {
     float dy   = ty - g_pose.y;
     float dist = sqrtf(dx * dx + dy * dy);
 
+    static uint32_t lastWpLog = 0;
+    if (now - lastWpLog > 200u) {
+      lastWpLog = now;
+      Serial.printf("[WP DEBUG] idx=%d, target=(%.3f,%.3f), pose=(%.3f,%.3f), heading=%.3f, dist=%.3f\n",
+                    (int)s_wpIndex, tx, ty, g_pose.x, g_pose.y, g_pose.headingRad, dist);
+    }
+
     /* Đến nơi */
     if (dist < WP_ARRIVE_THRESH_M) {
       Serial.printf("[WP] WP[%d] reached (%.2f,%.2f) dist=%.3fm\n",
