@@ -156,7 +156,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
   doc["spdAutoPct"] =
       (autoSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
   uint32_t swerveSpdUse =
-      g_state.swerveBaseSpeed ? g_state.swerveBaseSpeed : (PWM_MAX * 45 / 100);
+      g_state.swerveBaseSpeed ? g_state.swerveBaseSpeed : (PWM_MAX * 40 / 100);
   doc["spdSwervePct"] =
       (swerveSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
  

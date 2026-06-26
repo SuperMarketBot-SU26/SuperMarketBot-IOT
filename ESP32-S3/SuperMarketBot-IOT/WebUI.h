@@ -463,9 +463,9 @@ details pre{
                 <div class="spd-block__label">Trượt ngang · Strafe</div>
                 <div class="spd-block__hint">Mecanum: trái/phải không cần xoay</div>
               </div>
-              <span class="spd-block__badge" id="strVal">60%</span>
+              <span class="spd-block__badge" id="strVal">50%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="strSlider" min="0" max="100" value="60"
+            <input type="range" class="spd-range spd-range--manual" id="strSlider" min="0" max="100" value="50"
               oninput="sendStrafe(this.value)" aria-label="Trượt ngang Mecanum"/>
             <div class="spd-block__ticks"><span>Trái</span><span>50%</span><span>Phải</span></div>
           </div>
@@ -487,9 +487,9 @@ details pre{
                 <div class="spd-block__label">Tốc độ · Tránh vật</div>
                 <div class="spd-block__hint">Khi dạt chéo, đi lùi, xoay dò (15–100%)</div>
               </div>
-              <span class="spd-block__badge" id="spdSwerveVal">60%</span>
+              <span class="spd-block__badge" id="spdSwerveVal">40%</span>
             </div>
-            <input type="range" class="spd-range spd-range--auto" id="spdSwerveSlider" min="15" max="100" value="60"
+            <input type="range" class="spd-range spd-range--auto" id="spdSwerveSlider" min="15" max="100" value="40"
               oninput="sendSpeedSwerve(this.value)" aria-label="Tốc độ tránh vật phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>45%</span><span>100%</span></div>
           </div>
@@ -1153,7 +1153,7 @@ inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
   g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", PWM_MAX * 60 / 100);
-  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 60 / 100);
+  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 40 / 100);
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
   g_prefs.end();
