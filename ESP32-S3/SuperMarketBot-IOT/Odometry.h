@@ -25,11 +25,41 @@ volatile uint32_t g_ticksRR = 0;
 uint32_t g_totalFL = 0, g_totalRL = 0, g_totalFR = 0, g_totalRR = 0;
 volatile uint32_t g_encPhyLastPulseMs[4] = {0, 0, 0, 0};
 
-// ISR phải IRAM_ATTR, càng ngắn càng tốt
-void IRAM_ATTR isrFL() { g_ticksFL++; }
-void IRAM_ATTR isrRL() { g_ticksRL++; }
-void IRAM_ATTR isrFR() { g_ticksFR++; }
-void IRAM_ATTR isrRR() { g_ticksRR++; }
+// Thời điểm ngắt cuối cùng (để lọc nhiễu cơ học/điện từ)
+volatile uint32_t g_lastIsrFL = 0;
+volatile uint32_t g_lastIsrRL = 0;
+volatile uint32_t g_lastIsrFR = 0;
+volatile uint32_t g_lastIsrRR = 0;
+
+// ISR phải IRAM_ATTR, càng ngắn càng tốt. Chống nhiễu tần số cao < 1200us.
+void IRAM_ATTR isrFL() {
+  uint32_t now = micros();
+  if (now - g_lastIsrFL > 1200u) {
+    g_ticksFL++;
+    g_lastIsrFL = now;
+  }
+}
+void IRAM_ATTR isrRL() {
+  uint32_t now = micros();
+  if (now - g_lastIsrRL > 1200u) {
+    g_ticksRL++;
+    g_lastIsrRL = now;
+  }
+}
+void IRAM_ATTR isrFR() {
+  uint32_t now = micros();
+  if (now - g_lastIsrFR > 1200u) {
+    g_ticksFR++;
+    g_lastIsrFR = now;
+  }
+}
+void IRAM_ATTR isrRR() {
+  uint32_t now = micros();
+  if (now - g_lastIsrRR > 1200u) {
+    g_ticksRR++;
+    g_lastIsrRR = now;
+  }
+}
 
 /* Chỉ tắt ISR nếu cùng chân LED và encoder (ví dụ tùy chỉnh pin) */
 #if !SMB_ONBOARD_RGB || (SMB_NEOPIXEL_PIN != ENC_RR)
@@ -82,10 +112,10 @@ inline void odomUpdate() {
   g_state.rpmRR = rpmPhy[g_mapEncSlot[SLOT_RR]];
 
   float distPhy[4] = {
-      (g_totalFL / ENC_PPR) * WHEEL_CIRC_M,
-      (g_totalRL / ENC_PPR) * WHEEL_CIRC_M,
-      (g_totalFR / ENC_PPR) * WHEEL_CIRC_M,
-      (g_totalRR / ENC_PPR) * WHEEL_CIRC_M,
+      (g_totalFL / ENC_PPR) * WHEEL_CIRC_M * ODOM_CALIB_FACTOR,
+      (g_totalRL / ENC_PPR) * WHEEL_CIRC_M * ODOM_CALIB_FACTOR,
+      (g_totalFR / ENC_PPR) * WHEEL_CIRC_M * ODOM_CALIB_FACTOR,
+      (g_totalRR / ENC_PPR) * WHEEL_CIRC_M * ODOM_CALIB_FACTOR,
   };
   g_state.distFL = distPhy[g_mapEncSlot[SLOT_LF]];
   g_state.distRL = distPhy[g_mapEncSlot[SLOT_LR]];

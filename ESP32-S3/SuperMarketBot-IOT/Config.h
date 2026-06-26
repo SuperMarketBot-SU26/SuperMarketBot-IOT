@@ -125,6 +125,8 @@
 // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm
 #define WHEEL_DIAM_M  0.065f
 #define WHEEL_CIRC_M  (PI * WHEEL_DIAM_M)
+// Hệ số hiệu chuẩn quãng đường (giảm < 1.0 nếu đi xa hơn lý thuyết, tăng > 1.0 nếu đi ngắn hơn)
+#define ODOM_CALIB_FACTOR  1.0f
 
 /* -------------------- PWM / LEDC ----------------------------------- */
 #define PWM_FREQ      20000 // 20kHz, ngoài ngưỡng nghe
