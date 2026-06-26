@@ -87,15 +87,22 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   s_locTotalRR = totalRR;
 
   /* Ký hiệu hóa delta bằng hướng vật lý (g_motorDir) — phân biệt tiến/lùi (có xét đảo chiều) */
-  int32_t sdFL = (int32_t)dFL * locGetPhysicalDir(0); // MID_FL
-  int32_t sdFR = (int32_t)dFR * locGetPhysicalDir(2); // MID_FR
-  int32_t sdRL = (int32_t)dRL * locGetPhysicalDir(1); // MID_RL
-  int32_t sdRR = (int32_t)dRR * locGetPhysicalDir(3); // MID_RR
+  int32_t sdPhy[4];
+  sdPhy[0] = (int32_t)dFL * locGetPhysicalDir(0); // Physical FL
+  sdPhy[1] = (int32_t)dRL * locGetPhysicalDir(1); // Physical RL
+  sdPhy[2] = (int32_t)dFR * locGetPhysicalDir(2); // Physical FR
+  sdPhy[3] = (int32_t)dRR * locGetPhysicalDir(3); // Physical RR
 
-  /* Quãng đường mỗi bên (m) — trung bình trước + sau */
+  // Ánh xạ các xung vật lý về các slot logic (LF, LR, RF, RR)
+  int32_t sdLF = sdPhy[g_mapEncSlot[SLOT_LF]];
+  int32_t sdLR = sdPhy[g_mapEncSlot[SLOT_LR]];
+  int32_t sdRF = sdPhy[g_mapEncSlot[SLOT_RF]];
+  int32_t sdRR = sdPhy[g_mapEncSlot[SLOT_RR]];
+
+  /* Quãng đường mỗi bên (m) — trung bình trước + sau của các slot logic */
   const float ticksToM = WHEEL_CIRC_M / ENC_PPR;
-  float dLeft  = ((float)(sdFL + sdRL) * 0.5f) * ticksToM;
-  float dRight = ((float)(sdFR + sdRR) * 0.5f) * ticksToM;
+  float dLeft  = ((float)(sdLF + sdLR) * 0.5f) * ticksToM;
+  float dRight = ((float)(sdRF + sdRR) * 0.5f) * ticksToM;
 
   /* Tính ds và dθ */
   float ds     = (dLeft + dRight) * 0.5f;
