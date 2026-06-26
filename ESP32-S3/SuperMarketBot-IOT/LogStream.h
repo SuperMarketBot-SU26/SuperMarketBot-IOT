@@ -12,6 +12,14 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#define LOG_HISTORY_COUNT 40
+extern char g_logHistory[LOG_HISTORY_COUNT][128];
+extern int g_logHistoryHead;
+extern int g_logHistoryCount;
+extern portMUX_TYPE g_logMux;
+
+void addLogHistory(const char* text);
+
 struct LogMessage {
     char text[128];
 };
@@ -33,6 +41,9 @@ private:
                     _logBuf[_logIdx - 1] = '\0';
                 }
                 
+                // Lưu vào bộ nhớ đệm lịch sử log
+                addLogHistory(_logBuf);
+
                 // Đẩy log vào hàng đợi FreeRTOS (không block)
                 if (g_logQueue != NULL) {
                     LogMessage msg;

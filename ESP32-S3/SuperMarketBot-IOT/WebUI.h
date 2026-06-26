@@ -1091,6 +1091,34 @@ connectWS();
 
 static void onWebSocketEvent(uint8_t num, WStype_t type,
                              uint8_t *payload, size_t length) {
+  if (type == WStype_CONNECTED) {
+    // Copy log history to a local buffer safely
+    static char tempLogs[LOG_HISTORY_COUNT][128];
+    int count = 0;
+    int startIdx = 0;
+
+    portENTER_CRITICAL(&g_logMux);
+    count = g_logHistoryCount;
+    if (g_logHistoryCount == LOG_HISTORY_COUNT) {
+      startIdx = g_logHistoryHead;
+    }
+    for (int i = 0; i < count; i++) {
+      int idx = (startIdx + i) % LOG_HISTORY_COUNT;
+      memcpy(tempLogs[i], g_logHistory[idx], 128);
+    }
+    portEXIT_CRITICAL(&g_logMux);
+
+    // Send history logs back to the newly connected WebSocket client (outside critical section)
+    for (int i = 0; i < count; i++) {
+      StaticJsonDocument<256> doc;
+      doc["type"] = "log";
+      doc["message"] = tempLogs[i];
+      char buf[256];
+      serializeJson(doc, buf);
+      g_wsServer.sendTXT(num, buf);
+    }
+    return;
+  }
   if (type == WStype_TEXT) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload, length);

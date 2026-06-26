@@ -61,6 +61,22 @@ LoggerSerial logger(Serial0);
 #define Serial logger
 QueueHandle_t g_logQueue = NULL;
 
+char g_logHistory[LOG_HISTORY_COUNT][128];
+int g_logHistoryHead = 0;
+int g_logHistoryCount = 0;
+portMUX_TYPE g_logMux = portMUX_INITIALIZER_UNLOCKED;
+
+void addLogHistory(const char* text) {
+  portENTER_CRITICAL(&g_logMux);
+  strncpy(g_logHistory[g_logHistoryHead], text, 127);
+  g_logHistory[g_logHistoryHead][127] = '\0';
+  g_logHistoryHead = (g_logHistoryHead + 1) % LOG_HISTORY_COUNT;
+  if (g_logHistoryCount < LOG_HISTORY_COUNT) {
+    g_logHistoryCount++;
+  }
+  portEXIT_CRITICAL(&g_logMux);
+}
+
 RobotState g_state = {
   .usFront = LIDAR_MAX_CM, .usBack = LIDAR_MAX_CM, .usLeft = LIDAR_MAX_CM, .usRight = LIDAR_MAX_CM,
   .usLF = LIDAR_MAX_CM, .usLR = LIDAR_MAX_CM, .usRF = LIDAR_MAX_CM, .usRR = LIDAR_MAX_CM,
