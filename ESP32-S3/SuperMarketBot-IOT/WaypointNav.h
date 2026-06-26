@@ -131,6 +131,20 @@ inline void wpNavStart() {
     Serial.println(F("[WP] No waypoints — abort"));
     return;
   }
+  
+  // Tự động căn chỉnh toạ độ Robot với Waypoint đầu tiên của lộ trình
+  g_pose.x = s_wpRoute[0].x;
+  g_pose.y = s_wpRoute[0].y;
+  
+  // Căn chỉnh góc quay hướng tới Waypoint thứ 2 (nếu có)
+  if (s_wpCount > 1) {
+    float dx = s_wpRoute[1].x - s_wpRoute[0].x;
+    float dy = s_wpRoute[1].y - s_wpRoute[0].y;
+    g_pose.headingRad = atan2f(dy, dx);
+    while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
+    while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
+  }
+  
   s_wpIndex    = 0;
   oaReset(s_wpOa);
   s_wpFsm      = WP_NAVIGATING;
@@ -139,7 +153,7 @@ inline void wpNavStart() {
   pidSpeedReset();
   pidYawReset();
   strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
-  Serial.printf("[WP] Start → WP[0] (%.3f, %.3f)\n",
+  Serial.printf("[WP] Start → WP[0] (%.3f, %.3f) | Pose aligned to map!\n",
                 s_wpRoute[0].x, s_wpRoute[0].y);
 }
 
@@ -229,7 +243,8 @@ inline void wpNavTick() {
       return;
     }
 
-    /* Timeout waypoint */
+    /* Timeout waypoint - Tạm tắt theo yêu cầu để tránh bỏ qua waypoint khi kẹt */
+    /*
     if (now - s_wpT0 >= WP_TIMEOUT_MS) {
       Serial.printf("[WP] Timeout WP[%d] — skip\n", (int)s_wpIndex);
       s_wpIndex++;
@@ -237,6 +252,7 @@ inline void wpNavTick() {
       s_wpT0 = now;
       return;
     }
+    */
 
     float tx   = s_wpRoute[s_wpIndex].x;
     float ty   = s_wpRoute[s_wpIndex].y;
@@ -335,11 +351,22 @@ inline void wpNavTick() {
    *                     rồi publish "reroute_needed" → Backend gửi route mới
    * ══════════════════════════════════════════════════════════════ */
   case WP_OBSTACLE_HOLD: {
-    botStop();
+    // Lùi xe trong 1200ms đầu để tạo khoảng trống thoát kẹt
+    if (now - s_wpObstHoldStart < 1200u) {
+      if (!obsRearBlocked()) {
+        uint16_t bkSpd = g_state.swerveBaseSpeed;
+        if (bkSpd == 0) bkSpd = (uint16_t)((uint32_t)PWM_MAX * 40u / 100u); // 40% speed
+        botBackward(bkSpd);
+      } else {
+        botStop();
+      }
+    } else {
+      botStop();
+    }
 
-    /* Chỉ resume khi phía trước ≥ 1m (PATH_CLEAR), không phải ~70cm */
+    /* Chỉ resume khi phía trước ≥ 1m (PATH_CLEAR) */
     const bool pathClear = obsPathClear(fCm);
-    if (pathClear) {
+    if (pathClear && (now - s_wpObstHoldStart >= 1200u)) { // Chỉ đi tiếp sau khi lùi xong
       pidSpeedReset();
       oaReset(s_wpOa);
       usFilterReset();

@@ -216,8 +216,16 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
 #endif
 
   case OA_SWERVE: {
-    // Nếu góc hoặc cảm biến bị chặn trong lúc strafe
-    if (obsAnyCornerBlocked()) {
+    // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
+    bool sideBlocked = false;
+    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF, RR
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM)
+                 || (obsCmValid(g_state.usRR) && g_state.usRR < (int16_t)US_STOP_CM);
+    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF, LR
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM)
+                 || (obsCmValid(g_state.usLR) && g_state.usLR < (int16_t)US_STOP_CM);
+    }
+    if (sideBlocked) {
       botStop();
       ctx.state = OA_BLOCKED;
       ctx.stateT0 = now;
@@ -242,7 +250,16 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   }
 
   case OA_PASS: {
-    if (obsAnyCornerBlocked()) {
+    // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
+    bool sideBlocked = false;
+    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF, RR
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM)
+                 || (obsCmValid(g_state.usRR) && g_state.usRR < (int16_t)US_STOP_CM);
+    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF, LR
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM)
+                 || (obsCmValid(g_state.usLR) && g_state.usLR < (int16_t)US_STOP_CM);
+    }
+    if (sideBlocked) {
       botStop();
       ctx.state = OA_BLOCKED;
       ctx.stateT0 = now;
