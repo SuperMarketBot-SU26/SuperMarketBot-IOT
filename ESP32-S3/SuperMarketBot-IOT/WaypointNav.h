@@ -82,6 +82,12 @@ extern volatile uint32_t   s_wpSettleUntilMs;
 /* Status string cho MQTT telemetry */
 char g_wpStatus[32] = "idle";
 
+/* Mecanum segment path-following variables */
+static float s_wpStartColX = 0.f;
+static float s_wpStartColY = 0.f;
+static float s_wpSegmentHeading = 0.f;
+static bool  s_wpAligned = false;
+
 /* ==================== Helpers ===================================== */
 static inline float wpNormalizeAngle(float a) {
   while (a >  (float)M_PI) a -= 2.f * (float)M_PI;
@@ -152,6 +158,16 @@ inline void wpNavStart() {
   g_state.mode = MODE_WAYPOINT;
   pidSpeedReset();
   pidYawReset();
+  
+  s_wpStartColX = g_pose.x;
+  s_wpStartColY = g_pose.y;
+  s_wpAligned = false;
+  if (s_wpCount > 0) {
+    float dx = s_wpRoute[0].x - g_pose.x;
+    float dy = s_wpRoute[0].y - g_pose.y;
+    s_wpSegmentHeading = atan2f(dy, dx);
+  }
+  
   strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
   Serial.printf("[WP] Start → WP[0] (%.3f, %.3f) | Pose aligned to map!\n",
                 s_wpRoute[0].x, s_wpRoute[0].y);
@@ -275,6 +291,15 @@ inline void wpNavTick() {
       oaReset(s_wpOa);
       s_wpT0 = now;
       pidSpeedReset();
+      pidYawReset();
+      s_wpStartColX = g_pose.x;
+      s_wpStartColY = g_pose.y;
+      s_wpAligned = false;
+      if (s_wpIndex < s_wpCount) {
+        float dx = s_wpRoute[s_wpIndex].x - g_pose.x;
+        float dy = s_wpRoute[s_wpIndex].y - g_pose.y;
+        s_wpSegmentHeading = atan2f(dy, dx);
+      }
       if (s_wpIndex >= s_wpCount) {
         botStop();
         s_wpFsm      = WP_DONE;
@@ -317,22 +342,44 @@ inline void wpNavTick() {
       return;
     }
 
-    /* ── Pure Pursuit steering ─────────────────────────────────── */
-    float targetH = atan2f(dy, dx);
-    float alpha   = wpAngleDiff(targetH, g_pose.headingRad);
-
-    /* Quá lệch → xoay tại chỗ */
-    if (fabsf(alpha) > WP_MAX_STEER_RAD) {
-      uint16_t turnPwm = g_state.swerveBaseSpeed;
-      if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 45 : 35);
-      if (alpha > 0) { botRotateCCW(turnPwm); } // alpha > 0 là đích bên trái -> xoay trái CCW
-      else           { botRotateCW(turnPwm); }  // alpha < 0 là đích bên phải -> xoay phải CW
+    /* ── Mecanum Path-Following & Alignment ────────────────────── */
+    float alpha = wpAngleDiff(s_wpSegmentHeading, g_pose.headingRad);
+    
+    // Nếu lệch hướng lớn (vừa bắt đầu segment hoặc bị va quệt lệch hẳn xe), xoay tại chỗ căn chỉnh trước
+    if (!s_wpAligned) {
+      if (fabsf(alpha) > 0.15f) { // ~8.5 độ
+        uint16_t turnPwm = g_state.swerveBaseSpeed;
+        if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 45 : 35);
+        if (alpha > 0) { botRotateCCW(turnPwm); }
+        else           { botRotateCW(turnPwm); }
+        return;
+      } else {
+        s_wpAligned = true;
+        pidYawReset();
+      }
+    }
+    
+    // Nếu trong quá trình di chuyển bị lệch hướng đột ngột quá lớn (>35 độ), dừng xoay lại
+    if (fabsf(alpha) > 0.6f) {
+      s_wpAligned = false;
+      botStop();
       return;
     }
 
-    int16_t steer = -(int16_t)(WP_STEER_K * alpha); // Đảo dấu để quay về hướng waypoint
-    if (steer >  100) steer =  100;
-    if (steer < -100) steer = -100;
+    // Tính toán sai số lệch ngang (Cross-Track Error) so với đường thẳng đoạn thẳng đang đi
+    float dx_p = g_pose.x - s_wpStartColX;
+    float dy_p = g_pose.y - s_wpStartColY;
+    float e_lat = -dx_p * sinf(s_wpSegmentHeading) + dy_p * cosf(s_wpSegmentHeading);
+    
+    // Bù lệch ngang bằng trượt ngang (strafe) xe Mecanum sang trái/phải để quay lại vạch thẳng
+    int16_t strafeCmd = (int16_t)(e_lat * 150.f); 
+    if (strafeCmd > 60)  strafeCmd = 60;
+    if (strafeCmd < -60) strafeCmd = -60;
+
+    // Chỉnh lái Yaw PID khép kín dùng IMU để triệt tiêu sai số góc, giữ robot thẳng tắp
+    float dt_s = (float)SAFE_LOOP_MS * 0.001f;
+    float yawOut = pidYawCompute(s_wpSegmentHeading, g_pose.headingRad, dt_s);
+    int16_t steer = (int16_t)constrain(yawOut, -100, 100);
 
     uint16_t cruiseSpd = g_state.autoBaseSpeed;
     if (cruiseSpd == 0) cruiseSpd = g_state.baseSpeed;
@@ -346,13 +393,13 @@ inline void wpNavTick() {
 
     uint16_t spd = (dist < WP_SLOW_RADIUS_M) ? slowSpd : cruiseSpd;
 
-    float dt_s    = (float)SAFE_LOOP_MS * 0.001f;
     float pidOut  = pidSpeedCompute(pwmToEstMps(spd), robotActualSpeedMps(), dt_s);
     int32_t runPwm = (int32_t)spd + (int32_t)pidOut;
     if (runPwm < 0) runPwm = 0;
     if (runPwm > (int32_t)PWM_MAX) runPwm = (int32_t)PWM_MAX;
 
-    botDrive(steer, 100, (uint16_t)runPwm);
+    // Tiến thẳng đồng thời trượt ngang né/bù lệch đường và bẻ lái IMU giữ đầu thẳng
+    botDriveMecanum(strafeCmd, 100, steer, (uint16_t)runPwm);
     break;
   }
 
@@ -361,26 +408,15 @@ inline void wpNavTick() {
    *                     rồi publish "reroute_needed" → Backend gửi route mới
    * ══════════════════════════════════════════════════════════════ */
   case WP_OBSTACLE_HOLD: {
-    // Lùi xe trong 1200ms đầu để tạo khoảng trống thoát kẹt
-    if (now - s_wpObstHoldStart < 1200u) {
-      if (!obsRearBlocked()) {
-        uint16_t bkSpd = g_state.swerveBaseSpeed;
-        if (bkSpd == 0) bkSpd = (uint16_t)((uint32_t)PWM_MAX * 40u / 100u); // 40% speed
-        botBackward(bkSpd);
-      } else {
-        botStop();
-      }
-    } else {
-      botStop();
-    }
+    botStop(); // Dừng tại chỗ chờ hoặc yêu cầu định tuyến lại, không lùi xe
+    pidSpeedReset();
 
     /* Chỉ resume khi phía trước ≥ 1m (PATH_CLEAR) */
     const bool pathClear = obsPathClear(fCm);
-    if (pathClear && (now - s_wpObstHoldStart >= 1200u)) { // Chỉ đi tiếp sau khi lùi xong
-      pidSpeedReset();
+    if (pathClear) {
       oaReset(s_wpOa);
       usFilterReset();
-      s_wpSettleUntilMs = now + 450;  // Settle trước khi Pure Pursuit lại
+      s_wpSettleUntilMs = now + 450;  // Settle trước khi đi tiếp
       wpSetState(WP_NAVIGATING, now, "navigating");
       Serial.println(F("[WP] Duong truoc du xa — settle 450ms roi resume."));
       return;

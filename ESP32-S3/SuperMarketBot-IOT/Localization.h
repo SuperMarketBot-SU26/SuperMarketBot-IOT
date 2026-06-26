@@ -100,7 +100,7 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   int32_t sdRR = sdPhy[g_mapEncSlot[SLOT_RR]];
 
   /* Quãng đường mỗi bên (m) — trung bình trước + sau của các slot logic */
-  const float ticksToM = WHEEL_CIRC_M / ENC_PPR;
+  const float ticksToM = (WHEEL_CIRC_M / ENC_PPR) * ODOM_CALIB_FACTOR;
   float dLeft  = ((float)(sdLF + sdLR) * 0.5f) * ticksToM;
   float dRight = ((float)(sdRF + sdRR) * 0.5f) * ticksToM;
 
