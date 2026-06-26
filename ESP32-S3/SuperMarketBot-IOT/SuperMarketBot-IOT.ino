@@ -57,7 +57,7 @@ static void printMemInfo() {
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 #undef Serial
-LoggerSerial logger(Serial);
+LoggerSerial logger(Serial0);
 #define Serial logger
 QueueHandle_t g_logQueue = NULL;
 
