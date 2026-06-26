@@ -66,18 +66,18 @@ enum WpFsmState : uint8_t {
 };
 
 /* ==================== Biến nội bộ ================================== */
-static Waypoint   s_wpRoute[WP_MAX_WAYPOINTS];
-static uint8_t    s_wpCount = 0;
-uint8_t           s_wpIndex = 0;          // expose để MqttClient đọc
-static WpFsmState s_wpFsm   = WP_IDLE;
-static uint32_t   s_wpT0    = 0;          // Millis khi bắt đầu waypoint hiện tại
+extern Waypoint            s_wpRoute[WP_MAX_WAYPOINTS];
+extern volatile uint8_t    s_wpCount;
+extern volatile uint8_t    s_wpIndex;          // expose để MqttClient đọc
+extern volatile WpFsmState s_wpFsm;
+extern volatile uint32_t   s_wpT0;          // Millis khi bắt đầu waypoint hiện tại
 
 /* Obstacle-hold fallback */
-static uint32_t   s_wpObstHoldStart = 0;
-static OaContext  s_wpOa;
+extern volatile uint32_t   s_wpObstHoldStart;
+extern volatile OaContext  s_wpOa;
 
 /* Settle delay sau khi OA xong — tránh lao ngay vào hướng mới */
-static uint32_t   s_wpSettleUntilMs = 0;
+extern volatile uint32_t   s_wpSettleUntilMs;
 
 /* Status string cho MQTT telemetry */
 char g_wpStatus[32] = "idle";
