@@ -244,6 +244,8 @@
 #define BOOT_GUARD_MS           12000u
 /** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (HiveMQ Cloud hoặc local broker). */
 #define WIFI_STA_ENABLE         1
+/** 0 = Tắt hẳn kết nối MQTT (tránh treo khi chạy offline/local). 1 = Bật MQTT. */
+#define MQTT_ENABLE             1
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
@@ -340,6 +342,8 @@ extern volatile uint32_t s_settleUntilMs;
 #define SENSOR_LINK_MS_LIDAR  500u
 #define SENSOR_LINK_MS_US     2000u
 #define SENSOR_LINK_MS_ENC    3500u
+
+extern bool g_imuEnabled;
 
 #include "LogStream.h"
 

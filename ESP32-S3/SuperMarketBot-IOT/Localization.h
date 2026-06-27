@@ -108,7 +108,6 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   float ds     = (dLeft + dRight) * 0.5f;
   float dTheta = (dRight - dLeft) / WHEEL_BASE_M;
 
-  extern bool g_imuEnabled;
   if (g_imuEnabled) {
     // Nếu có IMU hoạt động, dùng góc headingRad cập nhật từ Gyro ở taskControl độc lập.
     // Ta chỉ dùng ds từ encoder để chiếu dịch chuyển lên hệ tọa độ thế giới.

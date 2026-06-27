@@ -17,7 +17,7 @@
 
 static float    s_gyroBiasZ = 0.f;
 static uint32_t s_lastImuTimeMs = 0;
-inline bool     g_imuEnabled = false;
+bool            g_imuEnabled = false;
 
 // Đọc 2 byte từ một thanh ghi I2C
 static inline int16_t mpu6050Read16(uint8_t reg) {

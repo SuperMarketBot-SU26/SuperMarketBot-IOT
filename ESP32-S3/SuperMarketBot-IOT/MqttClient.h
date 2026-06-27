@@ -204,19 +204,12 @@ static void mqttReconnect() {
   g_mqttLastReconnectMs = now;
 
   Serial.print(F("[MQTT] Connecting..."));
-  
-  // Thiết lập timeout TCP kết nối siêu ngắn (1000ms) để tránh treo block nhiệm vụ điều khiển WebSocket trên Core 0
-  g_wifiClient.setTimeout(1000); 
-
   bool ok;
   if (strlen(MQTT_USER) > 0) {
     ok = g_mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
   } else {
     ok = g_mqttClient.connect(MQTT_CLIENT_ID); // Local broker không cần auth
   }
-
-  // Khôi phục lại timeout tiêu chuẩn (5 giây) để truyền nhận gói tin lớn
-  g_wifiClient.setTimeout(5000);
 
   if (ok) {
     g_mqttClient.subscribe(MQTT_TOPIC_COMMAND);
@@ -332,6 +325,9 @@ static void mqttPublishStatus(const char *status) {
 
 /* ==================== MAIN LOOP (gọi từ taskWebIO) ================= */
 static void mqttLoop() {
+#if !MQTT_ENABLE
+  return;
+#endif
   /* Xử lý pending status từ Core 1 trước */
   if (g_mqttStatusPending) {
     mqttPublishStatus((const char *)g_mqttPendingStatus);
