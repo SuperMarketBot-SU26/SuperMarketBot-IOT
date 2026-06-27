@@ -69,7 +69,13 @@ inline void motorDrive(MotorId id, int32_t speed) {
     digitalWrite(m.in2, HIGH);
     g_motorDir[(uint8_t)id] = 0;
   }
-  if (speed > PWM_MAX) speed = PWM_MAX;
+  if (speed > 0) {
+    // Đền bù vùng chết (Deadband compensation) cho động cơ vàng DC:
+    // Đảm bảo PWM thực tế xuất ra tối thiểu là 70 (khoảng 27% công suất) để thắng lực ma sát nghỉ và giúp bánh quay đều.
+    constexpr int32_t MIN_MOTOR_PWM = 70;
+    if (speed > PWM_MAX) speed = PWM_MAX;
+    speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
+  }
   ledcWrite(m.pwm, speed);
 }
 
