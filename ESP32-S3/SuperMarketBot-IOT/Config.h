@@ -306,6 +306,9 @@ struct RobotState {
   // Millis lần cuối có frame LiDAR hợp lệ / sau 1 vòng quét US (giám sát “tươi”)
   volatile uint32_t lidarLastUpdateMs;
   volatile uint32_t usLastUpdateMs;
+  /** Tốc độ PWM thực tế đã xuất ở chu kỳ trước (sau slew limiter) — index theo MotorId (TB6612 vật lý).
+   *  Chia sẻ giữa taskControl (Core 1) và taskWebIO (Core 0) nên KHÔNG dùng static cục bộ. */
+  volatile int32_t lastMotorSpeed[4];
 };
 
 /** FSM tự hành (AN_*) — hiển thị trên Web/MQTT khi không cắm USB Serial. */

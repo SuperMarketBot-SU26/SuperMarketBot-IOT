@@ -59,15 +59,15 @@ inline void motorDrive(MotorId id, int32_t speed) {
   if (speed < -(int32_t)PWM_MAX) speed = -(int32_t)PWM_MAX;
 
   // 2. Bộ lọc dốc (Slew rate limiter) giảm dòng khởi động đột ngột (inrush current) chống sụt áp nguồn (brownout)
-  static int32_t s_lastSpeed[4] = {0, 0, 0, 0};
-  int32_t diff = speed - s_lastSpeed[id];
+  int32_t lastSpd = g_state.lastMotorSpeed[(uint8_t)id];
+  int32_t diff = speed - lastSpd;
   constexpr int32_t MAX_RAMP_STEP = 150; // Giới hạn thay đổi PWM tối đa mỗi chu kỳ 10ms
   if (diff > MAX_RAMP_STEP) {
-    speed = s_lastSpeed[id] + MAX_RAMP_STEP;
+    speed = lastSpd + MAX_RAMP_STEP;
   } else if (diff < -MAX_RAMP_STEP) {
-    speed = s_lastSpeed[id] - MAX_RAMP_STEP;
+    speed = lastSpd - MAX_RAMP_STEP;
   }
-  s_lastSpeed[id] = speed;
+  g_state.lastMotorSpeed[(uint8_t)id] = speed;
 
   const MotorPins &m = MOTORS[id];
   // 3. Thiết lập hướng quay động cơ
