@@ -286,9 +286,9 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     uint16_t spd = g_state.swerveBaseSpeed;
     if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
 
-    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang
+    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang (Phản hồi âm)
     float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    int16_t turnCmd = (int16_t)(yawError * 60.f); // Độ nhạy P = 60
+    int16_t turnCmd = -(int16_t)(yawError * 60.f); // Thêm dấu trừ để phản hồi âm
     turnCmd = constrain(turnCmd, -35, 35);
 
     botDriveMecanum(strafeCmd, fwdCmd, turnCmd, spd);
@@ -335,9 +335,9 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     uint16_t spd = g_state.swerveBaseSpeed;
     if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
 
-    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang
+    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang (Phản hồi âm)
     float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    int16_t turnCmd = (int16_t)(yawError * 60.f);
+    int16_t turnCmd = -(int16_t)(yawError * 60.f); // Thêm dấu trừ để phản hồi âm
     turnCmd = constrain(turnCmd, -35, 35);
 
     botDriveMecanum(strafeCmd, fwdCmd, turnCmd, spd);

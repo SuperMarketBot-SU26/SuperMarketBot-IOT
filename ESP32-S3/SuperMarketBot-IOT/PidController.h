@@ -136,7 +136,8 @@ inline float pidYawCompute(float targetRad, float actualRad, float dt_s) {
   float err = targetRad - actualRad;
   while (err >  (float)M_PI) err -= 2.f * (float)M_PI;
   while (err < -(float)M_PI) err += 2.f * (float)M_PI;
-  return pidCompute(s_pidYaw, actualRad + err, actualRad, dt_s); // pass err thông qua setpoint trick
+  // Nhân thêm -1 để đảo chiều lái bù chính xác (chiều lệnh tăng là CW, chiều góc tăng là CCW)
+  return -pidCompute(s_pidYaw, actualRad + err, actualRad, dt_s);
 }
 
 #endif // PID_CONTROLLER_H
