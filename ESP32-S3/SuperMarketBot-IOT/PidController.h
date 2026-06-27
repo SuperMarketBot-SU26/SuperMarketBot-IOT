@@ -29,10 +29,10 @@
 #define PID_SPEED_OUT_MAX ((float)PWM_MAX)
 
 /** Yaw/Heading PID — steer sang trái/phải khi bám heading (Phase 3) */
-#define PID_YAW_KP      120.f
-#define PID_YAW_KI      0.8f
-#define PID_YAW_KD      6.f
-#define PID_YAW_I_MAX   15.f
+#define PID_YAW_KP      40.f
+#define PID_YAW_KI      0.f
+#define PID_YAW_KD      2.f
+#define PID_YAW_I_MAX   30.f
 #define PID_YAW_OUT_MAX 100.f  // cmdX range -100..100
 
 /* ==================== Struct PID =================================== */
@@ -136,6 +136,7 @@ inline float pidYawCompute(float targetRad, float actualRad, float dt_s) {
   float err = targetRad - actualRad;
   while (err >  (float)M_PI) err -= 2.f * (float)M_PI;
   while (err < -(float)M_PI) err += 2.f * (float)M_PI;
+  s_pidYaw.prevError = err;  // override để tương thích chính xác trạng thái trước đây
   return pidCompute(s_pidYaw, actualRad + err, actualRad, dt_s); // pass err thông qua setpoint trick
 }
 

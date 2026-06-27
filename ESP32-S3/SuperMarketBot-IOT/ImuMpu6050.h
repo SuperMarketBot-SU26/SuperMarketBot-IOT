@@ -107,8 +107,8 @@ inline bool imuMpu6050Update(float &headingRad) {
   gyroZRad = -gyroZRad; // Đảo chiều nếu IMU bị lắp ngược trục Z
 #endif
 
-  // Ngưỡng lọc nhiễu tĩnh (Deadband) siêu nhạy để tránh bỏ sót các di chuyển nhỏ nhất
-  if (fabsf(gyroZRad) < 0.0002f) {
+  // Ngưỡng lọc nhiễu tĩnh (Deadband) để tránh trôi góc khi robot đứng im
+  if (fabsf(gyroZRad) < 0.0015f) {
     gyroZRad = 0.f;
   }
 
