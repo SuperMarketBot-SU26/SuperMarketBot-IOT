@@ -28,7 +28,6 @@
 #include "PidController.h"
 #include "WaypointNav.h"
 #include "StatusRGB.h"
-#include <esp_task_wdt.h>
 #include "CtrlJson.h"
 #include "LocalObstacleAvoid.h"
 #include "ObstacleSensors.h"
@@ -429,13 +428,6 @@ static void taskWebIO(void *pvParams) {
 }
 
 static void taskMQTT(void *pvParams) {
-  // Hủy đăng ký Watchdog cho task này để tránh bị reset khi bắt tay SSL/TLS mã hóa nặng
-  #if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
-  esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
-  #else
-  esp_task_wdt_delete(NULL);
-  #endif
-
   while (true) {
     #if WIFI_STA_ENABLE
     mqttLoop();
@@ -491,10 +483,10 @@ void setup() {
     nullptr, 0
   );
 
-  // Core 0: MQTT Task — priority 1 (chạy nền, không block task chính)
+  // Core 0: MQTT Task — priority 0 (chạy đồng hạng với IDLE task để tránh starve watchdog khi handshake TLS)
   xTaskCreatePinnedToCore(
     taskMQTT, "MQTTTask",
-    8192, nullptr, 1,
+    8192, nullptr, 0,
     nullptr, 0
   );
 
