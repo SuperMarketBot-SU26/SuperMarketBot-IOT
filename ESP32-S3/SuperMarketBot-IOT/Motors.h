@@ -54,7 +54,23 @@ extern volatile int8_t g_motorDir[4];
  * @param speed -PWM_MAX..+PWM_MAX (âm = lùi)
  */
 inline void motorDrive(MotorId id, int32_t speed) {
+  // 1. Giới hạn dải đầu vào
+  if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
+  if (speed < -(int32_t)PWM_MAX) speed = -(int32_t)PWM_MAX;
+
+  // 2. Bộ lọc dốc (Slew rate limiter) giảm dòng khởi động đột ngột (inrush current) chống sụt áp nguồn (brownout)
+  static int32_t s_lastSpeed[4] = {0, 0, 0, 0};
+  int32_t diff = speed - s_lastSpeed[id];
+  constexpr int32_t MAX_RAMP_STEP = 150; // Giới hạn thay đổi PWM tối đa mỗi chu kỳ 10ms
+  if (diff > MAX_RAMP_STEP) {
+    speed = s_lastSpeed[id] + MAX_RAMP_STEP;
+  } else if (diff < -MAX_RAMP_STEP) {
+    speed = s_lastSpeed[id] - MAX_RAMP_STEP;
+  }
+  s_lastSpeed[id] = speed;
+
   const MotorPins &m = MOTORS[id];
+  // 3. Thiết lập hướng quay động cơ
   if (speed > 0) {
     digitalWrite(m.in1, HIGH);
     digitalWrite(m.in2, LOW);
@@ -69,11 +85,11 @@ inline void motorDrive(MotorId id, int32_t speed) {
     digitalWrite(m.in2, HIGH);
     g_motorDir[(uint8_t)id] = 0;
   }
+
+  // 4. Bù vùng chết (Deadband compensation) cho động cơ vàng DC (quy đổi theo hệ 10-bit PWM: 0..1023)
   if (speed > 0) {
-    // Đền bù vùng chết (Deadband compensation) cho động cơ vàng DC:
-    // Đảm bảo PWM thực tế xuất ra tối thiểu là 70 (khoảng 27% công suất) để thắng lực ma sát nghỉ và giúp bánh quay đều.
-    constexpr int32_t MIN_MOTOR_PWM = 70;
-    if (speed > PWM_MAX) speed = PWM_MAX;
+    constexpr int32_t MIN_MOTOR_PWM = 280; // 27.3% của 1023, tương đương 70 của hệ 8-bit
+    if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
     speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
   }
   ledcWrite(m.pwm, speed);

@@ -284,7 +284,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
       fwdCmd = 45; // Tiến chéo mượt mà
     }
     uint16_t spd = g_state.swerveBaseSpeed;
-    if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
+    if (spd == 0) spd = oaPct2Pwm(32); // Mặc định 32% để bảo vệ nguồn nguồn sụt áp
 
     // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang (Phản hồi âm)
     float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
@@ -333,7 +333,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
     int16_t fwdCmd = 45; // Vượt chướng ngại vật mượt mà
     uint16_t spd = g_state.swerveBaseSpeed;
-    if (spd == 0) spd = oaPct2Pwm(45); // Mặc định 45% nếu chưa chỉnh
+    if (spd == 0) spd = oaPct2Pwm(32); // Mặc định 32% để bảo vệ nguồn nguồn sụt áp
 
     // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang (Phản hồi âm)
     float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
