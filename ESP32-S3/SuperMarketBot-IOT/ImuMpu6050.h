@@ -23,7 +23,9 @@ inline bool     g_imuEnabled = false;
 static inline int16_t mpu6050Read16(uint8_t reg) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(reg);
-  Wire.endTransmission(false);
+  if (Wire.endTransmission(false) != 0) {
+    return 0; // Tránh treo nhiệm vụ điều khiển nếu đường bus I2C bị nhiễu do động cơ
+  }
   Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint8_t h = Wire.read();
@@ -42,6 +44,7 @@ inline void imuMpu6050Init() {
 
   Serial.printf("[IMU] Initializing MPU6050 on I2C SDA:%d SCL:%d...\n", (int)IMU_I2C_SDA, (int)IMU_I2C_SCL);
   Wire.begin(IMU_I2C_SDA, IMU_I2C_SCL, 400000u); // Khởi tạo I2C bus tốc độ 400kHz
+  Wire.setTimeOut(10); // Giới hạn timeout 10ms tránh treo block nhiệm vụ điều khiển khi bị nghẽn bus
 
   // Thử kết nối thiết bị
   Wire.beginTransmission(MPU6050_ADDR);
