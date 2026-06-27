@@ -214,9 +214,8 @@ inline void wpNavTick() {
 
   /* ── Safety hardstop — ưu tiên tuyệt đối (mọi state) ───────── */
   const bool hardFront = obsFrontBlocked();
-  const bool hardRear  = obsRearBlocked();
 
-  if (hardFront || hardRear) {
+  if (hardFront) {
     /* Không can thiệp FSM — chỉ dừng motor, FSM tự xử lý ở state tương ứng */
     botStop();
     /* Trong state OA đang xoay → hardstop nhưng không reset FSM,

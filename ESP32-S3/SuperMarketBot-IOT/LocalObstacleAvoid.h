@@ -79,9 +79,9 @@ static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
   int16_t lr = g_state.usLR;
   int16_t rr = g_state.usRR;
 
-  // Tính điểm 2 bên sườn (bằng khoảng cách nhỏ nhất ở sườn bên đó)
-  int16_t leftScore  = min(lf, lr);
-  int16_t rightScore = min(rf, rr);
+  // Tính điểm 2 bên sườn (chỉ dùng cảm biến trước-bên để tránh nhiễu/vật cản từ bức tường phía sau)
+  int16_t leftScore  = lf;
+  int16_t rightScore = rf;
 
   // Ngưỡng an toàn tối thiểu để có thể lách tránh (stop distance + 3cm dự phòng)
   const int16_t minSwerveDist = (int16_t)(US_STOP_CM + 3);
@@ -153,7 +153,9 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
 
 inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   const bool hardFront = obsFrontBlocked();
+#if !USE_HC_SR04_HARDWARE
   const bool hardRear  = obsRearBlocked();
+#endif
 
   switch (ctx.state) {
   case OA_IDLE:
@@ -218,12 +220,10 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   case OA_SWERVE: {
     // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
     bool sideBlocked = false;
-    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF, RR
-      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM)
-                 || (obsCmValid(g_state.usRR) && g_state.usRR < (int16_t)US_STOP_CM);
-    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF, LR
-      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM)
-                 || (obsCmValid(g_state.usLR) && g_state.usLR < (int16_t)US_STOP_CM);
+    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM);
+    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM);
     }
     if (sideBlocked) {
       botStop();
@@ -252,12 +252,10 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   case OA_PASS: {
     // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
     bool sideBlocked = false;
-    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF, RR
-      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM)
-                 || (obsCmValid(g_state.usRR) && g_state.usRR < (int16_t)US_STOP_CM);
-    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF, LR
-      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM)
-                 || (obsCmValid(g_state.usLR) && g_state.usLR < (int16_t)US_STOP_CM);
+    if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM);
+    } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM);
     }
     if (sideBlocked) {
       botStop();
