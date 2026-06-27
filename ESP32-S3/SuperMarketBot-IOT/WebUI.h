@@ -1265,7 +1265,6 @@ inline void webUILoop() {
     // Để nhận lệnh từ Web Manager (Gửi Test Lộ trình), ta không bao giờ tắt MQTT nữa
     // (Đã xoá logic ngắt kết nối MQTT khi về chế độ Manual)
   }
-  mqttLoop();
 #endif
 }
 

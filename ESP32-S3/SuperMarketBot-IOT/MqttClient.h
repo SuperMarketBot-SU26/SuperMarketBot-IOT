@@ -56,6 +56,7 @@ static WiFiClientSecure g_wifiClient;
 #else
 static WiFiClient       g_wifiClient;
 #endif
+extern SemaphoreHandle_t g_mqttMutex;
 static PubSubClient     g_mqttClient(g_wifiClient);
 static uint32_t         g_mqttLastReconnectMs = 0;
 static uint32_t         g_mqttLastTelemetryMs = 0;
@@ -328,16 +329,20 @@ static void mqttLoop() {
 #if !MQTT_ENABLE
   return;
 #endif
-  /* Xử lý pending status từ Core 1 trước */
-  if (g_mqttStatusPending) {
-    mqttPublishStatus((const char *)g_mqttPendingStatus);
-    g_mqttStatusPending = false;
-  }
+  if (g_mqttMutex == NULL) return;
+  if (xSemaphoreTake(g_mqttMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    /* Xử lý pending status từ Core 1 trước */
+    if (g_mqttStatusPending) {
+      mqttPublishStatus((const char *)g_mqttPendingStatus);
+      g_mqttStatusPending = false;
+    }
 
-  mqttReconnect();
-  if (g_mqttClient.connected()) {
-    g_mqttClient.loop();
-    mqttPublishTelemetry();
+    mqttReconnect();
+    if (g_mqttClient.connected()) {
+      g_mqttClient.loop();
+      mqttPublishTelemetry();
+    }
+    xSemaphoreGive(g_mqttMutex);
   }
 }
 

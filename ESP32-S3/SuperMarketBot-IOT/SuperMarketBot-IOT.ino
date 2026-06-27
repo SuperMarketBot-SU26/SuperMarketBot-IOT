@@ -89,6 +89,7 @@ RobotState g_state = {
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────
 SemaphoreHandle_t g_stateMutex;
+SemaphoreHandle_t g_mqttMutex;
 
 /** Hướng quay vật lý hiện tại của 4 động cơ (MID_FL, MID_RL, MID_FR, MID_RR)
  *  Sử dụng để ký hiệu hóa số xung đếm từ encoder không chiều. */
@@ -401,12 +402,15 @@ static void taskWebIO(void *pvParams) {
           g_wsServer.broadcastTXT(buf);
         }
         // 2. Gửi qua MQTT (Cloud/Backend)
-        if (g_mqttClient.connected()) {
-          StaticJsonDocument<256> doc;
-          doc["msg"] = logMsg.text;
-          char buf[256];
-          serializeJson(doc, buf);
-          g_mqttClient.publish(MQTT_TOPIC_LOG, buf);
+        if (g_mqttMutex != NULL && xSemaphoreTake(g_mqttMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+          if (g_mqttClient.connected()) {
+            StaticJsonDocument<256> doc;
+            doc["msg"] = logMsg.text;
+            char buf[256];
+            serializeJson(doc, buf);
+            g_mqttClient.publish(MQTT_TOPIC_LOG, buf);
+          }
+          xSemaphoreGive(g_mqttMutex);
         }
       }
     }
@@ -420,6 +424,15 @@ static void taskWebIO(void *pvParams) {
       statusRgbUpdate();
     }
     vTaskDelay(pdMS_TO_TICKS(2)); // nhường CPU ngắn
+  }
+}
+
+static void taskMQTT(void *pvParams) {
+  while (true) {
+    #if WIFI_STA_ENABLE
+    mqttLoop();
+    #endif
+    vTaskDelay(pdMS_TO_TICKS(100)); // Chạy tần số 10Hz
   }
 }
 
@@ -460,12 +473,20 @@ void setup() {
 
   // ── Mutex ────────────────────────────────────────────────────────
   g_stateMutex = xSemaphoreCreateMutex();
+  g_mqttMutex = xSemaphoreCreateMutex();
 
   // ── Tạo FreeRTOS tasks ───────────────────────────────────────────
   // Core 0: Web IO — stack 10KB, priority 2 (tăng để WiFi/WS được xử lý kịp)
   xTaskCreatePinnedToCore(
     taskWebIO, "WebIO",
     10240, nullptr, 2,
+    nullptr, 0
+  );
+
+  // Core 0: MQTT Task — priority 1 (chạy nền, không block task chính)
+  xTaskCreatePinnedToCore(
+    taskMQTT, "MQTTTask",
+    8192, nullptr, 1,
     nullptr, 0
   );
 
