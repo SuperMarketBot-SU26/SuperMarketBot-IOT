@@ -41,7 +41,7 @@
 #define MQTT_CLIENT_ID     "RB001"
 #define MQTT_USER          "Smartmarketbot"
 #define MQTT_PASS          "Passsep490"
-#define MQTT_RECONNECT_MS  5000u       // Thời gian giữa 2 lần thử kết nối lại
+#define MQTT_RECONNECT_MS  15000u      // Thời gian giữa 2 lần thử kết nối lại (tăng lên 15s để tránh nghẽn)
 #define MQTT_TELEMETRY_MS  2000u       // Publish telemetry mỗi 2 giây
 
 /* Topics */
@@ -204,12 +204,19 @@ static void mqttReconnect() {
   g_mqttLastReconnectMs = now;
 
   Serial.print(F("[MQTT] Connecting..."));
+  
+  // Thiết lập timeout TCP kết nối siêu ngắn (1000ms) để tránh treo block nhiệm vụ điều khiển WebSocket trên Core 0
+  g_wifiClient.setTimeout(1000); 
+
   bool ok;
   if (strlen(MQTT_USER) > 0) {
     ok = g_mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
   } else {
     ok = g_mqttClient.connect(MQTT_CLIENT_ID); // Local broker không cần auth
   }
+
+  // Khôi phục lại timeout tiêu chuẩn (5 giây) để truyền nhận gói tin lớn
+  g_wifiClient.setTimeout(5000);
 
   if (ok) {
     g_mqttClient.subscribe(MQTT_TOPIC_COMMAND);
@@ -222,7 +229,7 @@ static void mqttReconnect() {
     strncpy((char *)g_mqttPendingStatus, "online", sizeof(g_mqttPendingStatus) - 1);
     g_mqttStatusPending = true;
   } else {
-    Serial.printf(" FAIL rc=%d. Sẽ tự động thử lại sau 5 giây...\n", g_mqttClient.state());
+    Serial.printf(" FAIL rc=%d. Sẽ tự động thử lại sau 15 giây...\n", g_mqttClient.state());
   }
 }
 
