@@ -28,6 +28,7 @@
 #include "PidController.h"
 #include "WaypointNav.h"
 #include "StatusRGB.h"
+#include <esp_task_wdt.h>
 #include "CtrlJson.h"
 #include "LocalObstacleAvoid.h"
 #include "ObstacleSensors.h"
@@ -440,6 +441,9 @@ static void taskMQTT(void *pvParams) {
  *  setup() — Chạy trên Core 1 (Arduino default)
  * =================================================================== */
 void setup() {
+  // Vô hiệu hóa Task Watchdog toàn hệ thống để tránh bị reset do TLS handshake quá lâu
+  esp_task_wdt_deinit();
+
   g_logQueue = xQueueCreate(64, sizeof(LogMessage));
   Serial.begin(115200);
   // USB CDC trên S3 xuất hiện sau vài trăm ms — delay giúp log app không lẫn với boot ROM
@@ -483,11 +487,11 @@ void setup() {
     nullptr, 0
   );
 
-  // Core 0: MQTT Task — priority 0 (chạy đồng hạng với IDLE task để tránh starve watchdog khi handshake TLS)
+  // Core 1: MQTT Task — priority 1 (chạy trên Core 1 để tránh ảnh hưởng đến sóng Wi-Fi/Bluetooth ở Core 0)
   xTaskCreatePinnedToCore(
     taskMQTT, "MQTTTask",
-    8192, nullptr, 0,
-    nullptr, 0
+    8192, nullptr, 1,
+    nullptr, 1
   );
 
   // Core 1: Điều khiển — stack 8KB, priority 5 (real-time)
