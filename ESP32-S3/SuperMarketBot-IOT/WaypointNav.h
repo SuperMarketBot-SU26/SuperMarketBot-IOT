@@ -348,7 +348,15 @@ inline void wpNavTick() {
     if (!s_wpAligned) {
       if (fabsf(alpha) > 0.15f) { // ~8.5 độ
         uint16_t turnPwm = g_state.swerveBaseSpeed;
-        if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 40 : 32);
+        if (turnPwm == 0) {
+          turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 40 : 32);
+        } else {
+          // Khóa giới hạn dưới an toàn 30% để đảm bảo luôn đủ moment quay tại chỗ
+          uint16_t minPwm = wpPct2Pwm(30);
+          if (turnPwm < minPwm) {
+            turnPwm = minPwm;
+          }
+        }
         if (alpha > 0) { botRotateCCW(turnPwm); }
         else           { botRotateCW(turnPwm); }
         return;

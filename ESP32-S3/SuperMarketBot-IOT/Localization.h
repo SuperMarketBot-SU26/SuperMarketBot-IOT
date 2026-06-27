@@ -24,7 +24,7 @@
 /* -------------------- Thông số cơ học ----------------------------- */
 /** Khoảng cách tâm bánh trái → tâm bánh phải (m). Đo thực tế trên robot. */
 #ifndef WHEEL_BASE_M
-#define WHEEL_BASE_M    0.16f
+#define WHEEL_BASE_M    0.365f  // Khung 25.5x15cm: L_W (track width) ~17.0cm + L_L (axle distance) ~19.5cm = 36.5cm hiệu dụng cho xoay Mecanum
 #endif
 
 /* -------------------- Cấu trúc Pose ------------------------------- */
