@@ -348,7 +348,7 @@ inline void wpNavTick() {
     if (!s_wpAligned) {
       if (fabsf(alpha) > 0.15f) { // ~8.5 độ
         uint16_t turnPwm = g_state.swerveBaseSpeed;
-        if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 30 : 22);
+        if (turnPwm == 0) turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 40 : 32);
         if (alpha > 0) { botRotateCCW(turnPwm); }
         else           { botRotateCW(turnPwm); }
         return;
