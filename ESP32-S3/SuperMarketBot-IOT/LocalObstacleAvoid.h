@@ -18,9 +18,10 @@ enum OaFsmState : uint8_t {
   OA_IDLE = 0,
   OA_SCAN_CW,
   OA_SCAN_CCW,
-  OA_SWERVE,
-  OA_PASS,
-  OA_BLOCKED
+  OA_WAIT,        // Đợi vật cản động di chuyển đi chỗ khác
+  OA_SWERVE,      // Trượt ngang song song tránh vật
+  OA_PASS,        // Tiến chéo vượt mặt
+  OA_BLOCKED      // Bị kẹt cứng
 };
 
 enum OaTickResult : uint8_t {
@@ -43,6 +44,7 @@ struct OaContext {
   uint8_t    attempts      = 0;
   int8_t     swerveDir     = 0;
   uint8_t    pathClearStreak = 0;
+  uint8_t    sideBlockedCount = 0; // Đếm số lần phát hiện sườn bị chặn liên tiếp
 };
 
 static inline float oaNorm(float a) {
@@ -69,6 +71,7 @@ inline void oaReset(OaContext &ctx) {
   ctx.state = OA_IDLE;
   ctx.attempts = 0;
   ctx.pathClearStreak = 0;
+  ctx.sideBlockedCount = 0;
 }
 
 #if USE_HC_SR04_HARDWARE
@@ -76,10 +79,8 @@ inline void oaReset(OaContext &ctx) {
 static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
   int16_t lf = g_state.usLF;
   int16_t rf = g_state.usRF;
-  int16_t lr = g_state.usLR;
-  int16_t rr = g_state.usRR;
 
-  // Tính điểm 2 bên sườn (chỉ dùng cảm biến trước-bên để tránh nhiễu/vật cản từ bức tường phía sau)
+  // Tính điểm 2 bên sườn
   int16_t leftScore  = lf;
   int16_t rightScore = rf;
 
@@ -89,12 +90,12 @@ static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
   bool leftOk  = (leftScore >= minSwerveDist);
   bool rightOk = (rightScore >= minSwerveDist);
 
-  // Nếu cả 2 bên đều quá chật hẹp -> Chuyển sang Lùi xe
+  // Nếu cả 2 bên đều quá chật hẹp -> Chuyển sang Blocked
   if (!leftOk && !rightOk) {
     ctx.state = OA_BLOCKED;
     ctx.stateT0 = now;
     ctx.attempts = OA_MAX_ATTEMPTS;
-    Serial.printf("[OA-US] Ca 2 ben deu ket cung (<%dcm) -> Blocked (lui xe). Trai:%d Phai:%d\n", 
+    Serial.printf("[OA-US] Ca 2 ben deu ket cung (<%dcm) -> Blocked. Trai:%d Phai:%d\n", 
                   (int)minSwerveDist, (int)leftScore, (int)rightScore);
     return false;
   }
@@ -112,6 +113,7 @@ static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
   ctx.poseYBefore = g_pose.y;
   ctx.state = OA_SWERVE;
   ctx.stateT0 = now;
+  ctx.sideBlockedCount = 0;
   Serial.printf("[OA-US] Quyet dinh trut ngang sang: %s (Diem Trai: %dcm, Diem Phai: %dcm)\n", 
                 ctx.swerveDir > 0 ? "PHAI" : "TRAI", (int)leftScore, (int)rightScore);
   return true;
@@ -128,7 +130,7 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
   if (ctx.attempts >= OA_MAX_ATTEMPTS) {
     ctx.state = OA_BLOCKED;
     ctx.stateT0 = now;
-    Serial.println(F("[OA] Max attempts — blocked."));
+    Serial.println(F("[OA] Dat den gioi han ne vat can -> Dung cho doi."));
     return true;
   }
 
@@ -137,17 +139,13 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
   ctx.cruiseHeading = g_pose.headingRad;
   ctx.scanMaxRight = 0.f;
   ctx.scanMaxLeft  = 0.f;
+  ctx.sideBlockedCount = 0;
 
-#if USE_HC_SR04_HARDWARE
-  (void)oaPickSideAndSwerve(ctx, now);
-  Serial.printf("[OA-US] Truoc %dcm — lach (try %d/%d)\n",
-                (int)frontCm, (int)ctx.attempts, (int)OA_MAX_ATTEMPTS);
-#else
-  ctx.state = OA_SCAN_CW;
+  // Chuyển sang trạng thái dừng chờ 1.8 giây xem vật cản động (người) có tự di chuyển đi không
+  ctx.state = OA_WAIT;
   ctx.stateT0 = now;
-  Serial.printf("[OA] Obstacle %dcm — scan CW (try %d/%d)\n",
+  Serial.printf("[OA] Obstacle %dcm -> Dung cho 1.8s xem vat di chuyen (lan thu %d/%d)\n",
                 (int)frontCm, (int)ctx.attempts, (int)OA_MAX_ATTEMPTS);
-#endif
   return true;
 }
 
@@ -217,26 +215,68 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   }
 #endif
 
+  case OA_WAIT: {
+    botStop();
+    // Nếu trong thời gian chờ mà người đi qua đã tự đi khuất
+    if (obsPathClear(frontCm)) {
+      ctx.state = OA_IDLE;
+      ctx.attempts = 0;
+      Serial.println(F("[OA] Vat can dong da tu roi di -> Resume."));
+      return OA_RES_DONE;
+    }
+    // Hết 1.8 giây vẫn kẹt -> Bắt đầu lách
+    if (now - ctx.stateT0 >= 1800u) {
+#if USE_HC_SR04_HARDWARE
+      bool ok = oaPickSideAndSwerve(ctx, now);
+      if (!ok) {
+        return OA_RES_BLOCKED;
+      }
+#else
+      ctx.state = OA_SCAN_CW;
+      ctx.stateT0 = now;
+#endif
+    }
+    return OA_RES_RUNNING;
+  }
+
   case OA_SWERVE: {
     // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
     bool sideBlocked = false;
     if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF
-      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM);
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)(US_STOP_CM - 5)); // Cho sườn hẹp hơn chút (30cm) để tránh báo ảo khi lách sát
     } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF
-      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM);
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)(US_STOP_CM - 5));
     }
+    
     if (sideBlocked) {
+      ctx.sideBlockedCount++;
+      if (ctx.sideBlockedCount >= 4) { // Lọc nhiễu sườn: bị chặn 4 chu kỳ liên tiếp mới dừng
+        botStop();
+        ctx.state = OA_BLOCKED;
+        ctx.stateT0 = now;
+        Serial.println(F("[OA] Suon ben bi chan thuc te -> Blocked."));
+        return OA_RES_BLOCKED;
+      }
+    } else {
+      if (ctx.sideBlockedCount > 0) ctx.sideBlockedCount--;
+    }
+
+    // Giới hạn khoảng cách trượt ngang tối đa 40cm để tránh va quệt kệ hàng sườn đối diện
+    if (oaDistMoved(ctx) > 0.40f) {
       botStop();
       ctx.state = OA_BLOCKED;
       ctx.stateT0 = now;
+      Serial.println(F("[OA] Dat den gioi han lach suon 40cm -> Dung de an toan."));
       return OA_RES_BLOCKED;
     }
+
     // Nếu đường phía trước đã thông thoáng
     if (obsPathClear(frontCm)) {
       ctx.state = OA_PASS; // trượt thêm 1 chút rồi tiếp tục thẳng
       ctx.stateT0 = now;
       return OA_RES_RUNNING;
     }
+
     // Tiến chéo thông minh: dạt ngang tối đa lực, đi tiến nhẹ nếu phía trước còn trống tương đối
     int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
     int16_t fwdCmd = 0;
@@ -253,16 +293,23 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     // Chỉ kiểm tra các góc bị chặn trong hướng di chuyển (trượt ngang)
     bool sideBlocked = false;
     if (ctx.swerveDir > 0) { // Đang trượt sang phải -> kiểm tra RF
-      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)US_STOP_CM);
+      sideBlocked = (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)(US_STOP_CM - 5));
     } else if (ctx.swerveDir < 0) { // Đang trượt sang trái -> kiểm tra LF
-      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)US_STOP_CM);
+      sideBlocked = (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)(US_STOP_CM - 5));
     }
+    
     if (sideBlocked) {
-      botStop();
-      ctx.state = OA_BLOCKED;
-      ctx.stateT0 = now;
-      return OA_RES_BLOCKED;
+      ctx.sideBlockedCount++;
+      if (ctx.sideBlockedCount >= 4) {
+        botStop();
+        ctx.state = OA_BLOCKED;
+        ctx.stateT0 = now;
+        return OA_RES_BLOCKED;
+      }
+    } else {
+      if (ctx.sideBlockedCount > 0) ctx.sideBlockedCount--;
     }
+
     // Vật cản lại xuất hiện phía trước → quay lại strafe
     if (!obsPathClear(frontCm)) {
       ctx.state = OA_SWERVE;
@@ -286,7 +333,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
   }
 
   case OA_BLOCKED:
-    // Bị chặn cứng -> lập tức kích hoạt lùi xe (backup) để thoát kẹt ngay
+    // Bị chặn cứng -> giải phóng để FSM chính điều khiển lùi hoặc dừng hẳn
     oaReset(ctx);
     return OA_RES_BLOCKED;
 

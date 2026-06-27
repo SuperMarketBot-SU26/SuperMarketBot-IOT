@@ -103,6 +103,10 @@ inline bool imuMpu6050Update(float &headingRad) {
   // Chuyển sang rad/s
   float gyroZRad = gyroZ * (float)M_PI / 180.0f;
 
+#if IMU_YAW_INVERTED
+  gyroZRad = -gyroZRad; // Đảo chiều nếu IMU bị lắp ngược trục Z
+#endif
+
   // Ngưỡng lọc nhiễu tĩnh (Deadband) để tránh trôi góc khi robot đứng im
   if (fabsf(gyroZRad) < 0.0015f) {
     gyroZRad = 0.f;

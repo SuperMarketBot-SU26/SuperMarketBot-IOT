@@ -108,23 +108,24 @@ inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
   float ds     = (dLeft + dRight) * 0.5f;
   float dTheta = (dRight - dLeft) / WHEEL_BASE_M;
 
-#if USE_IMU_MPU6050
-  // Nếu có IMU, góc headingRad được cập nhật từ Gyro ở taskControl độc lập.
-  // Ta chỉ dùng ds từ encoder để chiếu dịch chuyển lên hệ tọa độ thế giới.
-  float midH = g_pose.headingRad;
-  g_pose.x          += ds * cosf(midH);
-  g_pose.y          += ds * sinf(midH);
-#else
-  /* Cập nhật pose — trapezoidal integration (giảm sai số khi xoay) */
-  float midH = g_pose.headingRad + dTheta * 0.5f;
-  g_pose.x          += ds * cosf(midH);
-  g_pose.y          += ds * sinf(midH);
-  g_pose.headingRad += dTheta;
+  extern bool g_imuEnabled;
+  if (g_imuEnabled) {
+    // Nếu có IMU hoạt động, dùng góc headingRad cập nhật từ Gyro ở taskControl độc lập.
+    // Ta chỉ dùng ds từ encoder để chiếu dịch chuyển lên hệ tọa độ thế giới.
+    float midH = g_pose.headingRad;
+    g_pose.x          += ds * cosf(midH);
+    g_pose.y          += ds * sinf(midH);
+  } else {
+    // Nếu không có IMU hoặc IMU chưa sẵn sàng/lỗi, tự động hạ cấp xuống dùng bộ tích lũy Encoder (Dead Reckoning)
+    float midH = g_pose.headingRad + dTheta * 0.5f;
+    g_pose.x          += ds * cosf(midH);
+    g_pose.y          += ds * sinf(midH);
+    g_pose.headingRad += dTheta;
 
-  /* Giữ heading trong [0, 2π) */
-  while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
-  while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
-#endif
+    /* Giữ heading trong [0, 2π) */
+    while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
+    while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
+  }
 }
 
 /* =====================================================================

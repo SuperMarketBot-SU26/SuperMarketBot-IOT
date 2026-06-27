@@ -111,6 +111,7 @@
 #define USE_IMU_MPU6050  1
 #define IMU_I2C_SDA      35    // Chân I2C SDA
 #define IMU_I2C_SCL      36    // Chân I2C SCL
+#define IMU_YAW_INVERTED 0     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
