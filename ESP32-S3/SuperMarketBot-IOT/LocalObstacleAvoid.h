@@ -362,7 +362,7 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
     return false;
   }
   if (ctx.pathClearStreak < 255) ctx.pathClearStreak++;
-  if (ctx.pathClearStreak < OA_PATH_CLEAR_STREAK) {
+  if (ctx.pathClearStreak < g_state.usPathClearStreak) {
     botStop();
     return false;
   }

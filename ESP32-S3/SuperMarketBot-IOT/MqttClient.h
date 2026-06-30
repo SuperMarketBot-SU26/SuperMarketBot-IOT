@@ -320,7 +320,7 @@ static void mqttPublishTelemetry() {
   doc["rpmFR"]      = g_state.rpmFR;
   doc["rpmRL"]      = g_state.rpmRL;
   doc["rpmRR"]      = g_state.rpmRR;
-  doc["navState"]   = (g_state.mode == MODE_WAYPOINT) ? "waypoint" : "reactive";
+  doc["navState"]   = (const char *)g_wpStatus;
   doc["wpStatus"]   = (const char *)g_wpStatus;
   doc["autoFsm"]    = (int)g_autoFsmState;
   doc["wpIndex"]    = (g_state.mode == MODE_WAYPOINT) ? (int)s_wpIndex : -1;

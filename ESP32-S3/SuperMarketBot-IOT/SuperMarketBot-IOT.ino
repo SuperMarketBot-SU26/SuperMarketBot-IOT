@@ -87,7 +87,16 @@ RobotState g_state = {
   .mode = MODE_MANUAL,
   .estop = false,
   .lidarLastUpdateMs = 0,
-  .usLastUpdateMs = 0
+  .usLastUpdateMs = 0,
+  .alignThresholdDeg = 10.0f,
+  .rotateSpeedMinPct = 10,
+  .usStopCm = 30,
+  .usOaDetectCm = 42,
+  .usPathClearCm = 48,
+  .usPathClearStreak = 18,
+  .yawKp = 40.0f,
+  .yawKi = 0.0f,
+  .yawKd = 2.0f
 };
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────

@@ -1089,6 +1089,56 @@ connectWS();
 </html>
 )rawhtml";
 
+inline void cfgReplyToClient(WebSocketsServer &ws, uint8_t clientNum) {
+  JsonDocument doc;
+  doc["t"] = "cfg";
+  doc["align"] = g_state.alignThresholdDeg;
+  doc["minRot"] = g_state.rotateSpeedMinPct;
+  doc["stop"] = g_state.usStopCm;
+  doc["detect"] = g_state.usOaDetectCm;
+  doc["clear"] = g_state.usPathClearCm;
+  doc["streak"] = g_state.usPathClearStreak;
+  doc["kp"] = g_state.yawKp;
+  doc["ki"] = g_state.yawKi;
+  doc["kd"] = g_state.yawKd;
+
+  char out[256];
+  size_t n = serializeJson(doc, out, sizeof(out) - 1);
+  if (n > 0) ws.sendTXT(clientNum, out, n);
+}
+
+inline void cfgApplyJson(JsonDocument &doc, Preferences &prefs) {
+  if (doc["align"].is<float>()) g_state.alignThresholdDeg = doc["align"].as<float>();
+  if (doc["minRot"].is<uint16_t>()) g_state.rotateSpeedMinPct = doc["minRot"].as<uint16_t>();
+  if (doc["stop"].is<uint16_t>()) g_state.usStopCm = doc["stop"].as<uint16_t>();
+  if (doc["detect"].is<uint16_t>()) g_state.usOaDetectCm = doc["detect"].as<uint16_t>();
+  if (doc["clear"].is<uint16_t>()) g_state.usPathClearCm = doc["clear"].as<uint16_t>();
+  if (doc["streak"].is<uint16_t>()) g_state.usPathClearStreak = doc["streak"].as<uint16_t>();
+  if (doc["kp"].is<float>()) g_state.yawKp = doc["kp"].as<float>();
+  if (doc["ki"].is<float>()) g_state.yawKi = doc["ki"].as<float>();
+  if (doc["kd"].is<float>()) g_state.yawKd = doc["kd"].as<float>();
+
+  // Cập nhật bộ điều khiển PID thực tế
+  s_pidYaw.kp = g_state.yawKp;
+  s_pidYaw.ki = g_state.yawKi;
+  s_pidYaw.kd = g_state.yawKd;
+
+  // Lưu vào NVS
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.putFloat("cfgAlign", g_state.alignThresholdDeg);
+  prefs.putUInt("cfgMinRot", g_state.rotateSpeedMinPct);
+  prefs.putUInt("cfgStop", g_state.usStopCm);
+  prefs.putUInt("cfgDetect", g_state.usOaDetectCm);
+  prefs.putUInt("cfgClear", g_state.usPathClearCm);
+  prefs.putUInt("cfgStreak", g_state.usPathClearStreak);
+  prefs.putFloat("cfgKp", g_state.yawKp);
+  prefs.putFloat("cfgKi", g_state.yawKi);
+  prefs.putFloat("cfgKd", g_state.yawKd);
+  prefs.end();
+
+  Serial.println(F("[CFG] Da luu cau hinh tu hanh moi vao NVS & ap dung thanh cong."));
+}
+
 static void onWebSocketEvent(uint8_t num, WStype_t type,
                              uint8_t *payload, size_t length) {
   if (type == WStype_TEXT) {
@@ -1096,6 +1146,15 @@ static void onWebSocketEvent(uint8_t num, WStype_t type,
     DeserializationError err = deserializeJson(doc, payload, length);
     if (err) return;
     const char *t = doc["t"];
+    if (t && strcmp(t, "cfgGet") == 0) {
+      cfgReplyToClient(g_wsServer, num);
+      return;
+    }
+    if (t && strcmp(t, "cfg") == 0) {
+      cfgApplyJson(doc, g_prefs);
+      cfgReplyToClient(g_wsServer, num);
+      return;
+    }
     if (t && strcmp(t, "layoutGet") == 0) {
       sensorLayoutReplyToClient(g_wsServer, num);
       return;
@@ -1154,10 +1213,25 @@ inline void webUIInit() {
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
   g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", PWM_MAX * 60 / 100);
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 40 / 100);
-  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 30 / 100);
+  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 10 / 100);
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
+
+  g_state.alignThresholdDeg = g_prefs.getFloat("cfgAlign", 10.0f);
+  g_state.rotateSpeedMinPct = g_prefs.getUInt("cfgMinRot", 10);
+  g_state.usStopCm = g_prefs.getUInt("cfgStop", 30);
+  g_state.usOaDetectCm = g_prefs.getUInt("cfgDetect", 42);
+  g_state.usPathClearCm = g_prefs.getUInt("cfgClear", 48);
+  g_state.usPathClearStreak = g_prefs.getUInt("cfgStreak", 18);
+  g_state.yawKp = g_prefs.getFloat("cfgKp", 40.0f);
+  g_state.yawKi = g_prefs.getFloat("cfgKi", 0.0f);
+  g_state.yawKd = g_prefs.getFloat("cfgKd", 2.0f);
+
+  s_pidYaw.kp = g_state.yawKp;
+  s_pidYaw.ki = g_state.yawKi;
+  s_pidYaw.kd = g_state.yawKd;
+
   g_prefs.end();
 
   batteryMonitorInit();

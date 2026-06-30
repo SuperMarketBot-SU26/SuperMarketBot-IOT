@@ -346,13 +346,13 @@ inline void wpNavTick() {
     
     // Nếu lệch hướng lớn (vừa bắt đầu segment hoặc bị va quệt lệch hẳn xe), xoay tại chỗ căn chỉnh trước
     if (!s_wpAligned) {
-      if (fabsf(alpha) > 0.15f) { // ~8.5 độ
+      if (fabsf(alpha) > 0.175f) { // ~10 độ
         uint16_t turnPwm = g_state.rotateBaseSpeed;
         if (turnPwm == 0) {
-          turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 35 : 25);
+          turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10);
         } else {
-          // Khóa giới hạn dưới an toàn 10% để tránh động cơ bị kẹt moment
-          uint16_t minPwm = wpPct2Pwm(10);
+          // Khóa giới hạn dưới an toàn để tránh động cơ bị kẹt moment
+          uint16_t minPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10);
           if (turnPwm < minPwm) {
             turnPwm = minPwm;
           }

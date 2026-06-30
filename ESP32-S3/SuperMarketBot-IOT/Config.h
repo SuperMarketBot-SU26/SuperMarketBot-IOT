@@ -311,6 +311,17 @@ struct RobotState {
   /** Tốc độ PWM thực tế đã xuất ở chu kỳ trước (sau slew limiter) — index theo MotorId (TB6612 vật lý).
    *  Chia sẻ giữa taskControl (Core 1) và taskWebIO (Core 0) nên KHÔNG dùng static cục bộ. */
   volatile int32_t lastMotorSpeed[4];
+
+  // Configs tunable online
+  volatile float alignThresholdDeg;    // mặc định 10.0f
+  volatile uint16_t rotateSpeedMinPct; // mặc định 10
+  volatile uint16_t usStopCm;          // mặc định 30
+  volatile uint16_t usOaDetectCm;      // mặc định 42
+  volatile uint16_t usPathClearCm;     // mặc định 48
+  volatile uint16_t usPathClearStreak; // mặc định 18
+  volatile float yawKp;                // mặc định 40.0f
+  volatile float yawKi;                // mặc định 0.0f
+  volatile float yawKd;                // mặc định 2.0f
 };
 
 /** FSM tự hành (AN_*) — hiển thị trên Web/MQTT khi không cắm USB Serial. */
