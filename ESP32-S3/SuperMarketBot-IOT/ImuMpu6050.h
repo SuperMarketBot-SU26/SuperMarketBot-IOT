@@ -112,9 +112,9 @@ inline bool imuMpu6050Update(float &headingRad) {
     gyroZRad = 0.f;
   }
 
-  // Tích lũy góc xoay (Yaw)
+  // Tích lũy góc xoay (Yaw) với hệ số bù tỉ lệ
   // Khi robot xoay trái (CCW), gyroZ có giá trị dương, góc tăng lên
-  headingRad += gyroZRad * dt;
+  headingRad += gyroZRad * dt * g_state.imuYawScale;
 
   // Giữ góc nằm trong khoảng [0, 2π)
   while (headingRad < 0.f) headingRad += 2.f * (float)M_PI;

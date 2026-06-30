@@ -136,6 +136,30 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       g_state.swerveBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
     }
 
+  } else if (strcmp(cmd, "set_speed_rotate") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ XOAY (SET_SPEED_ROTATE) từ Backend! Tốc độ: %d%%\n", v);
+    if (v >= 0 && v <= 100) {
+      g_state.rotateBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
+    }
+
+  } else if (strcmp(cmd, "set_yaw_scale") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT HỆ SỐ BÙ GÓC IMU (SET_YAW_SCALE) từ Backend! Tỉ lệ: %d%%\n", v);
+    if (v >= 50 && v <= 150) {
+      g_state.imuYawScale = (float)v / 100.0f;
+    }
+
   } else if (strcmp(cmd, "set_strafe") == 0) {
     int v = -1;
     if (doc["payload"].is<int>()) {

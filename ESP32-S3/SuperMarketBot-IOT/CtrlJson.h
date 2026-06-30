@@ -70,6 +70,21 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_prefs.begin(NVS_NAMESPACE, false);
     g_prefs.putUInt("swerveSpeed", g_state.swerveBaseSpeed);
     g_prefs.end();
+  } else if (strcmp(t, "spdRotate") == 0) {
+    uint16_t pct = doc["v"].as<uint16_t>();
+    if (pct > 100) pct = 100;
+    g_state.rotateBaseSpeed = (uint16_t)((uint32_t)pct * PWM_MAX / 100);
+    g_prefs.begin(NVS_NAMESPACE, false);
+    g_prefs.putUInt("rotateSpeed", g_state.rotateBaseSpeed);
+    g_prefs.end();
+  } else if (strcmp(t, "yawScale") == 0) {
+    uint16_t pct = doc["v"].as<uint16_t>();
+    if (pct < 50) pct = 50;
+    if (pct > 150) pct = 150;
+    g_state.imuYawScale = (float)pct / 100.0f;
+    g_prefs.begin(NVS_NAMESPACE, false);
+    g_prefs.putUInt("yawScale", pct);
+    g_prefs.end();
   } else if (strcmp(t, "mode") == 0) {
     uint8_t m = doc["m"].as<uint8_t>();
     Serial.printf("[WS-Mode] Yeu cau chuyen sang Mode: %d\n", m);

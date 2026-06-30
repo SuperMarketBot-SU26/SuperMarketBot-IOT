@@ -301,6 +301,8 @@ struct RobotState {
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
   volatile uint16_t swerveBaseSpeed; // 0..PWM_MAX — tốc độ riêng khi dạt tránh/lùi/xoay (slider web)
+  volatile uint16_t rotateBaseSpeed; // 0..PWM_MAX — tốc độ xoay hướng (slider web)
+  volatile float imuYawScale;        // Hệ số nhân bù góc IMU (mặc định 1.0f)
   volatile RobotMode mode;
   volatile bool estop;        // Cờ dừng khẩn cấp
   // Millis lần cuối có frame LiDAR hợp lệ / sau 1 vòng quét US (giám sát “tươi”)
