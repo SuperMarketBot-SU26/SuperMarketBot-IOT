@@ -77,12 +77,9 @@ inline void oaReset(OaContext &ctx) {
 #if USE_HC_SR04_HARDWARE
 /** SR04: Tính điểm 2 bên sườn và lách tránh về hướng rộng hơn. */
 static inline bool oaPickSideAndSwerve(OaContext &ctx, uint32_t now) {
-  int16_t lf = g_state.usLF;
-  int16_t rf = g_state.usRF;
-
-  // Tính điểm 2 bên sườn
-  int16_t leftScore  = lf;
-  int16_t rightScore = rf;
+  // Tính điểm 2 bên sườn thực tế (Trái vs Phải) để lách sang hướng rộng hơn
+  int16_t leftScore  = g_state.usLeft;
+  int16_t rightScore = g_state.usRight;
 
   // Ngưỡng an toàn tối thiểu để có thể lách tránh (stop distance + 3cm dự phòng)
   const int16_t minSwerveDist = (int16_t)(US_STOP_CM + 3);
@@ -126,6 +123,7 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
   }
   botStop();
   pidSpeedReset();
+  pidYawReset(); // Reset PID Yaw để bắt đầu trạng thái tránh vật cản mới, tránh vọt lố tích lũy
 
   if (ctx.attempts >= OA_MAX_ATTEMPTS) {
     ctx.state = OA_BLOCKED;
@@ -140,6 +138,12 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
   ctx.scanMaxRight = 0.f;
   ctx.scanMaxLeft  = 0.f;
   ctx.sideBlockedCount = 0;
+
+  // [P0-2 FIX] Lưu ý: pidYawReset() đã được gọi ở đầu oaBegin() (line 126) — an toàn.
+  // Reset Yaw PID integral & prevError khi bắt đầu một quá trình OA mới.
+  // Nếu không reset, integral từ CRUISE sẽ "đổ" vào SWERVE với target khác
+  // → output PID rất lớn trong 1-2 tick → xe giật mạnh khi chuyển state.
+  // Đặc biệt nguy hiểm khi user nâng yawKi > 0 để bù drift dài hạn.
 
   // Chuyển sang trạng thái dừng chờ 1.8 giây xem vật cản động (người) có tự di chuyển đi không
   ctx.state = OA_WAIT;
@@ -227,11 +231,15 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     // Hết 1.8 giây vẫn kẹt -> Bắt đầu lách
     if (now - ctx.stateT0 >= 1800u) {
 #if USE_HC_SR04_HARDWARE
+      // [P0-2 FIX] Reset PID yaw trước khi chuyển sang SWERVE để tránh integral cũ
+      pidYawReset();
       bool ok = oaPickSideAndSwerve(ctx, now);
       if (!ok) {
         return OA_RES_BLOCKED;
       }
 #else
+      // [P0-2 FIX] Reset PID yaw trước khi chuyển sang SCAN để tránh integral cũ
+      pidYawReset();
       ctx.state = OA_SCAN_CW;
       ctx.stateT0 = now;
 #endif
@@ -277,19 +285,29 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
       return OA_RES_RUNNING;
     }
 
-    // Tiến chéo thông minh: dạt ngang tối đa lực, đi tiến nhẹ nếu phía trước còn trống tương đối
-    int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
+    // Tiến chéo/rẽ tránh vật cản tùy theo loại bánh xe
+    int16_t strafeCmd = 0;
     int16_t fwdCmd = 0;
-    if (obsCmValid(frontCm) && frontCm >= 20) {
-      fwdCmd = 45; // Tiến chéo mượt mà
-    }
+    int16_t turnCmd = 0;
     uint16_t spd = g_state.swerveBaseSpeed;
     if (spd == 0) spd = oaPct2Pwm(32); // Mặc định 32% để bảo vệ nguồn nguồn sụt áp
 
-    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang
-    float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    int16_t turnCmd = (int16_t)(yawError * 60.f); // Độ nhạy P = 60
-    turnCmd = constrain(turnCmd, -35, 35);
+    if (g_state.wheelMode == WHEEL_NORMAL) {
+      // Bánh thường: Rẽ mạnh về hướng thông thoáng để tránh vật cản
+      strafeCmd = 0;
+      fwdCmd = 45; 
+      turnCmd = (ctx.swerveDir > 0) ? 55 : -55; // Xoay về hướng trống
+    } else {
+      // Bánh Mecanum: Tiến chéo thông minh dạt ngang
+      strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
+      if (obsCmValid(frontCm) && frontCm >= 20) {
+        fwdCmd = 45;
+      }
+      // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang
+      float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
+      turnCmd = (int16_t)(yawError * 60.f); // P = 60
+      turnCmd = constrain(turnCmd, -35, 35);
+    }
 
     botDriveMecanum(strafeCmd, fwdCmd, turnCmd, spd);
     return OA_RES_RUNNING;
@@ -330,15 +348,26 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
       Serial.println(F("[OA] Vuot vat can bang strafe hoan tat."));
       return OA_RES_DONE;
     }
-    int16_t strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
-    int16_t fwdCmd = 45; // Vượt chướng ngại vật mượt mà
+    // Vượt qua vật cản
+    int16_t strafeCmd = 0;
+    int16_t fwdCmd = 0;
+    int16_t turnCmd = 0;
     uint16_t spd = g_state.swerveBaseSpeed;
-    if (spd == 0) spd = oaPct2Pwm(32); // Mặc định 32% để bảo vệ nguồn nguồn sụt áp
+    if (spd == 0) spd = oaPct2Pwm(32);
 
-    // Khóa hướng đầu xe bằng IMU (P-controller) chống lệch hướng khi trượt ngang
-    float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
-    int16_t turnCmd = (int16_t)(yawError * 60.f);
-    turnCmd = constrain(turnCmd, -35, 35);
+    if (g_state.wheelMode == WHEEL_NORMAL) {
+      // Bánh thường: Đi thẳng tiến lên để thoát hoàn toàn vật cản
+      strafeCmd = 0;
+      fwdCmd = 60;
+      turnCmd = 0;
+    } else {
+      // Bánh Mecanum: Tiếp tục trượt ngang dạt qua vật cản
+      strafeCmd = (ctx.swerveDir > 0) ? 100 : -100;
+      fwdCmd = 45;
+      float yawError = oaAngleDiff(ctx.swerveTarget, g_pose.headingRad);
+      turnCmd = (int16_t)(yawError * 60.f);
+      turnCmd = constrain(turnCmd, -35, 35);
+    }
 
     botDriveMecanum(strafeCmd, fwdCmd, turnCmd, spd);
     return OA_RES_RUNNING;

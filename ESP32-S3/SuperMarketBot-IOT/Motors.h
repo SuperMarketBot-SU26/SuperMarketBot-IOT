@@ -88,7 +88,7 @@ inline void motorDrive(MotorId id, int32_t speed) {
 
   // 4. Bù vùng chết (Deadband compensation) cho động cơ vàng DC (quy đổi theo hệ 10-bit PWM: 0..1023)
   if (speed > 0) {
-    constexpr int32_t MIN_MOTOR_PWM = 280; // 27.3% của 1023, tương đương 70 của hệ 8-bit
+    constexpr int32_t MIN_MOTOR_PWM = 170; // Hạ từ 280 xuống 170 để khởi hành mượt mà, bò chậm chính xác, tránh giật cục
     if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
     speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
   }
@@ -154,10 +154,23 @@ inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
                              uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
 
-  // Scale các đầu vào joystick (-100..100) theo tốc độ nền base
-  int32_t fwdScaled = (int32_t)fwd * (int32_t)base / 100;
-  int32_t strafeScaled = (int32_t)strafe * (int32_t)base / 100;
-  int32_t turnScaled = (int32_t)turn * (int32_t)base / 100;
+  if (g_state.wheelMode == WHEEL_NORMAL) {
+    strafe = 0;
+  }
+
+  // Áp dụng đường cong phi tuyến Quadratic (Exponential Curve) giúp điều khiển cực kỳ mịn ở tốc độ thấp
+  int32_t fwdSign = (fwd >= 0) ? 1 : -1;
+  int32_t strafeSign = (strafe >= 0) ? 1 : -1;
+  int32_t turnSign = (turn >= 0) ? 1 : -1;
+
+  int32_t fwdCurve = ((int32_t)fwd * (int32_t)fwd * fwdSign) / 100;
+  int32_t strafeCurve = ((int32_t)strafe * (int32_t)strafe * strafeSign) / 100;
+  int32_t turnCurve = ((int32_t)turn * (int32_t)turn * turnSign) / 100;
+
+  // Scale các đầu vào joystick phi tuyến theo tốc độ nền base
+  int32_t fwdScaled = fwdCurve * (int32_t)base / 100;
+  int32_t strafeScaled = strafeCurve * (int32_t)base / 100;
+  int32_t turnScaled = turnCurve * (int32_t)base / 100;
 
   // Mecanum con lăn tạo ma sát cao → nhân thêm để bù
   // strafe yếu nhất → gain 1.35; fwd/turn gain 1.15

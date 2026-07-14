@@ -498,7 +498,7 @@ details pre{
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" style="display:none">
         <h2>Bánh xe (RPM)</h2>
         <p class="hint" style="margin-top:-4px;margin-bottom:8px;font-size:.68rem"><b>OFF</b> khi vài giây gần đây <b>chưa có xung</b> encoder — lăn nhẹ bánh để kiểm.</p>
         <div class="rpm-grid">
@@ -517,6 +517,8 @@ details pre{
         </p>
         <p class="stat-row">Quãng đường TB: <b id="distAvg">0.00</b> m</p>
         <p class="stat-row">Chế độ: <b id="modeLabel" class="mode-manual">Lái tay</b></p>
+        <p class="stat-row">Hệ bánh xe: <b id="wheelLabel" style="color:var(--text)">--</b></p>
+        <p class="stat-row">Góc IMU: <b id="imuLabel" style="color:#f59e0b">--°</b></p>
         <button type="button" class="btn-ghost" onclick="odomReset()">Reset odom</button>
       </div>
     </div>
@@ -562,9 +564,9 @@ details pre{
 
       <div class="card" id="sec-layout">
         <h2><span class="dot"></span> Bố trí cảm biến (team — không đổi dây GPIO)</h2>
-        <p class="hint">Mỗi <b>góc xe</b> chọn <b>một</b> siêu âm vật lý và <b>một</b> encoder vật lý (0–3, không trùng trong từng loại). LiDAR: chọn UART nào là phía <b>trước</b> xe.</p>
+        <p class="hint">Chọn cổng Siêu âm vật lý tương ứng với vị trí trên xe (0–3, không trùng).</p>
         <div class="layout-form" id="layGrid"></div>
-        <div class="layout-lid">
+        <div class="layout-lid" style="display:none">
           <label>LiDAR phía <b>trước</b> xe đang là UART</label>
           <select id="lidFrontSel" aria-label="LiDAR trước">
             <option value="0">Serial1 — GPIO TX17 / RX18</option>
@@ -600,6 +602,7 @@ const WS_URL='ws://'+location.hostname+':81';
 let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=200;
 const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
+const SENS_LBL=['Trước (Front)','Sau (Back)','Trái (Left)','Phải (Right)'];
 const PHY_US=[{v:0,t:'US Trước (Echo 10)'},{v:1,t:'US Sau (Echo 11)'},{v:2,t:'US Trái (Echo 12)'},{v:3,t:'US Phải (Echo 13)'}];
 const PHY_ENC=[{v:0,t:'Enc FL (GPIO39)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
 const PHY_MOT=[
@@ -608,7 +611,7 @@ const PHY_MOT=[
   {v:2,t:'#2-A FR — PWM21, AIN 45/46 → AO1-AO2'},
   {v:3,t:'#2-B RR — PWM40, BIN 41/42 → BO1-BO2'}
 ];
-const B=[{lbl:'Trái trước',i:'dULF'},{lbl:'Trái sau',i:'dULR'},{lbl:'Phải trước',i:'dURF'},{lbl:'Phải sau',i:'dURR'}];
+const B=[{lbl:'Trước (Front)',i:'dULF'},{lbl:'Sau (Back)',i:'dULR'},{lbl:'Trái (Left)',i:'dURF'},{lbl:'Phải (Right)',i:'dURR'}];
 const spark=[]; const SPARK_N=48;
 function paintSpdTrack(el,raw){
   if(!el)return;
@@ -660,9 +663,9 @@ function buildBump(){
 }
 function buildLayoutGrid(){
   const g=document.getElementById('layGrid'); if(!g)return;
-  let h='<div class="layout-row" style="font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px"><span>Góc xe</span><span>Siêu âm vật lý</span><span>Encoder vật lý</span></div>';
+  let h='<div class="layout-row" style="grid-template-columns:1.15fr 1.85fr;font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px"><span>Vị trí</span><span>Cảm biến Siêu âm vật lý</span></div>';
   for(let i=0;i<4;i++){
-    h+=`<div class="layout-row"><label>${SLOT_LBL[i]}</label><select id="layUs${i}"></select><select id="layEnc${i}"></select></div>`;
+    h+=`<div class="layout-row" style="grid-template-columns:1.15fr 1.85fr"><label>${SENS_LBL[i]}</label><select id="layUs${i}"></select><select id="layEnc${i}" style="display:none"></select></div>`;
   }
   g.innerHTML=h;
   for(let i=0;i<4;i++){
@@ -689,6 +692,7 @@ function buildMotorGrid(){
   for(let i=0;i<4;i++){
     h+=`<div class="layout-mot"><label>${SLOT_LBL[i]}</label><select id="motMap${i}"></select><select id="motInv${i}"><option value="0">Tiến = như code</option><option value="1">Đảo chiều (lùi↔tiến)</option></select></div>`;
   }
+  h+=`<div class="layout-mot" style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px"><label>Hệ Bánh Xe</label><select id="wheelModeSelect" style="grid-column:span 2"><option value="0">Bánh Mecanum (Đa hướng)</option><option value="1">Bánh Thường (4WD vi sai)</option></select></div>`;
   g.innerHTML=h;
   for(let i=0;i<4;i++){
     const sm=document.getElementById('motMap'+i);
@@ -702,6 +706,8 @@ function applyMotorPayload(d){
     if(d.mapMot&&d.mapMot[i]!=null&&sm) sm.value=String(d.mapMot[i]);
     if(d.motInv&&d.motInv[i]!=null&&si) si.value=String(d.motInv[i]);
   }
+  const swm=document.getElementById('wheelModeSelect');
+  if(swm && d.wheelMode!=null) swm.value=String(d.wheelMode);
 }
 function saveMotorLayout(){
   const mapMot=[], motInv=[];
@@ -709,10 +715,11 @@ function saveMotorLayout(){
     mapMot.push(parseInt(document.getElementById('motMap'+i).value,10));
     motInv.push(parseInt(document.getElementById('motInv'+i).value,10));
   }
+  const wheelMode = parseInt(document.getElementById('wheelModeSelect').value,10);
   const msg=document.getElementById('motLayMsg');
   if(!isPerm4(mapMot)){ msg.textContent='Lỗi: 4 kênh phải chọn đủ 0–3, không trùng.'; return; }
   msg.textContent='Đang gửi…';
-  wsS({t:'motLayout',mapMot,motInv});
+  wsS({t:'motLayout',mapMot,motInv,wheelMode});
 }
 function saveLayout(){
   const us=[], enc=[];
@@ -726,6 +733,7 @@ function saveLayout(){
   msg.textContent='Đang gửi…';
   wsS({t:'layout',us,enc,lidF});
 }
+
 function setRing(id,cm){
   const el=document.getElementById(id);
   if(!el)return;
@@ -846,6 +854,16 @@ function applyTelemetry(d){
       const ml=document.getElementById('modeLabel');
       ml.textContent=(d.mode===2)?'MQTT (Lộ trình)':((d.mode===1)?'Tự hành':'Lái tay');
       ml.className=(d.mode===1||d.mode===2)?'mode-auto':'mode-manual';
+      const wl=document.getElementById('wheelLabel');
+      if(wl && d.wheelMode!=null){
+        wl.textContent=(d.wheelMode===1)?'Bánh Thường (4WD)':'Bánh Mecanum';
+        wl.style.color=(d.wheelMode===1)?'#10b981':'#38bdf8';
+      }
+      const il=document.getElementById('imuLabel');
+      if(il && d.HeadingRad!=null){
+        const deg = Math.round(d.HeadingRad * 180 / Math.PI);
+        il.textContent = deg + '°';
+      }
       const btnMan = document.getElementById('btnManual');
       const btnAut = document.getElementById('btnAuto');
       const btnRot = document.getElementById('btnRoute');

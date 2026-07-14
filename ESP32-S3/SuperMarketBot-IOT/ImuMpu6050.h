@@ -12,6 +12,7 @@
 
 #define MPU6050_ADDR         0x68
 #define MPU6050_PWR_MGMT_1   0x6B
+#define MPU6050_CONFIG       0x1A
 #define MPU6050_GYRO_CONFIG  0x1B
 #define MPU6050_GYRO_ZOUT_H  0x47
 
@@ -19,20 +20,21 @@ static float    s_gyroBiasZ = 0.f;
 static uint32_t s_lastImuTimeMs = 0;
 bool            g_imuEnabled = false;
 
-// Đọc 2 byte từ một thanh ghi I2C
-static inline int16_t mpu6050Read16(uint8_t reg) {
+// Đọc 2 byte từ một thanh ghi I2C an toàn (có kiểm tra lỗi bus)
+static inline bool mpu6050Read16(uint8_t reg, int16_t &outVal) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) {
-    return 0; // Tránh treo nhiệm vụ điều khiển nếu đường bus I2C bị nhiễu do động cơ
+    return false; // Lỗi truyền bus I2C (ví dụ do nhiễu động cơ)
   }
   Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint8_t h = Wire.read();
     uint8_t l = Wire.read();
-    return (int16_t)((h << 8) | l);
+    outVal = (int16_t)((h << 8) | l);
+    return true;
   }
-  return 0;
+  return false;
 }
 
 // Khởi tạo MPU6050
@@ -60,25 +62,44 @@ inline void imuMpu6050Init() {
   Wire.endTransmission();
   delay(10);
 
-  // Cấu hình Gyro full scale range +/- 250 deg/s (Độ nhạy: 131 LSB / (deg/s))
+  // Cấu hình Bộ lọc thông thấp kỹ thuật số (DLPF = 42Hz) để lọc nhiễu rung cơ học từ motor
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(MPU6050_CONFIG);
+  Wire.write(3); // DLPF_CFG = 3 -> Gyro 42Hz, Delay 4.8ms (Lọc sạch rung nhiễu)
+  Wire.endTransmission();
+  delay(10);
+
+  // Cấu hình Gyro full scale range +/- 250 deg/s (Độ nhạy cao nhất: 131 LSB / (deg/s))
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(MPU6050_GYRO_CONFIG);
   Wire.write(0); 
   Wire.endTransmission();
   delay(10);
 
-  // Hiệu chuẩn Gyro Z-axis: Đọc 250 mẫu khi robot tĩnh để tìm sai số tĩnh (bias)
+  // Hiệu chuẩn Gyro Z-axis: Đọc 250 mẫu hợp lệ khi robot tĩnh để tìm sai số tĩnh (bias)
   Serial.println(F("[IMU] Đang hiệu chuẩn Gyro (giữ robot đứng yên)..."));
   long sumZ = 0;
-  const int numSamples = 250;
-  for (int i = 0; i < numSamples; i++) {
-    sumZ += mpu6050Read16(MPU6050_GYRO_ZOUT_H);
+  int validSamples = 0;
+  int16_t val = 0;
+  // Thử tối đa 1000 lần đọc để thu thập 250 mẫu thành công sạch lỗi I2C
+  for (int i = 0; i < 1000 && validSamples < 250; i++) {
+    if (mpu6050Read16(MPU6050_GYRO_ZOUT_H, val)) {
+      sumZ += val;
+      validSamples++;
+    }
     delay(4);
   }
-  s_gyroBiasZ = (float)sumZ / (float)numSamples;
-  s_lastImuTimeMs = millis();
-  g_imuEnabled = true;
-  Serial.printf("[IMU] Hiệu chuẩn xong. Gyro Bias Z: %.3f\n", s_gyroBiasZ);
+
+  if (validSamples > 0) {
+    s_gyroBiasZ = (float)sumZ / (float)validSamples;
+    s_lastImuTimeMs = millis();
+    g_imuEnabled = true;
+    Serial.printf("[IMU] Hiệu chuẩn xong. Mẫu hợp lệ: %d/%d. Gyro Bias Z: %.3f\n", validSamples, 250, s_gyroBiasZ);
+  } else {
+    s_gyroBiasZ = 0.f;
+    g_imuEnabled = false;
+    Serial.println(F("[IMU ERROR] Không thể đọc mẫu hiệu chuẩn từ MPU6050! I2C lỗi nặng."));
+  }
 }
 
 // Cập nhật góc Heading từ cảm biến Gyroscope
@@ -88,15 +109,20 @@ inline bool imuMpu6050Update(float &headingRad) {
 
   uint32_t now = millis();
   float dt = (float)(now - s_lastImuTimeMs) * 0.001f;
-  s_lastImuTimeMs = now;
 
   if (dt <= 0.f || dt > 1.0f) {
-    // Tránh lỗi khi lag vòng lặp
+    s_lastImuTimeMs = now; // Tránh lỗi trôi góc khi lag
     return false;
   }
 
-  int16_t rawZ = mpu6050Read16(MPU6050_GYRO_ZOUT_H);
-  
+  int16_t rawZ = 0;
+  if (!mpu6050Read16(MPU6050_GYRO_ZOUT_H, rawZ)) {
+    // Nếu lỗi I2C, KHÔNG cập nhật s_lastImuTimeMs. 
+    // Vòng lặp sau dt sẽ tăng lên tự động bù đắp đúng khoảng thời gian bị mất!
+    return false; 
+  }
+  s_lastImuTimeMs = now; // Chỉ cập nhật mốc thời gian khi đọc thành công
+
   // Tính tốc độ góc Z (deg/s): Chia độ nhạy 131 LSB/(deg/s)
   float gyroZ = (float)(rawZ - s_gyroBiasZ) / 131.0f;
   
@@ -108,12 +134,12 @@ inline bool imuMpu6050Update(float &headingRad) {
 #endif
 
   // Ngưỡng lọc nhiễu tĩnh (Deadband) để tránh trôi góc khi robot đứng im
-  if (fabsf(gyroZRad) < 0.0015f) {
+  // Tăng nhẹ lên 0.0022f (khoảng 0.12 deg/s) để chống trôi triệt để khi đứng yên tĩnh
+  if (fabsf(gyroZRad) < 0.0022f) {
     gyroZRad = 0.f;
   }
 
   // Tích lũy góc xoay (Yaw) với hệ số bù tỉ lệ
-  // Khi robot xoay trái (CCW), gyroZ có giá trị dương, góc tăng lên
   headingRad += gyroZRad * dt * g_state.imuYawScale;
 
   // Giữ góc nằm trong khoảng [0, 2π)

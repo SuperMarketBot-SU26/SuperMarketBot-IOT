@@ -33,10 +33,20 @@ inline void motorLayoutApplyDefaults() {
     g_mapMotSlot[i] = (uint8_t)i;
     g_motInv[i] = 0;
   }
+  g_state.wheelMode = WHEEL_MECANUM;
 }
 
 inline void motorLayoutLoad(Preferences &prefs) {
   motorLayoutApplyDefaults();
+  
+  // Đọc wheelMode từ NVS
+  uint8_t wm = prefs.getUChar("wheelMode", 0);
+  if (wm <= 1) {
+    g_state.wheelMode = (WheelMode)wm;
+  } else {
+    g_state.wheelMode = WHEEL_MECANUM;
+  }
+
   uint8_t tmp[4];
   for (int i = 0; i < 4; i++) {
     char k[8];
@@ -66,12 +76,13 @@ inline bool motorLayoutSave(Preferences &prefs) {
     snprintf(k, sizeof(k), "motI%d", i);
     prefs.putUChar(k, g_motInv[i] & 1u);
   }
+  prefs.putUChar("wheelMode", (uint8_t)g_state.wheelMode);
   prefs.end();
   return true;
 }
 
 /**
- * JSON: { "t":"motLayout", "mapMot":[0..3]x4, "motInv":[0|1]x4 }
+ * JSON: { "t":"motLayout", "mapMot":[0..3]x4, "motInv":[0|1]x4, "wheelMode":0|1 }
  */
 inline bool motorLayoutApplyJson(JsonDocument &doc, Preferences &prefs) {
   JsonArray jm = doc["mapMot"];
@@ -91,6 +102,12 @@ inline bool motorLayoutApplyJson(JsonDocument &doc, Preferences &prefs) {
     g_mapMotSlot[i] = tmpM[i];
     g_motInv[i] = tmpI[i];
   }
+  if (doc.containsKey("wheelMode")) {
+    int wm = doc["wheelMode"].as<int>();
+    if (wm == 0 || wm == 1) {
+      g_state.wheelMode = (WheelMode)wm;
+    }
+  }
   return motorLayoutSave(prefs);
 }
 
@@ -101,13 +118,14 @@ inline void motorLayoutReplyToClient(WebSocketsServer &ws, uint8_t clientNum) {
   p.end();
   JsonDocument doc;
   doc["t"] = "motLayout";
+  doc["wheelMode"] = (uint8_t)g_state.wheelMode;
   JsonArray a = doc["mapMot"].to<JsonArray>();
   JsonArray b = doc["motInv"].to<JsonArray>();
   for (int i = 0; i < 4; i++) {
     a.add(g_mapMotSlot[i]);
     b.add(g_motInv[i]);
   }
-  char out[160];
+  char out[180];
   size_t n = serializeJson(doc, out, sizeof(out) - 1);
   if (n > 0) ws.sendTXT(clientNum, out, n);
 }

@@ -137,11 +137,11 @@ inline void wpNavStart() {
     Serial.println(F("[WP] No waypoints — abort"));
     return;
   }
-  
+
   // Tự động căn chỉnh toạ độ Robot với Waypoint đầu tiên của lộ trình
   g_pose.x = s_wpRoute[0].x;
   g_pose.y = s_wpRoute[0].y;
-  
+
   // Căn chỉnh góc quay hướng tới Waypoint thứ 2 (nếu có)
   if (s_wpCount > 1) {
     float dx = s_wpRoute[1].x - s_wpRoute[0].x;
@@ -150,7 +150,13 @@ inline void wpNavStart() {
     while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
     while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
   }
-  
+
+  // [P0-1 FIX] Reset toàn bộ odom để locUpdate() lấy đúng delta=0 ở tick đầu tiên.
+  // Nếu không reset, s_locTotalFL/FR/RL/RR trong Localization.h vẫn giữ giá trị cũ,
+  // → dFL/FR/RL/RR dương → ds > 0 → g_pose.x bị "trôi" tiếp theo hướng cũ
+  // → robot lệch khỏi waypoint[0] vài chục cm sau ~1s.
+  odomResetDistance();
+
   s_wpIndex    = 0;
   oaReset(s_wpOa);
   s_wpFsm      = WP_NAVIGATING;
@@ -230,6 +236,8 @@ inline void wpNavTick() {
       s_wpT0 = now;
       s_wpSettleUntilMs = now + 450;  // Pause 450ms để filter sensor ổn định
       usFilterReset();
+      // [P0-2 FIX] Reset Yaw PID khi OA xong để Pure Pursuit segment heading bắt đầu sạch
+      pidYawReset();
       strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
       Serial.println(F("[WP] OA done — settle 450ms sau do resume Pure Pursuit."));
     } else if (r == OA_RES_BLOCKED) {
@@ -378,15 +386,26 @@ inline void wpNavTick() {
     float dy_p = g_pose.y - s_wpStartColY;
     float e_lat = -dx_p * sinf(s_wpSegmentHeading) + dy_p * cosf(s_wpSegmentHeading);
     
-    // Bù lệch ngang bằng trượt ngang (strafe) xe Mecanum sang trái/phải để quay lại vạch thẳng
-    int16_t strafeCmd = (int16_t)(e_lat * 150.f); 
-    if (strafeCmd > 60)  strafeCmd = 60;
-    if (strafeCmd < -60) strafeCmd = -60;
-
-    // Chỉnh lái Yaw PID khép kín dùng IMU để triệt tiêu sai số góc, giữ robot thẳng tắp
+    int16_t strafeCmd = 0;
+    int16_t steer = 0;
     float dt_s = (float)SAFE_LOOP_MS * 0.001f;
-    float yawOut = pidYawCompute(s_wpSegmentHeading, g_pose.headingRad, dt_s);
-    int16_t steer = (int16_t)constrain(yawOut, -100, 100);
+
+    if (g_state.wheelMode == WHEEL_NORMAL) {
+      // Bánh thường (4WD vi sai): Hướng đầu xe trực tiếp tới Target Waypoint (Line-of-Sight - LOS)
+      float currentTargetHeading = atan2f(ty - g_pose.y, tx - g_pose.x);
+      float yawOut = pidYawCompute(currentTargetHeading, g_pose.headingRad, dt_s);
+      steer = (int16_t)constrain(yawOut, -100, 100);
+      strafeCmd = 0;
+    } else {
+      // Bánh Mecanum: Bù lệch ngang bằng trượt ngang (strafe) xe sang trái/phải để quay lại vạch thẳng
+      strafeCmd = (int16_t)(e_lat * 150.f); 
+      if (strafeCmd > 60)  strafeCmd = 60;
+      if (strafeCmd < -60) strafeCmd = -60;
+
+      // Chỉnh lái Yaw PID khép kín dùng IMU để triệt tiêu sai số góc, giữ robot thẳng tắp
+      float yawOut = pidYawCompute(s_wpSegmentHeading, g_pose.headingRad, dt_s);
+      steer = (int16_t)constrain(yawOut, -100, 100);
+    }
 
     uint16_t cruiseSpd = g_state.autoBaseSpeed;
     if (cruiseSpd == 0) cruiseSpd = g_state.baseSpeed;

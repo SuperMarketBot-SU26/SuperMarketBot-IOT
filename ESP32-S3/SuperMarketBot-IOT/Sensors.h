@@ -31,10 +31,7 @@ volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
 int g_batPct = -1; // Biến toàn cục lưu phần trăm pin cho MQTT và AutoDock
 
 #if USE_HC_SR04_HARDWARE
-static NewPing g_sonarLF(US_TRIG, US_ECHO_LF, US_PING_MAX_CM);
-static NewPing g_sonarRL(US_TRIG, US_ECHO_RL, US_PING_MAX_CM);
-static NewPing g_sonarRF(US_TRIG, US_ECHO_RF, US_PING_MAX_CM);
-static NewPing g_sonarRR(US_TRIG, US_ECHO_RR, US_PING_MAX_CM);
+
 static int16_t s_usFiltered[4] = {
   (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM,
   (int16_t)US_PING_MAX_CM, (int16_t)US_PING_MAX_CM
@@ -151,10 +148,10 @@ inline void sensorsInit() {
 #if USE_HC_SR04_HARDWARE
   pinMode(US_TRIG, OUTPUT);
   digitalWrite(US_TRIG, LOW);
-  pinMode(US_ECHO_LF, INPUT);
-  pinMode(US_ECHO_RL, INPUT);
-  pinMode(US_ECHO_RF, INPUT);
-  pinMode(US_ECHO_RR, INPUT);
+  pinMode(US_ECHO_LF, INPUT_PULLDOWN);
+  pinMode(US_ECHO_RL, INPUT_PULLDOWN);
+  pinMode(US_ECHO_RF, INPUT_PULLDOWN);
+  pinMode(US_ECHO_RR, INPUT_PULLDOWN);
   Serial.println(F("[US] HC-SR04 x4 (LF/RL/RF/RR) — stop <30cm, OA tu 42cm."));
 #endif
 
@@ -185,20 +182,41 @@ inline void sensorsCommitPhyToState(const int16_t phy[4]) {
     if (p > 3) p = (uint8_t)s;
     usSlot[s] = phy[p];
   }
-  g_state.usLF = usSlot[SLOT_LF];
-  g_state.usLR = usSlot[SLOT_LR];
-  g_state.usRF = usSlot[SLOT_RF];
-  g_state.usRR = usSlot[SLOT_RR];
-  g_state.usFront = (int16_t)min((int)g_state.usLF, (int)g_state.usRF);
-  g_state.usBack = (int16_t)min((int)g_state.usLR, (int)g_state.usRR);
-  g_state.usLeft = (int16_t)min((int)g_state.usLF, (int)g_state.usLR);
-  g_state.usRight = (int16_t)min((int)g_state.usRF, (int)g_state.usRR);
+  // Gán 4 cổng vật lý trực tiếp cho 4 hướng logic: F (0), B (1), L (2), R (3)
+  g_state.usLF = usSlot[0]; // Port 0 đại diện cho Front
+  g_state.usLR = usSlot[1]; // Port 1 đại diện cho Back
+  g_state.usRF = usSlot[2]; // Port 2 đại diện cho Left
+  g_state.usRR = usSlot[3]; // Port 3 đại diện cho Right
+
+  g_state.usFront = g_state.usLF;
+  g_state.usBack  = g_state.usLR;
+  g_state.usLeft  = g_state.usRF;
+  g_state.usRight = g_state.usRR;
   g_state.usLastUpdateMs = millis();
 }
 
 /**
  * SR04 (nếu bật) hoặc đồng bộ từ LiDAR — gọi sau sensorsPollLidar() khi không dùng SR04.
  */
+inline int16_t readCustomSonar(uint8_t triggerPin, uint8_t echoPin) {
+  // 1. Đảm bảo chân Trig ở mức LOW trước
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  
+  // 2. Kích hoạt phát sóng bằng cách kéo Trig lên HIGH trong 10us
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+  
+  // 3. Đo thời gian phản hồi HIGH trên chân Echo
+  // 15000us tương đương khoảng ~250cm (an toàn và phản hồi nhanh)
+  uint32_t duration = pulseIn(echoPin, HIGH, 15000UL);
+  if (duration == 0) return 0;
+  
+  // Khoảng cách (cm) = thời gian / 58
+  return (int16_t)(duration / 58);
+}
+
 inline void sensorsPollUS() {
 #if USE_HC_SR04_HARDWARE
   static int16_t phy[4] = {
@@ -210,22 +228,22 @@ inline void sensorsPollUS() {
   
   switch (currentSensorIdx) {
     case US_PHY_F: // LF (Trái trước)
-      r = (int16_t)g_sonarLF.ping_cm();
+      r = readCustomSonar(US_TRIG, US_ECHO_LF);
       phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
       g_usPhyLastEchoMs[US_PHY_F] = millis();
       break;
     case US_PHY_B: // RL (Trái sau)
-      r = (int16_t)g_sonarRL.ping_cm();
+      r = readCustomSonar(US_TRIG, US_ECHO_RL);
       phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
       g_usPhyLastEchoMs[US_PHY_B] = millis();
       break;
     case US_PHY_L: // RF (Phải trước)
-      r = (int16_t)g_sonarRF.ping_cm();
+      r = readCustomSonar(US_TRIG, US_ECHO_RF);
       phy[US_PHY_L] = usFilterSample(US_PHY_L, r);
       g_usPhyLastEchoMs[US_PHY_L] = millis();
       break;
     case US_PHY_R: // RR (Phải sau)
-      r = (int16_t)g_sonarRR.ping_cm();
+      r = readCustomSonar(US_TRIG, US_ECHO_RR);
       phy[US_PHY_R] = usFilterSample(US_PHY_R, r);
       g_usPhyLastEchoMs[US_PHY_R] = millis();
       break;

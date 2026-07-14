@@ -69,6 +69,7 @@ void IRAM_ATTR isrRR() {
 #endif
 
 inline void odomInit() {
+#if USE_ENCODER_HARDWARE
   pinMode(ENC_FL, INPUT_PULLUP);
   pinMode(ENC_RL, INPUT_PULLUP);
   pinMode(ENC_FR, INPUT_PULLUP);
@@ -81,6 +82,10 @@ inline void odomInit() {
 #if ODOM_HAS_ENC_RR
   attachInterrupt(digitalPinToInterrupt(ENC_RR), isrRR, RISING);
 #endif
+  Serial.println(F("[Encoder] Encoders initialized on GPIOs with interrupts."));
+#else
+  Serial.println(F("[Encoder] Encoders disabled (hardware removed)."));
+#endif
 }
 
 /**
@@ -89,12 +94,44 @@ inline void odomInit() {
  *   dist   += (ticks / ENC_PPR) * WHEEL_CIRC_M
  */
 inline void odomUpdate() {
+  uint32_t fl = 0, rl = 0, fr = 0, rr = 0;
+
+#if USE_ENCODER_HARDWARE
   noInterrupts();
-  uint32_t fl = g_ticksFL; g_ticksFL = 0;
-  uint32_t rl = g_ticksRL; g_ticksRL = 0;
-  uint32_t fr = g_ticksFR; g_ticksFR = 0;
-  uint32_t rr = g_ticksRR; g_ticksRR = 0;
+  fl = g_ticksFL; g_ticksFL = 0;
+  rl = g_ticksRL; g_ticksRL = 0;
+  fr = g_ticksFR; g_ticksFR = 0;
+  rr = g_ticksRR; g_ticksRR = 0;
   interrupts();
+#else
+  // Giả lập Encoder bằng phần mềm dựa trên công suất PWM thực tế đang cấp cho Motor
+  // Động cơ vàng DC quay tối đa ~200 RPM ở 6V -> Tần số xung tối đa với đĩa 20 lỗ là ~66.7 xung/giây.
+  // Trong cửa sổ ODOM_PERIOD_MS (100ms), số xung tối đa ở 100% PWM là ~6.67 xung.
+  // Dùng biến số thực tích lũy để tránh sai số làm tròn khi vận tốc nhỏ.
+  static float s_simTicksFL = 0.f;
+  static float s_simTicksRL = 0.f;
+  static float s_simTicksFR = 0.f;
+  static float s_simTicksRR = 0.f;
+
+  // Đọc công suất động cơ hiện tại (sau bộ ramp điều khiển)
+  int32_t pwmFL = abs(g_state.lastMotorSpeed[MID_FL]);
+  int32_t pwmRL = abs(g_state.lastMotorSpeed[MID_RL]);
+  int32_t pwmFR = abs(g_state.lastMotorSpeed[MID_FR]);
+  int32_t pwmRR = abs(g_state.lastMotorSpeed[MID_RR]);
+
+  // Quy đổi tỉ lệ tích lũy xung
+  constexpr float MAX_TICKS_PER_100MS = 6.67f;
+  s_simTicksFL += ((float)pwmFL / (float)PWM_MAX) * MAX_TICKS_PER_100MS;
+  s_simTicksRL += ((float)pwmRL / (float)PWM_MAX) * MAX_TICKS_PER_100MS;
+  s_simTicksFR += ((float)pwmFR / (float)PWM_MAX) * MAX_TICKS_PER_100MS;
+  s_simTicksRR += ((float)pwmRR / (float)PWM_MAX) * MAX_TICKS_PER_100MS;
+
+  // Lấy phần nguyên và trừ đi để giữ phần dư số thực cho chu kỳ sau
+  fl = (uint32_t)s_simTicksFL; s_simTicksFL -= (float)fl;
+  rl = (uint32_t)s_simTicksRL; s_simTicksRL -= (float)rl;
+  fr = (uint32_t)s_simTicksFR; s_simTicksFR -= (float)fr;
+  rr = (uint32_t)s_simTicksRR; s_simTicksRR -= (float)rr;
+#endif
 
   g_totalFL += fl; g_totalRL += rl; g_totalFR += fr; g_totalRR += rr;
 

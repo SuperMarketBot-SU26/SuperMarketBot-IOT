@@ -83,13 +83,13 @@
 #define US_INTER_PING_MS  16u
 #define US_DISPLAY_MAX_CM 200
 /** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
-#define US_MIN_VALID_CM     5
+#define US_MIN_VALID_CM     2
 /**
  * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
  */
 #define USE_HC_SR04_HARDWARE  1
 /** Bật cả hai phần cứng hoạt động song song để Fusion 5 cảm biến. */
-#define USE_LIDAR_HARDWARE    1
+#define USE_LIDAR_HARDWARE    0
 
 #if USE_HC_SR04_HARDWARE
 /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
@@ -109,11 +109,12 @@
 
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
 #define USE_IMU_MPU6050  1
-#define IMU_I2C_SDA      35    // Chân I2C SDA
-#define IMU_I2C_SCL      36    // Chân I2C SCL
+#define IMU_I2C_SDA      17    // Chân I2C SDA (Đã chuyển sang GPIO 17 an toàn, tránh 35/36 trùng PSRAM)
+#define IMU_I2C_SCL      18    // Chân I2C SCL (Đã chuyển sang GPIO 18 an toàn, tránh 35/36 trùng PSRAM)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
+#define USE_ENCODER_HARDWARE  0 // 1 = Bật đọc encoder bánh xe; 0 = Tắt (khi tháo rời phần cứng tránh nhiễu chân floating)
 // DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
 // GPIO3 (ENC_FR): trên S3 là MTCK/JTAG — trong Arduino chọn USB JTAG disabled / peripheral JTAG off nếu encoder không đếm xung.
 #define ENC_FL        39    // Trước trái
@@ -276,15 +277,20 @@
 /* -------------------- LƯU TRỮ -------------------------------------- */
 #define NVS_NAMESPACE "smb"
 
-/* -------------------- CHẾ ĐỘ HOẠT ĐỘNG ----------------------------- */
 enum RobotMode : uint8_t {
   MODE_MANUAL   = 0,    // Lái tay
   MODE_AUTO     = 1,    // Tự hành né vật cản (reactive FSM)
   MODE_WAYPOINT = 2     // Tự hành bám waypoint (Pure Pursuit, Phase 3)
 };
 
+enum WheelMode : uint8_t {
+  WHEEL_MECANUM = 0,    // Bánh Mecanum (di chuyển đa hướng)
+  WHEEL_NORMAL  = 1     // Bánh thường (4WD vi sai)
+};
+
 /* -------------------- CẤU TRÚC CHIA SẺ GIỮA 2 CORE ----------------- */
 struct RobotState {
+  volatile WheelMode wheelMode; // Kiểu bánh xe
   // Cảm biến khoảng cách (cm)
   volatile int16_t usFront, usBack, usLeft, usRight;
   /** 4 góc xe (sau remap web) — Trái trước / Trái sau / Phải trước / Phải sau */

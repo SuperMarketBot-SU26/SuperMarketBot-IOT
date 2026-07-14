@@ -161,6 +161,7 @@ static void autoNavigateAvoidance() {
       s_settleUntilMs = now + 450;
       usFilterReset();
       s_autoOa.cruiseHeading = g_pose.headingRad;
+      // [P0-2 FIX] Reset Yaw PID khi quay về CRUISE để CRUISE heading lock bắt đầu sạch
       pidYawReset();
       Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa). Settle 450ms."));
     } else if (r == OA_RES_BLOCKED) {
@@ -311,6 +312,9 @@ static void taskControl(void *pvParams) {
   TickType_t odomTick = xTaskGetTickCount();
   TickType_t usTick   = xTaskGetTickCount();
 
+  static bool s_headingLocked = false;
+  static float s_targetHeading = 0.f;
+
   while (true) {
     /* 12s đầu: ép MANUAL — tránh MQTT/backend hoặc mode cũ khiến robot tự chạy */
     if (millis() < BOOT_GUARD_MS) {
@@ -375,8 +379,23 @@ static void taskControl(void *pvParams) {
     } else {
       if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
         botStop();
+        s_headingLocked = false;
       } else {
-        botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, g_state.cmdX, g_state.baseSpeed);
+        // Khóa hướng (Heading Lock) tự động bằng IMU khi đi thẳng / đi ngang
+        if (g_imuEnabled && (g_state.cmdY != 0 || g_state.cmdStrafe != 0) && g_state.cmdX == 0) {
+          if (!s_headingLocked) {
+            s_targetHeading = g_pose.headingRad;
+            pidYawReset();
+            s_headingLocked = true;
+          }
+          float dt_s = (float)SAFE_LOOP_MS / 1000.f;
+          float yawCorrection = pidYawCompute(s_targetHeading, g_pose.headingRad, dt_s);
+          int32_t steer = (int32_t)constrain(yawCorrection, -35, 35); // Giới hạn lực bù xoay tối đa ở mức vừa phải để không bị lắc đuôi
+          botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, steer, g_state.baseSpeed);
+        } else {
+          s_headingLocked = false;
+          botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, g_state.cmdX, g_state.baseSpeed);
+        }
       }
     }
 
