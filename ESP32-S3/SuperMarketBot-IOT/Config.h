@@ -58,6 +58,20 @@
 #define LIDAR_BAUD    115200
 // Góc đo TF-Luna thường 2,3°/step; tầm datasheet ~0,2m–8m (phụ thuộc vật liệu, ánh sáng)
 #define LIDAR_MAX_CM  800
+
+/* -------------------- YDLIDAR X3 (360°, 30m, SLAM) ------------------ */
+// Dùng Serial1 riêng để không xung đột TF-Luna. ESP32-S3 có 3 UART:
+//   Serial0 = USB (debug)
+//   Serial1 = LIDAR_X3_TX=15, LIDAR_X3_RX=16 (dùng cho X3)
+//   Serial2 = LIDAR_B_TX=1,  LIDAR_B_RX=2  (TF-Luna back)
+// Lưu ý: ENC_RL=16 đang dùng; nếu bật X3 phải tắt encoder RL hoặc chuyển ENC_RL sang GPIO khác.
+#define USE_YDLIDAR_X3          0   // 0 = tắt (mặc định); 1 = bật driver YDLidar X3
+#define YDLIDAR_X3_TX           15  // ESP TX → X3 RX (chỉ cần RX để đọc scan; TX để gửi lệnh)
+#define YDLIDAR_X3_RX           16  // ESP RX ← X3 TX
+#define YDLIDAR_X3_BAUD         230400  // X3 mặc định 230400
+#define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
+#define YDLIDAR_SCAN_BUFF_SIZE  1024  // Buffer bytes cho mỗi scan packet
+#define YDLIDAR_MAX_POINTS      720  // 360° / 0.5° resolution ≈ 720 points (X3 thực tế ~640 points)
 /**
  * TF-Luna (Benewake): gửi lệnh UART sau khi mở cổng — bật output, khung 9 byte (cm), FPS, save.
  * Tắt (=0) nếu bạn đã cấu hình bằng tool PC và không muốn firmware đụng vào.

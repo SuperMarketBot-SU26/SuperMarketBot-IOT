@@ -162,24 +162,24 @@ inline void wpNavStart() {
     return;
   }
 
+  // [P0-1 FIX] Reset toàn bộ odom (về pose 0,0) TRƯỚC khi snap pose mới
+  // để encoder delta của tick tiếp theo được tính từ 0 → không bị "trôi" pose
+  odomResetDistance();
+
   // Tự động căn chỉnh toạ độ Robot với Waypoint đầu tiên của lộ trình
+  // (đặt SAU odomResetDistance để không bị reset về 0,0)
   g_pose.x = s_wpRoute[0].x;
   g_pose.y = s_wpRoute[0].y;
 
-  // Căn chỉnh góc quay hướng tới Waypoint thứ 2 (nếu có)
+  // Căn chỉnh góc quay hướng tới Waypoint thứ 2 (nếu có) — đặt trước
+  // khi IMU đọc lại để tránh bị override ngay tick sau.
   if (s_wpCount > 1) {
-    float dx = s_wpRoute[1].x - s_wpRoute[0].x;
-    float dy = s_wpRoute[1].y - s_wpRoute[0].y;
-    g_pose.headingRad = atan2f(dy, dx);
-    while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
+    float dx0 = s_wpRoute[1].x - s_wpRoute[0].x;
+    float dy0 = s_wpRoute[1].y - s_wpRoute[0].y;
+    g_pose.headingRad = atan2f(dy0, dx0);
+    while (g_pose.headingRad < 0.f)                g_pose.headingRad += 2.f * (float)M_PI;
     while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
   }
-
-  // [P0-1 FIX] Reset toàn bộ odom để locUpdate() lấy đúng delta=0 ở tick đầu tiên.
-  // Nếu không reset, s_locTotalFL/FR/RL/RR trong Localization.h vẫn giữ giá trị cũ,
-  // → dFL/FR/RL/RR dương → ds > 0 → g_pose.x bị "trôi" tiếp theo hướng cũ
-  // → robot lệch khỏi waypoint[0] vài chục cm sau ~1s.
-  odomResetDistance();
 
   s_wpIndex    = 0;
   oaReset(s_wpOa);
@@ -248,6 +248,7 @@ inline void wpNavTick() {
   const int16_t  bCm   = obsBackCm();
 
   /* ── Safety hardstop — ưu tiên tuyệt đối (mọi state) ───────── */
+#if !WP_DISABLE_OBSTACLE_GUARD
   const bool hardFront = obsFrontBlocked();
 
   if (hardFront) {
@@ -256,6 +257,7 @@ inline void wpNavTick() {
     /* Trong state OA đang xoay → hardstop nhưng không reset FSM,
        tick tiếp theo sẽ detect dist và chuyển state đúng */
   }
+#endif
 
   /* ── Local OA (dùng chung Auto bước 2) — chạy trước switch ─────── */
   if (s_wpFsm == WP_NAVIGATING && s_wpOa.state != OA_IDLE) {
@@ -306,6 +308,12 @@ inline void wpNavTick() {
     }
     */
 
+/* [NV-DBG] Khi WP_DISABLE_OBSTACLE_GUARD = 1, bỏ qua kiểm tra cảm biến
+ * (chỉ dùng để test logic Pure Pursuit trong không gian rộng, không có vật cản). */
+#ifndef WP_DISABLE_OBSTACLE_GUARD
+#define WP_DISABLE_OBSTACLE_GUARD 1   // ← ĐỔI về 0 để bật lại obstacle guard
+#endif
+
     float tx   = s_wpRoute[s_wpIndex].x;
     float ty   = s_wpRoute[s_wpIndex].y;
     float dx   = tx - g_pose.x;
@@ -328,6 +336,10 @@ inline void wpNavTick() {
       lastWpLog = now;
       Serial.printf("[WP DEBUG] idx=%d, target=(%.3f,%.3f), pose=(%.3f,%.3f), heading=%.3f, dist=%.3f\n",
                     (int)s_wpIndex, tx, ty, g_pose.x, g_pose.y, g_pose.headingRad, dist);
+      // [NV-DBG] In kèm giá trị cảm biến để biết tại sao bị stop nếu có
+      Serial.printf("[WP DEBUG] sensors: front=%d cm (clear=%d, stop=%d), back=%d cm, usPathClearCm=%u, usStopCm=%u\n",
+                    (int)fCm, (int)obsPathClear(fCm), (int)obsFrontBlocked(),
+                    (int)bCm, (unsigned)g_state.usPathClearCm, (unsigned)g_state.usStopCm);
     }
 
     /* Đến nơi */
@@ -378,6 +390,7 @@ inline void wpNavTick() {
     }
 
     /* Gặp vật → quét/lách (≥1m mới coi bên trống) */
+#if !WP_DISABLE_OBSTACLE_GUARD
     if (obsOaTriggered(fCm)) {
       if (oaBegin(s_wpOa, fCm, now)) {
         if (s_wpOa.state == OA_BLOCKED) {
@@ -393,6 +406,10 @@ inline void wpNavTick() {
       botStop();
       return;
     }
+#else
+    // [NV-DBG] Đã tắt obstacle guard qua WP_DISABLE_OBSTACLE_GUARD
+    (void)fCm;
+#endif
 
     /* ── Mecanum Path-Following & Alignment ────────────────────── */
     float alpha = wpAngleDiff(s_wpSegmentHeading, g_pose.headingRad);
@@ -400,6 +417,16 @@ inline void wpNavTick() {
     // Nếu lệch hướng lớn (vừa bắt đầu segment hoặc bị va quệt lệch hẳn xe), xoay tại chỗ căn chỉnh trước
     if (!s_wpAligned) {
       if (fabsf(alpha) > 0.175f) { // ~10 độ
+        static uint32_t lastAlignLog = 0;
+        if (now - lastAlignLog > 500u) {
+          lastAlignLog = now;
+          Serial.printf("[WP ALIGN] alpha=%.3f rad (%.1f deg) → %s, turnPwm=%u\n",
+                        alpha, alpha * 180.f / (float)M_PI,
+                        (alpha > 0 ? "CCW" : "CW"),
+                        (unsigned)((g_state.rotateBaseSpeed != 0)
+                          ? g_state.rotateBaseSpeed
+                          : wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10)));
+        }
         uint16_t turnPwm = g_state.rotateBaseSpeed;
         if (turnPwm == 0) {
           turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10);

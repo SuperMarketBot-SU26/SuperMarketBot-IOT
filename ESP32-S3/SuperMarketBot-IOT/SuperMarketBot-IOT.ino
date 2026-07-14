@@ -36,6 +36,7 @@
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
+#include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -421,6 +422,51 @@ static void taskControl(void *pvParams) {
       }
     }
 
+#if USE_YDLIDAR_X3
+    // ── YDLidar X3 — đọc bytes mới từ Serial1 vào buffer ───────
+    // Chạy mỗi SAFE_LOOP_MS (50ms) để giữ CPU nhẹ; X3 tự buffer trong hardware.
+    x3Poll();
+
+    // Mỗi ~200ms, nếu có scan mới → lấy min trong cung trước (±45°)
+    // và cập nhật g_state.lidarFront (đơn vị cm) để fusion với HC-SR04.
+    static uint32_t lastX3Front = 0;
+    if (g_x3Scan.scanReady && (millis() - lastX3Front > 200u)) {
+      lastX3Front = millis();
+      g_x3Scan.scanReady = false;
+
+      uint16_t minMm = x3MinInArc(0.0f, 45.0f);  // trước ±45°
+      if (minMm != 0xFFFF && minMm > 0) {
+        uint16_t cm = minMm / 10u;
+        if (cm < LIDAR_MAX_CM && cm >= LIDAR_MIN_VALID_CM) {
+          g_state.lidarFront = (int16_t)cm;
+          g_state.lidarLastUpdateMs = millis();
+        }
+      }
+      // Sau ±45° (chỉ tham khảo, không dùng để stop)
+      uint16_t backMm = x3MinInArc(180.0f, 45.0f);
+      if (backMm != 0xFFFF && backMm > 0) {
+        uint16_t cm = backMm / 10u;
+        if (cm < LIDAR_MAX_CM && cm >= LIDAR_MIN_VALID_CM) {
+          g_state.lidarBack = (int16_t)cm;
+        }
+      }
+    }
+
+    // ── Publish scan lên MQTT cho BE/SLAM (mỗi ~500ms) ──────────
+    // Format mong muốn: topic "robot/<code>/scan" với JSON {ts, seq, points:[{a,d}]}
+    // Hiện tại skeleton chỉ in log để verify parser hoạt động; phần publish qua MQTT
+    // cần thêm cờ `g_mqttScanPending` riêng + copy buffer để tránh race với parser
+    // (parser chạy cùng taskControl, nên publish có thể đặt thẳng ở đây).
+    static uint32_t lastX3Pub = 0;
+    if (g_x3Scan.count > 0 && (millis() - lastX3Pub > 500u)) {
+      lastX3Pub = millis();
+      Serial.printf("[X3] scanSeq=%lu, points=%u, last=%lu ms ago\n",
+                    (unsigned long)g_x3Scan.scanSeq,
+                    (unsigned)g_x3Scan.count,
+                    (unsigned long)(millis() - g_x3Scan.lastScanMs));
+    }
+#endif
+
     vTaskDelayUntil(&xLastWake, xPeriod);
   }
 }
@@ -511,6 +557,9 @@ void setup() {
   odomInit();
   locInit();
   imuMpu6050Init();
+#if USE_YDLIDAR_X3
+  x3Init();   // Khởi tạo YDLidar X3 (UART, start scan)
+#endif
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();
