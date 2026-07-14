@@ -98,13 +98,34 @@ inline void motorDrive(MotorId id, int32_t speed) {
 /**
  * Ánh xạ lệnh theo 4 góc xe (slot 0..3 = LF,LR,RF,RR) → kênh TB6612 vật lý.
  * Mảng speedBySlot[] cùng thứ tự với g_mapMotSlot / g_motInv.
+ *
+ * NV1b: Áp dụng motor trim (LEFT/RIGHT_MOTOR_SCALE) để cân bằng lực kéo 2 bên.
+ * Slot 0 (LF) & 1 (RL) = bánh Trái → nhân g_state.leftMotorScale.
+ * Slot 2 (RF) & 3 (RR) = bánh Phải → nhân g_state.rightMotorScale.
+ *
+ * Scale bị clamp về [MOTOR_SCALE_MIN..MOTOR_SCALE_MAX] bởi auto-calibrate
+ * (NV1c) hoặc web UI. Nếu scale invalid (<0.5 hoặc >1.5) → fallback về 1.0
+ * an toàn (không brick robot khi NVS bị hỏng).
  */
+inline int32_t clampMotorScale(float s) {
+  if (!(s >= MOTOR_SCALE_MIN && s <= MOTOR_SCALE_MAX)) return 1024;  // 1.0 fixed-point
+  return (int32_t)(s * 1024.f + 0.5f);
+}
+
 inline void motorApplyLayout(const int32_t speedBySlot[4]) {
   for (int s = 0; s < 4; s++) {
     uint8_t p = g_mapMotSlot[s];
     if (p > 3) p = (uint8_t)s;
     int32_t sp = speedBySlot[s];
     if (g_motInv[s]) sp = -sp;
+
+    // NV1b: Áp scale theo slot (Trái: 0,1 | Phải: 2,3).
+    // Scale lưu dạng float, nhân với 1024 để giữ độ chính xác khi chia.
+    int32_t scaleFP = (s <= 1)
+        ? clampMotorScale(g_state.leftMotorScale)
+        : clampMotorScale(g_state.rightMotorScale);
+    sp = (sp * scaleFP) / 1024;
+
     motorDrive((MotorId)p, sp);
   }
 }

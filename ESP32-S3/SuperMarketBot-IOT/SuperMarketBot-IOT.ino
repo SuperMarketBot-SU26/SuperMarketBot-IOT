@@ -35,6 +35,7 @@
 #include "WebUI.h"
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
+#include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -96,7 +97,9 @@ RobotState g_state = {
   .usPathClearStreak = 18,
   .yawKp = 40.0f,
   .yawKi = 0.0f,
-  .yawKd = 2.0f
+  .yawKd = 2.0f,
+  .leftMotorScale = LEFT_MOTOR_SCALE_DEFAULT,
+  .rightMotorScale = RIGHT_MOTOR_SCALE_DEFAULT
 };
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────
@@ -390,7 +393,26 @@ static void taskControl(void *pvParams) {
           }
           float dt_s = (float)SAFE_LOOP_MS / 1000.f;
           float yawCorrection = pidYawCompute(s_targetHeading, g_pose.headingRad, dt_s);
-          int32_t steer = (int32_t)constrain(yawCorrection, -35, 35); // Giới hạn lực bù xoay tối đa ở mức vừa phải để không bị lắc đuôi
+          // [NV1c FIX] Tăng lực bù lái từ ±35 lên ±85 để chống lệch cơ khí mạnh.
+          // Khi scale trái/phải đã cân (NV1a) thì steer thường chỉ cần ±20-30,
+          // nhưng khi chưa calibrate (scale=1.0 cả 2 bên) robot có thể lệch
+          // 5-10° → cần steer ±70-85 để bù kịp.
+          int32_t steer = (int32_t)constrain(yawCorrection, -85, 85);
+
+          // [NV1c FIX] Auto-calibrate motor trim dựa trên yaw drift.
+          // Chỉ chạy khi đi thẳng (không xoay, không trượt ngang) để tránh
+          // drift giả do rotation tạo ra.
+          if (g_state.cmdStrafe == 0) {
+            static uint32_t lastTrimMs = 0;
+            static float prevHeading = 0.f;
+            uint32_t nowTrim = millis();
+            if (nowTrim - lastTrimMs >= AUTO_CAL_INTERVAL_MS) {
+              motorTrimTick(nowTrim, g_pose.headingRad, prevHeading);
+              prevHeading = g_pose.headingRad;
+              lastTrimMs = nowTrim;
+            }
+          }
+
           botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, steer, g_state.baseSpeed);
         } else {
           s_headingLocked = false;

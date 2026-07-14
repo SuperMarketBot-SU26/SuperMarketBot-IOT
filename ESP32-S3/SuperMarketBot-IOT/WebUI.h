@@ -16,6 +16,7 @@
 #include "RobotTelemetry.h"
 #include "SensorLayout.h"
 #include "MotorLayout.h"
+#include "MotorTrim.h"   // NV1c — motorTrimInit() gọi từ webUIInit()
 
 Preferences g_prefs;
 #include "CtrlJson.h"
@@ -1235,6 +1236,7 @@ inline void webUIInit() {
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
+  motorTrimInit(g_prefs);   // NV1c — Load motor trim scale từ NVS
 
   g_state.alignThresholdDeg = g_prefs.getFloat("cfgAlign", 10.0f);
   g_state.rotateSpeedMinPct = g_prefs.getUInt("cfgMinRot", 10);

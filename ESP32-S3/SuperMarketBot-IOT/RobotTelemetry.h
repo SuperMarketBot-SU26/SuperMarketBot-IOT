@@ -9,6 +9,7 @@
 #include "MotorLayout.h"
 #include "Sensors.h"
 #include "Odometry.h"
+#include "MotorTrim.h"   // NV1c — motor trim state accessor for telemetry
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -114,6 +115,22 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
  
   doc["upMs"] = (uint32_t)millis();
   doc["apCli"] = WiFi.softAPgetStationNum();
+
+  // NV1c — Motor trim telemetry (để web/BE debug drift + auto-cal)
+  doc["scaleL"] = (double)g_state.leftMotorScale;
+  doc["scaleR"] = (double)g_state.rightMotorScale;
+#if AUTO_CAL_ENABLE
+  {
+    MotorTrimState& mt = motorTrimInstance();
+    doc["calDrift"] = (double)mt.lastDriftDegps;
+    doc["calAdjCount"] = (uint16_t)mt.adjustCount;
+    doc["calDirty"] = (uint8_t)(mt.dirty ? 1 : 0);
+  }
+#else
+  doc["calDrift"] = 0.0;
+  doc["calAdjCount"] = 0;
+  doc["calDirty"] = 0;
+#endif
  
   if (includeSlow) {
     float tC = readChipTempCelsius();

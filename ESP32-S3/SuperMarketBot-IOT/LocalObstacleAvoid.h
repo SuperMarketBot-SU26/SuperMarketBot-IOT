@@ -61,6 +61,36 @@ static inline uint16_t oaPct2Pwm(uint8_t pct) {
   return (uint16_t)((uint32_t)PWM_MAX * (uint32_t)pct / 100u);
 }
 
+/**
+ * [NV2 FIX] Log FSM state transition với timestamp (ms) + ID trạng thái.
+ * Format: [t=12345ms OA→SWERVE dir=R fCm=42cm] → dễ grep trong Serial Monitor.
+ */
+static inline const char* oaStateName(OaFsmState s) {
+  switch (s) {
+    case OA_IDLE:      return "IDLE";
+    case OA_SCAN_CW:   return "SCAN_CW";
+    case OA_SCAN_CCW:  return "SCAN_CCW";
+    case OA_WAIT:      return "WAIT";
+    case OA_SWERVE:    return "SWERVE";
+    case OA_PASS:      return "PASS";
+    case OA_BLOCKED:   return "BLOCKED";
+    default:           return "?";
+  }
+}
+
+#define OA_LOG(from, to, ...) do { \
+    Serial.printf("[OA t=%lums %s→%s] ", (unsigned long)millis(), \
+                  oaStateName(from), oaStateName(to)); \
+    Serial.printf(__VA_ARGS__); \
+    Serial.println(); \
+  } while(0)
+
+#define OA_LOG_STAY(state, ...) do { \
+    Serial.printf("[OA t=%lums %s] ", (unsigned long)millis(), oaStateName(state)); \
+    Serial.printf(__VA_ARGS__); \
+    Serial.println(); \
+  } while(0)
+
 static inline float oaDistMoved(const OaContext &ctx) {
   float dx = g_pose.x - ctx.poseXBefore;
   float dy = g_pose.y - ctx.poseYBefore;
@@ -122,13 +152,14 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
     return false;
   }
   botStop();
+  // [NV2 FIX] Reset PID khi vào OA — đã có sẵn, giữ nguyên.
   pidSpeedReset();
-  pidYawReset(); // Reset PID Yaw để bắt đầu trạng thái tránh vật cản mới, tránh vọt lố tích lũy
+  pidYawReset();
 
   if (ctx.attempts >= OA_MAX_ATTEMPTS) {
     ctx.state = OA_BLOCKED;
     ctx.stateT0 = now;
-    Serial.println(F("[OA] Dat den gioi han ne vat can -> Dung cho doi."));
+    OA_LOG_STAY(OA_BLOCKED, "attempts=%u >= max=%u -> fallback", (unsigned)ctx.attempts, (unsigned)OA_MAX_ATTEMPTS);
     return true;
   }
 
@@ -139,17 +170,13 @@ inline bool oaBegin(OaContext &ctx, int16_t frontCm, uint32_t now) {
   ctx.scanMaxLeft  = 0.f;
   ctx.sideBlockedCount = 0;
 
-  // [P0-2 FIX] Lưu ý: pidYawReset() đã được gọi ở đầu oaBegin() (line 126) — an toàn.
-  // Reset Yaw PID integral & prevError khi bắt đầu một quá trình OA mới.
-  // Nếu không reset, integral từ CRUISE sẽ "đổ" vào SWERVE với target khác
-  // → output PID rất lớn trong 1-2 tick → xe giật mạnh khi chuyển state.
-  // Đặc biệt nguy hiểm khi user nâng yawKi > 0 để bù drift dài hạn.
-
   // Chuyển sang trạng thái dừng chờ 1.8 giây xem vật cản động (người) có tự di chuyển đi không
+  OaFsmState prev = ctx.state;
   ctx.state = OA_WAIT;
   ctx.stateT0 = now;
-  Serial.printf("[OA] Obstacle %dcm -> Dung cho 1.8s xem vat di chuyen (lan thu %d/%d)\n",
-                (int)frontCm, (int)ctx.attempts, (int)OA_MAX_ATTEMPTS);
+  OA_LOG(prev, OA_WAIT,
+         "Phat hien vat can %dcm phia truoc. Dung cho 1.8s xem co tu di chuyen (lan thu %u/%u)",
+         (int)frontCm, (unsigned)ctx.attempts, (unsigned)OA_MAX_ATTEMPTS);
   return true;
 }
 
@@ -223,9 +250,9 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     botStop();
     // Nếu trong thời gian chờ mà người đi qua đã tự đi khuất
     if (obsPathClear(frontCm)) {
+      OA_LOG(OA_WAIT, OA_IDLE, "Vat can dong da tu roi di (fCm=%dcm) -> Resume cruise", (int)frontCm);
       ctx.state = OA_IDLE;
       ctx.attempts = 0;
-      Serial.println(F("[OA] Vat can dong da tu roi di -> Resume."));
       return OA_RES_DONE;
     }
     // Hết 1.8 giây vẫn kẹt -> Bắt đầu lách
@@ -240,8 +267,10 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
 #else
       // [P0-2 FIX] Reset PID yaw trước khi chuyển sang SCAN để tránh integral cũ
       pidYawReset();
+      OaFsmState prev = ctx.state;
       ctx.state = OA_SCAN_CW;
       ctx.stateT0 = now;
+      OA_LOG(prev, OA_SCAN_CW, "Het 1.8s chờ, bat dau quet 2 ben");
 #endif
     }
     return OA_RES_RUNNING;
@@ -280,6 +309,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
 
     // Nếu đường phía trước đã thông thoáng
     if (obsPathClear(frontCm)) {
+      OA_LOG(OA_SWERVE, OA_PASS, "Duong truoc da tho (fCm=%dcm), tiep tuc truot 600ms de thoat het", (int)frontCm);
       ctx.state = OA_PASS; // trượt thêm 1 chút rồi tiếp tục thẳng
       ctx.stateT0 = now;
       return OA_RES_RUNNING;
@@ -343,9 +373,12 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
     // Trượt thêm 600ms để vượt bề rộng vật cản trước khi tiến thẳng
     if (now - ctx.stateT0 >= 600u) {
       botStop();
+      // [NV2 FIX] Reset PID khi về IDLE để Cruise stage tiếp theo bắt đầu sạch —
+      // tránh tích lũy integral từ SWERVE/PASS làm robot giật đuôi.
+      pidYawReset();
+      OA_LOG(OA_PASS, OA_IDLE, "Vuot mat vat can thanh cong (fCm=%dcm). Reset PID, resume Cruise", (int)frontCm);
       ctx.state = OA_IDLE;
       ctx.attempts = 0;
-      Serial.println(F("[OA] Vuot vat can bang strafe hoan tat."));
       return OA_RES_DONE;
     }
     // Vượt qua vật cản
@@ -375,6 +408,7 @@ inline OaTickResult oaTick(OaContext &ctx, int16_t frontCm, uint32_t now) {
 
   case OA_BLOCKED:
     // Bị chặn cứng -> giải phóng để FSM chính điều khiển lùi hoặc dừng hẳn
+    OA_LOG_STAY(OA_BLOCKED, "Tra ve IDLE de FSM chinh xu ly tiep");
     oaReset(ctx);
     return OA_RES_BLOCKED;
 

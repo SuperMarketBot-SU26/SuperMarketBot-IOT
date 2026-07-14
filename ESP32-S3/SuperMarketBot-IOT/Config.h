@@ -135,6 +135,50 @@
 #define PWM_RES_BITS  10    // 0..1023
 #define PWM_MAX       ((1 << PWM_RES_BITS) - 1)
 
+/* -------------------- CÂN BẰNG LỰC KÉO TRÁI/PHẢI (Motor Trim) ------
+ *
+ * Robot 4WD có thể lệch phải/trái do bất đối xứng cơ khí giữa 2 bên bánh:
+ *  - Bánh mòn không đều, motor khác tốc độ danh định, dây dẫn khác điện trở.
+ *  - Scale < 1.0 = giảm công suất bên đó, > 1.0 = tăng (hiếm khi cần).
+ *
+ * Auto-calibrate (NV1c) sẽ tự điều chỉnh LEFT_MOTOR_SCALE trong khoảng
+ * [MOTOR_SCALE_MIN..MOTOR_SCALE_MAX] dựa trên yaw drift của IMU.
+ *
+ * Giá trị dưới đây là **khởi đầu an toàn** (=1.0 = không bias). Sau khi robot
+ * chạy thử & tune thủ công qua web (nếu có), NVS sẽ lưu lại. Reset = xoá NVS.
+ * -------------------------------------------------------------------- */
+#define LEFT_MOTOR_SCALE_DEFAULT   1.00f   // Scale bánh Trái (FL+RL)
+#define RIGHT_MOTOR_SCALE_DEFAULT  1.00f   // Scale bánh Phải (FR+RR)
+/** Safety clamp — không cho scale vượt quá ±20% để tránh brick robot */
+#define MOTOR_SCALE_MIN            0.80f
+#define MOTOR_SCALE_MAX            1.20f
+/** NVS keys (lưu vào flash, giữ qua reboot) */
+#define NVS_KEY_SCALE_L            "motScL"
+#define NVS_KEY_SCALE_R            "motScR"
+
+/* -------------------- AUTO-CALIBRATE YAW DRIFT (NV1c) ---------------
+ *
+ * Khi đi thẳng (cruise, cmdX≈0, cmdY≠0), IMU báo yaw drift tích lũy > ngưỡng
+ * → tự tinh chỉnh LEFT_MOTOR_SCALE để bù. Tính theo dạng tích phân đơn giản
+ * (P-controller trên drift) — KHÔNG dùng PID đầy đủ vì drift noise cao.
+ *
+ * Cách hoạt động:
+ *   1. Mỗi AUTO_CAL_INTERVAL_MS, lấy yaw drift trung bình (deg/sec).
+ *   2. driftRate > AUTO_CAL_THRESH_DEGPS → scaleL giảm (robot lệch phải → trái mạnh quá → giảm trái).
+ *      driftRate < -AUTO_CAL_THRESH_DEGPS → scaleL tăng (robot lệch trái → tăng trái).
+ *   3. Mỗi lần điều chỉnh tối đa AUTO_CAL_STEP (0.5%/tick) → không giật.
+ *   4. Lưu NVS mỗi AUTO_CAL_SAVE_MS (5 giây) — tránh ghi flash quá nhiều.
+ *   5. Chỉ chạy khi MODE_AUTO/MODE_WAYPOINT (không lái tay).
+ *
+ * Debug: Telemetry JSON sẽ có `calDrift` (deg/s) + `calScaleL/R` để web hiển thị.
+ * -------------------------------------------------------------------- */
+#define AUTO_CAL_ENABLE               1     // 0 = tắt auto-calibrate (dùng scale thủ công)
+#define AUTO_CAL_INTERVAL_MS          1000u // Đo drift mỗi 1 giây
+#define AUTO_CAL_SAVE_MS              5000u // Ghi NVS mỗi 5 giây
+#define AUTO_CAL_THRESH_DEGPS         2.0f  // Ngưỡng drift tối thiểu (deg/s) để kích hoạt
+#define AUTO_CAL_STEP                 0.005f// Mỗi tick điều chỉnh tối đa 0.5%
+#define AUTO_CAL_DEAD_ZONE_DEGPS      0.5f  // Drift < ngưỡng này thì bỏ qua (nhiễu IMU)
+
 /* -------------------- AN TOÀN NÉ VẬT CẢN (không gian mở: siêu thị / hành lang) - */
 // Vùng "dừng cứng" (cm): dùng trong tự lái + né tránh. Tăng 26–35 nếu nhiễu/dừng sớm quá.
 #define SAFE_STOP_CM    15
@@ -328,6 +372,9 @@ struct RobotState {
   volatile float yawKp;                // mặc định 40.0f
   volatile float yawKi;                // mặc định 0.0f
   volatile float yawKd;                // mặc định 2.0f
+  /** Motor trim scales (NV1a). Volatile vì WebUI/MQTT có thể cập nhật runtime. */
+  volatile float leftMotorScale;       // 0.80..1.20, mặc định 1.00
+  volatile float rightMotorScale;      // 0.80..1.20, mặc định 1.00
 };
 
 /** FSM tự hành (AN_*) — hiển thị trên Web/MQTT khi không cắm USB Serial. */
@@ -366,6 +413,10 @@ extern volatile uint32_t s_settleUntilMs;
 #define SENSOR_LINK_MS_ENC    3500u
 
 extern bool g_imuEnabled;
+
+/** NV1c — Auto-calibrate motor trim state accessor (avoid multi-def). */
+struct MotorTrimState;
+extern MotorTrimState& motorTrimInstance();
 
 #include "LogStream.h"
 

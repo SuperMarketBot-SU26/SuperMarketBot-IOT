@@ -27,6 +27,7 @@
 
 #include "Config.h"
 #include "Localization.h"
+#include "Odometry.h"   // P0-1 FIX: cần cho odomResetDistance() trong wpNavStart()
 #include "LocalObstacleAvoid.h"
 #include "ObstacleSensors.h"
 #include "PidController.h"
@@ -49,6 +50,23 @@ extern void usFilterReset();
 #define WP_MAX_STEER_RAD      1.2f    // ~70° — quá lệch thì xoay tại chỗ trước
 #define WP_TIMEOUT_MS         20000u  // Timeout mỗi waypoint (ms)
 #define WP_MAX_WAYPOINTS      32      // Số waypoint tối đa trong 1 route
+
+/* ==================== NV3 — Accel limiter + smooth blend =============
+ *
+ * Giúp robot không "giật ga" khi chuyển waypoint hoặc khi PID output dao động.
+ *
+ * - WP_ACCEL_STEP_PWM_PER_TICK: tối đa PWM thay đổi mỗi SAFE_LOOP_MS (50ms).
+ *   Ví dụ 30 → từ 0 → 100% mất ~1.7s, tránh sụt áp nguồn (brownout).
+ * - WP_STEER_BLEND_ALPHA: low-pass filter cho steer cmd. 1.0 = no filter,
+ *   0.3 = mượt nhiều. Khuyến nghị 0.5-0.7.
+ * - WP_STRAFE_BLEND_ALPHA: tương tự cho strafe cmd.
+ * - WP_HOLD_AFTER_ARRIVE_MS: sau khi đến waypoint, giữ tốc độ 0 trong 200ms
+ *   để localization ổn định trước khi tính segment mới.
+ * -------------------------------------------------------------------- */
+#define WP_ACCEL_STEP_PWM_PER_TICK   30u
+#define WP_STEER_BLEND_ALPHA         0.6f
+#define WP_STRAFE_BLEND_ALPHA        0.7f
+#define WP_HOLD_AFTER_ARRIVE_MS      200u
 
 /* ==================== Cấu trúc ===================================== */
 struct Waypoint {
@@ -87,6 +105,12 @@ static float s_wpStartColX = 0.f;
 static float s_wpStartColY = 0.f;
 static float s_wpSegmentHeading = 0.f;
 static bool  s_wpAligned = false;
+
+/* NV3 — Accel limiter + low-pass blend (initialized to 0 = "not yet computed") */
+static int16_t s_wpLastSteer = 0;
+static int16_t s_wpLastStrafe = 0;
+static uint16_t s_wpLastPwm = 0;
+static uint32_t s_wpHoldUntilMs = 0;
 
 /* ==================== Helpers ===================================== */
 static inline float wpNormalizeAngle(float a) {
@@ -168,6 +192,11 @@ inline void wpNavStart() {
   s_wpStartColX = g_pose.x;
   s_wpStartColY = g_pose.y;
   s_wpAligned = false;
+  // NV3 — Reset accel/blend state
+  s_wpLastSteer = 0;
+  s_wpLastStrafe = 0;
+  s_wpLastPwm = 0;
+  s_wpHoldUntilMs = 0;
   if (s_wpCount > 0) {
     float dx = s_wpRoute[0].x - g_pose.x;
     float dy = s_wpRoute[0].y - g_pose.y;
@@ -283,6 +312,17 @@ inline void wpNavTick() {
     float dy   = ty - g_pose.y;
     float dist = sqrtf(dx * dx + dy * dy);
 
+    // [NV3 FIX] Hold-after-arrive: giữ botStop trong WP_HOLD_AFTER_ARRIVE_MS (200ms)
+    // để localization ổn định trước khi segment mới được tính (tránh heading nhảy giật).
+    if (s_wpHoldUntilMs > 0) {
+      if (now < s_wpHoldUntilMs) {
+        botStop();
+        return;
+      } else {
+        s_wpHoldUntilMs = 0;
+      }
+    }
+
     static uint32_t lastWpLog = 0;
     if (now - lastWpLog > 200u) {
       lastWpLog = now;
@@ -299,6 +339,11 @@ inline void wpNavTick() {
       s_wpT0 = now;
       pidSpeedReset();
       pidYawReset();
+      // [NV3 FIX] Reset accel/blend state + hold 200ms để localization ổn định.
+      s_wpLastSteer = 0;
+      s_wpLastStrafe = 0;
+      s_wpLastPwm = 0;
+      s_wpHoldUntilMs = now + WP_HOLD_AFTER_ARRIVE_MS;
       s_wpStartColX = g_pose.x;
       s_wpStartColY = g_pose.y;
       s_wpAligned = false;
@@ -424,8 +469,24 @@ inline void wpNavTick() {
     if (runPwm < 0) runPwm = 0;
     if (runPwm > (int32_t)PWM_MAX) runPwm = (int32_t)PWM_MAX;
 
+    // [NV3 FIX] Accel limiter: tránh tăng/giảm PWM đột ngột gây sụt áp nguồn (brownout).
+    // Đặc biệt quan trọng khi vừa rời WP_ARRIVE (PWM=0) → cruise (PWM lớn).
+    int32_t pwmDiff = runPwm - (int32_t)s_wpLastPwm;
+    if (pwmDiff >  (int32_t)WP_ACCEL_STEP_PWM_PER_TICK) runPwm = (int32_t)s_wpLastPwm + WP_ACCEL_STEP_PWM_PER_TICK;
+    if (pwmDiff < -(int32_t)WP_ACCEL_STEP_PWM_PER_TICK) runPwm = (int32_t)s_wpLastPwm - WP_ACCEL_STEP_PWM_PER_TICK;
+    s_wpLastPwm = (uint16_t)runPwm;
+
+    // [NV3 FIX] Low-pass blend cho steer & strafe để tránh giật khi PID output dao động.
+    // steerRaw và strafeRaw được tính ở trên; áp blend = alpha*new + (1-alpha)*old
+    int16_t steerBlended = (int16_t)(WP_STEER_BLEND_ALPHA * (float)steer
+                                  + (1.f - WP_STEER_BLEND_ALPHA) * (float)s_wpLastSteer);
+    int16_t strafeBlended = (int16_t)(WP_STRAFE_BLEND_ALPHA * (float)strafeCmd
+                                   + (1.f - WP_STRAFE_BLEND_ALPHA) * (float)s_wpLastStrafe);
+    s_wpLastSteer = steerBlended;
+    s_wpLastStrafe = strafeBlended;
+
     // Tiến thẳng đồng thời trượt ngang né/bù lệch đường và bẻ lái IMU giữ đầu thẳng
-    botDriveMecanum(strafeCmd, 100, steer, (uint16_t)runPwm);
+    botDriveMecanum(strafeBlended, 100, steerBlended, (uint16_t)runPwm);
     break;
   }
 
