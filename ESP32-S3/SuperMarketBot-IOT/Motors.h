@@ -146,14 +146,14 @@ inline void botBackward(uint16_t s) {
   motorApplyLayout(sp);
 }
 
-// Xoay tại chỗ sang phải (tank turn CW)
+// Xoay tại chỗ sang phải (tank turn CW) — heading TĂNG: FL/LR tiến, FR/RR lùi
 inline void botRotateCW(uint16_t s) {
   int32_t v = (int32_t)s;
   const int32_t sp[4] = {v, v, -v, -v};
   motorApplyLayout(sp);
 }
 
-// Xoay tại chỗ sang trái (tank turn CCW)
+// Xoay tại chỗ sang trái (tank turn CCW) — heading GIẢM: FL/LR lùi, FR/RR tiến
 inline void botRotateCCW(uint16_t s) {
   int32_t v = (int32_t)s;
   const int32_t sp[4] = {-v, -v, v, v};

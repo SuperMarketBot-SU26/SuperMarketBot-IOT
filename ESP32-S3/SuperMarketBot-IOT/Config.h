@@ -161,7 +161,7 @@
  * Giá trị dưới đây là **khởi đầu an toàn** (=1.0 = không bias). Sau khi robot
  * chạy thử & tune thủ công qua web (nếu có), NVS sẽ lưu lại. Reset = xoá NVS.
  * -------------------------------------------------------------------- */
-#define LEFT_MOTOR_SCALE_DEFAULT   1.00f   // Scale bánh Trái (FL+RL)
+#define LEFT_MOTOR_SCALE_DEFAULT   1.00f   // Scale bánh Trái (FL+RL) — tắt trim tạm, để 1.00
 #define RIGHT_MOTOR_SCALE_DEFAULT  1.00f   // Scale bánh Phải (FR+RR)
 /** Safety clamp — không cho scale vượt quá ±20% để tránh brick robot */
 #define MOTOR_SCALE_MIN            0.80f
@@ -186,7 +186,8 @@
  *
  * Debug: Telemetry JSON sẽ có `calDrift` (deg/s) + `calScaleL/R` để web hiển thị.
  * -------------------------------------------------------------------- */
-#define AUTO_CAL_ENABLE               1     // 0 = tắt auto-calibrate (dùng scale thủ công)
+#define AUTO_CAL_ENABLE               0     // 0 = tắt auto-calibrate (dùng scale thủ công)
+                                          // Bật =1 khi đã hiệu chỉnh cứng xong motor trim cố định
 #define AUTO_CAL_INTERVAL_MS          1000u // Đo drift mỗi 1 giây
 #define AUTO_CAL_SAVE_MS              5000u // Ghi NVS mỗi 5 giây
 #define AUTO_CAL_THRESH_DEGPS         2.0f  // Ngưỡng drift tối thiểu (deg/s) để kích hoạt

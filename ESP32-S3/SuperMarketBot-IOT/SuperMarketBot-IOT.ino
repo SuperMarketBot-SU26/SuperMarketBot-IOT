@@ -357,6 +357,20 @@ static void taskControl(void *pvParams) {
 #if USE_IMU_MPU6050
     float imuHeading = g_pose.headingRad;
     if (imuMpu6050Update(imuHeading)) {
+      // [NV-SMOOTH] Heading rate limiter: ngăn heading nhảy >2.5 rad/s
+      // Chặn spike từ IMU noise / wrap-around discontinuity.
+      static float s_prevHeading = 0.f;
+      static bool s_firstHeading = true;
+      if (!s_firstHeading) {
+        float dHeading = wpNormalizeAngle(imuHeading - s_prevHeading);
+        const float MAX_DHEADING = 2.5f * (float)SAFE_LOOP_MS * 0.001f; // rad per tick
+        if (fabsf(dHeading) > MAX_DHEADING) {
+          float clamped = s_prevHeading + copysignf(MAX_DHEADING, dHeading);
+          imuHeading = wpNormalizeAngle(clamped);
+        }
+      }
+      s_firstHeading = false;
+      s_prevHeading = imuHeading;
       g_pose.headingRad = imuHeading;
     }
 #endif

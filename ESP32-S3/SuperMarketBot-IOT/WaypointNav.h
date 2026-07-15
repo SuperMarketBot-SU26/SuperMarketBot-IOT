@@ -64,8 +64,8 @@ extern void usFilterReset();
  *   để localization ổn định trước khi tính segment mới.
  * -------------------------------------------------------------------- */
 #define WP_ACCEL_STEP_PWM_PER_TICK   30u
-#define WP_STEER_BLEND_ALPHA         0.6f
-#define WP_STRAFE_BLEND_ALPHA        0.7f
+#define WP_STEER_BLEND_ALPHA         0.40f  // Giảm từ 0.6 → steer MƯỢT hơn (ít nhảy)
+#define WP_STRAFE_BLEND_ALPHA        0.45f  // Giảm từ 0.7 → strafe MƯỢT hơn (ít nhảy)
 #define WP_HOLD_AFTER_ARRIVE_MS      200u
 
 /* ==================== Cấu trúc ===================================== */
@@ -248,14 +248,19 @@ inline void wpNavTick() {
   const int16_t  bCm   = obsBackCm();
 
   /* ── Safety hardstop — ưu tiên tuyệt đối (mọi state) ───────── */
+  /* [NV-FIX] Chỉ hardstop khi ĐÃ ALIGN xong hoặc đang đi thẳng.
+   * Cho phép hardFront=FALSE khi đang xoay align (robot cần xoay kể cả có vật trước mặt). */
 #if !WP_DISABLE_OBSTACLE_GUARD
   const bool hardFront = obsFrontBlocked();
 
   if (hardFront) {
-    /* Không can thiệp FSM — chỉ dừng motor, FSM tự xử lý ở state tương ứng */
-    botStop();
-    /* Trong state OA đang xoay → hardstop nhưng không reset FSM,
-       tick tiếp theo sẽ detect dist và chuyển state đúng */
+    // Nếu chưa align xong → cho phép tiếp tục xoay align (không chặn)
+    // Alignment chỉ dùng botRotateCCW/CW không tạo forward motion
+    if (!s_wpAligned) {
+      // Cho phép xoay align, không return
+    } else {
+      botStop();
+    }
   }
 #endif
 
@@ -311,7 +316,7 @@ inline void wpNavTick() {
 /* [NV-DBG] Khi WP_DISABLE_OBSTACLE_GUARD = 1, bỏ qua kiểm tra cảm biến
  * (chỉ dùng để test logic Pure Pursuit trong không gian rộng, không có vật cản). */
 #ifndef WP_DISABLE_OBSTACLE_GUARD
-#define WP_DISABLE_OBSTACLE_GUARD 1   // ← ĐỔI về 0 để bật lại obstacle guard
+#define WP_DISABLE_OBSTACLE_GUARD 0   // ← Bật lại obstacle guard (đã test sơ bộ)
 #endif
 
     float tx   = s_wpRoute[s_wpIndex].x;
@@ -389,7 +394,51 @@ inline void wpNavTick() {
       }
     }
 
-    /* Gặp vật → quét/lách (≥1m mới coi bên trống) */
+    /* ── Mecanum Path-Following & Alignment ────────────────────── */
+    float alpha = wpAngleDiff(s_wpSegmentHeading, g_pose.headingRad);
+
+    // Nếu lệch hướng lớn (vừa bắt đầu segment hoặc bị va quệt lệch hẳn xe), xoay tại chỗ căn chỉnh trước
+    if (!s_wpAligned) {
+      if (fabsf(alpha) > 0.052f) { // ~3 độ (giảm từ 0.087 → nhanh hơn)
+        static uint32_t lastAlignLog = 0;
+        if (now - lastAlignLog > 500u) {
+          lastAlignLog = now;
+          Serial.printf("[WP ALIGN] alpha=%.3f rad (%.1f deg) → %s, turnPwm=%u\n",
+                        alpha, alpha * 180.f / (float)M_PI,
+                        (alpha > 0 ? "CCW" : "CW"),
+                        (unsigned)((g_state.rotateBaseSpeed != 0)
+                          ? g_state.rotateBaseSpeed
+                          : wpPct2Pwm(ROBOT_HEAVY_LOAD ? 25 : 20)));
+        }
+        uint16_t turnPwm = g_state.rotateBaseSpeed;
+        if (turnPwm == 0) {
+          turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 25 : 20); // 25%/20% PWM → ~0.78 rad/s rotation
+        } else {
+          uint16_t minPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 25 : 20);
+          if (turnPwm < minPwm) {
+            turnPwm = minPwm;
+          }
+        }
+        if (alpha > 0) { botRotateCCW(turnPwm); }
+        else           { botRotateCW(turnPwm); }
+        return;  // ← KHÔNG check obstacle trong phase xoay align
+      } else {
+        s_wpAligned = true;
+        pidSpeedReset();  // Reset speed PID tránh cumulative windup từ phase alignment
+        pidYawReset();
+      }
+    }
+
+    // Nếu trong quá trình di chuyển bị lệch hướng đột ngột quá lớn (>45 độ), dừng xoay lại
+    if (fabsf(alpha) > 0.785f) { // tăng từ 0.6 rad (~35°) lên 0.785 rad (~45°)
+      s_wpAligned = false;
+      botStop();
+      pidSpeedReset();
+      return;
+    }
+
+    /* ── Obstacle Guard: CHỈ check SAU khi đã align xong ─────────── */
+    /* Cho phép xoay align kể cả có vật cản trước mặt */
 #if !WP_DISABLE_OBSTACLE_GUARD
     if (obsOaTriggered(fCm)) {
       if (oaBegin(s_wpOa, fCm, now)) {
@@ -400,58 +449,14 @@ inline void wpNavTick() {
         return;
       }
     }
-
-    /* Chưa đủ 1m phía trước → dừng, không lao vào vật (LiDAR cao hay đọc thấp) */
+    /* Chưa đủ PATH_CLEAR phía trước → dừng, không lao vào vật */
     if (!obsPathClear(fCm)) {
       botStop();
       return;
     }
 #else
-    // [NV-DBG] Đã tắt obstacle guard qua WP_DISABLE_OBSTACLE_GUARD
     (void)fCm;
 #endif
-
-    /* ── Mecanum Path-Following & Alignment ────────────────────── */
-    float alpha = wpAngleDiff(s_wpSegmentHeading, g_pose.headingRad);
-    
-    // Nếu lệch hướng lớn (vừa bắt đầu segment hoặc bị va quệt lệch hẳn xe), xoay tại chỗ căn chỉnh trước
-    if (!s_wpAligned) {
-      if (fabsf(alpha) > 0.175f) { // ~10 độ
-        static uint32_t lastAlignLog = 0;
-        if (now - lastAlignLog > 500u) {
-          lastAlignLog = now;
-          Serial.printf("[WP ALIGN] alpha=%.3f rad (%.1f deg) → %s, turnPwm=%u\n",
-                        alpha, alpha * 180.f / (float)M_PI,
-                        (alpha > 0 ? "CCW" : "CW"),
-                        (unsigned)((g_state.rotateBaseSpeed != 0)
-                          ? g_state.rotateBaseSpeed
-                          : wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10)));
-        }
-        uint16_t turnPwm = g_state.rotateBaseSpeed;
-        if (turnPwm == 0) {
-          turnPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10);
-        } else {
-          // Khóa giới hạn dưới an toàn để tránh động cơ bị kẹt moment
-          uint16_t minPwm = wpPct2Pwm(ROBOT_HEAVY_LOAD ? 15 : 10);
-          if (turnPwm < minPwm) {
-            turnPwm = minPwm;
-          }
-        }
-        if (alpha > 0) { botRotateCCW(turnPwm); }
-        else           { botRotateCW(turnPwm); }
-        return;
-      } else {
-        s_wpAligned = true;
-        pidYawReset();
-      }
-    }
-    
-    // Nếu trong quá trình di chuyển bị lệch hướng đột ngột quá lớn (>35 độ), dừng xoay lại
-    if (fabsf(alpha) > 0.6f) {
-      s_wpAligned = false;
-      botStop();
-      return;
-    }
 
     // Tính toán sai số lệch ngang (Cross-Track Error) so với đường thẳng đoạn thẳng đang đi
     float dx_p = g_pose.x - s_wpStartColX;
@@ -509,6 +514,21 @@ inline void wpNavTick() {
                                   + (1.f - WP_STEER_BLEND_ALPHA) * (float)s_wpLastSteer);
     int16_t strafeBlended = (int16_t)(WP_STRAFE_BLEND_ALPHA * (float)strafeCmd
                                    + (1.f - WP_STRAFE_BLEND_ALPHA) * (float)s_wpLastStrafe);
+
+    // [NV-SMOOTH] Accel limiter cho steer + strafe: tránh bước nhảy PWM đột ngột
+    // gây giật bánh (đặc biệt khi vừa rời alignment → cruise).
+    // Steer: ±100, giới hạn thay đổi tối đa 15/50ms = 300%/s
+    const int16_t STEER_ACCEL_MAX = 15;
+    int16_t sd = steerBlended - s_wpLastSteer;
+    if (sd >  STEER_ACCEL_MAX) steerBlended = s_wpLastSteer + STEER_ACCEL_MAX;
+    if (sd < -STEER_ACCEL_MAX) steerBlended = s_wpLastSteer - STEER_ACCEL_MAX;
+
+    // Strafe: ±60, giới hạn thay đổi tối đa 10/50ms = 200%/s
+    const int16_t STRAFE_ACCEL_MAX = 10;
+    int16_t fd = strafeBlended - s_wpLastStrafe;
+    if (fd >  STRAFE_ACCEL_MAX) strafeBlended = s_wpLastStrafe + STRAFE_ACCEL_MAX;
+    if (fd < -STRAFE_ACCEL_MAX) strafeBlended = s_wpLastStrafe - STRAFE_ACCEL_MAX;
+
     s_wpLastSteer = steerBlended;
     s_wpLastStrafe = strafeBlended;
 

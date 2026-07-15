@@ -28,11 +28,11 @@
 #define PID_SPEED_I_MAX 0.8f  // anti-windup (giới hạn tích phân, đơn vị mét)
 #define PID_SPEED_OUT_MAX ((float)PWM_MAX)
 
-/** Yaw/Heading PID — steer sang trái/phải khi bám heading (Phase 3) */
-#define PID_YAW_KP      40.f
+/** Yaw/Heading PID — P-only để tránh oscillation từ gyro derivative noise */
+#define PID_YAW_KP      15.f   // Giảm từ 20 → P-only nhẹ, mượt
 #define PID_YAW_KI      0.f
-#define PID_YAW_KD      2.f
-#define PID_YAW_I_MAX   30.f
+#define PID_YAW_KD      0.f    // Tắt D — gyro derivative noise gây oscillation
+#define PID_YAW_I_MAX   0.f    // Không dùng I
 #define PID_YAW_OUT_MAX 100.f  // cmdX range -100..100
 
 /* ==================== Struct PID =================================== */
