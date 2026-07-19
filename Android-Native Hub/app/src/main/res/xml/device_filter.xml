@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CP210x: YDLidar X3 & ESP32-S3 DevKit default UART chip (VID 0x10C4, PID 0xEA60) -->
+    <usb-device vendor-id="4292" product-id="60000" />
+    
+    <!-- CH340 / CH341: Common USB-to-Serial converter (VID 0x1A86, PID 0x7523 / 0x5523) -->
+    <usb-device vendor-id="6790" product-id="29987" />
+    <usb-device vendor-id="6790" product-id="21795" />
+    
+    <!-- FTDI standard chips (VID 0x0403, PID 0x6001) -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    
+    <!-- ESP32-S3 Native USB OTG JTAG/Serial console (VID 0x303A, PID 0x1001) -->
+    <usb-device vendor-id="12565" product-id="4102" />
+</resources>

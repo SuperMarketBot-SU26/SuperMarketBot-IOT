@@ -1,0 +1,26 @@
+# Android-Native Hub (Gradle và các file biên dịch rác)
+Android-Native Hub/.gradle/
+Android-Native Hub/build/
+Android-Native Hub/local.properties
+Android-Native Hub/.idea/
+Android-Native Hub/app/build/
+Android-Native Hub/*.apk
+Android-Native Hub/*.aar
+Android-Native Hub/app/src/main/play/
+Android-Native Hub/.cxx/
+
+# Arduino / ESP32 Build artifacts
+**/build/
+**/bin/
+**/*.o
+**/*.d
+**/*.elf
+**/*.bin
+**/*.hex
+.vscode/
+.pio/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
