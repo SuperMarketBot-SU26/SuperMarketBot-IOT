@@ -7,6 +7,10 @@
     <!-- Loại Foreground Service cụ thể cho thiết bị phần cứng gắn ngoài (yêu cầu từ Android 14+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     
+    <!-- Vượt qua bài kiểm tra bảo mật FGS connectedDevice trên máy ảo và khi chưa cắm thiết bị USB -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    
     <!-- Yêu cầu máy chủ USB Host -->
     <uses-feature android:name="android.hardware.usb.host" />
 

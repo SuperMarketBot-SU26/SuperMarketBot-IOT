@@ -44,6 +44,9 @@ dependencies {
     // USB Serial library for Android (YDLidar X3 & ESP32-S3 communication)
     implementation 'com.github.mik3y:usb-serial-for-android:3.7.0'
     
+    // OkHttp for WebSocket Client (WiFi Wireless Mode)
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.15.0'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
