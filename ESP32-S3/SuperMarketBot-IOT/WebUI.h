@@ -1380,7 +1380,7 @@ inline void webUIInit() {
   g_state.rotateSpeedMinPct = g_prefs.getUInt("cfgMinRot", 10);
   g_state.usStopCm = g_prefs.getUInt("cfgStop", 30);
   g_state.usOaDetectCm = g_prefs.getUInt("cfgDetect", 42);
-  g_state.usPathClearCm = g_prefs.getUInt("cfgClear", 48);
+  g_state.usPathClearCm = g_prefs.getUInt("cfgClear", 35);
   g_state.usPathClearStreak = g_prefs.getUInt("cfgStreak", 18);
   g_state.yawKp = g_prefs.getFloat("cfgKp", 40.0f);
   g_state.yawKi = g_prefs.getFloat("cfgKi", 0.0f);

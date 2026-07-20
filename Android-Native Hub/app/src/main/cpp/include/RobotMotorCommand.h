@@ -1,11 +1,16 @@
 /**
  * RobotMotorCommand.h
- * Motor command generator and UDP communication for ESP32
+ * Motor command generator for ESP32 — 4WD Differential Drive.
  *
- * This module handles:
- * 1. Velocity command generation (vx, vy, omega)
- * 2. Mecanum inverse kinematics
- * 3. WiFi UDP packet transmission
+ * Project dùng 4WD bánh thường (2 trái + 2 phải). Vy = 0 luôn.
+ *
+ * Module này handle:
+ * 1. Velocity command generation (vx, omega) — vy = 0
+ * 2. Differential inverse kinematics (left/right wheel speed)
+ * 3. Mecanum IK alias (back-compat) — internally routes to differential
+ *
+ * Communication: project dùng WebSocket JSON (xem MotorLink.kt).
+ * UDP packet format giữ làm LEGACY — không còn được sử dụng.
  */
 
 #ifndef ROBOT_MOTOR_COMMAND_H
@@ -25,9 +30,8 @@ constexpr float ROBOT_LENGTH = 0.25f;      // Wheelbase length
 constexpr float ROBOT_WIDTH = 0.20f;      // Wheelbase width
 constexpr float WHEEL_RADIUS = 0.0325f;   // Wheel radius (65mm diameter)
 
-// Mecanum wheel configuration (X-pattern)
-// Angles of rollers relative to wheel axis
-constexpr float MECANUM_ROLLER_ANGLE = 45.0f;  // degrees
+// 4WD differential drive — không có roller angle.
+// Mecanum roller angle (45°) giữ làm deprecated constant để back-compat.
 
 // ============================================================================
 // MOTOR COMMAND STRUCTURES
@@ -48,80 +52,74 @@ struct WheelSpeeds {
 };
 
 // ============================================================================
-// INVERSE KINEMATICS - Mecanum Wheels
+// INVERSE KINEMATICS — 4WD DIFFERENTIAL DRIVE (bánh thường)
 // ============================================================================
+//
+// Layout: 2 bánh trái (FL, RL) + 2 bánh phải (FR, RR).
+//   left_wheel  = vx + omega * W
+//   right_wheel = vx - omega * W
+// Trong đó W = half-width (wheelbase).
+//
+// Project KHÔNG dùng mecanum. Hàm [mecanumInverseKinematics] được giữ làm
+// alias cho [differentialInverseKinematics] để không break native code cũ.
 
 /**
- * Convert robot velocity (vx, vy, omega) to individual wheel velocities
- * For mecanum wheels with X-pattern configuration
+ * 4WD Differential IK (PRIMARY — dùng cho project).
  *
- * @param vx Robot forward velocity (m/s)
- * @param vy Robot strafe velocity (m/s)
- * @param omega Robot angular velocity (rad/s)
- * @param L Robot half-length (wheelbase)
- * @param W Robot half-width (wheelbase)
- * @return WheelSpeeds in rad/s for each wheel
+ * @param vx Forward velocity (m/s)
+ * @param omega Angular velocity (rad/s)
+ * @param L  unused (kept cho API compat)
+ * @param W  half-width wheelbase (m)
+ * @return WheelSpeeds (rad/s) — FL/RL = left, FR/RR = right
  */
-inline WheelSpeeds mecanumInverseKinematics(
-    float vx, float vy, float omega,
-    float L = ROBOT_LENGTH / 2.0f,
+inline WheelSpeeds differentialInverseKinematics(
+    float vx, float omega,
+    float /*L*/ = ROBOT_LENGTH / 2.0f,
     float W = ROBOT_WIDTH / 2.0f
 ) {
-    // Standard mecanum inverse kinematics
-    // Assuming wheel arrangement:
-    //   FL   FR
-    //   RL   RR
-    //
-    // Wheel layout (X-pattern):
-    //   /    \
-    //  FL    FR
-    //   \    /
-    //   /    \
-    //  RL    RR
-    //   \    /
-
-    float r = WHEEL_RADIUS;
-
-    // Calculate wheel angular velocities
-    // For X-pattern mecanum:
-    // v_fl = (vx - vy - (L + W) * omega) / r
-    // v_rl = (vx + vy - (L + W) * omega) / r
-    // v_fr = (vx + vy + (L + W) * omega) / r
-    // v_rr = (vx - vy + (L + W) * omega) / r
-
-    float sum_lw = (L + W);
+    float left  = vx + omega * W;
+    float right = vx - omega * W;
 
     WheelSpeeds ws;
-    ws.w_fl = (vx - vy - sum_lw * omega) / r;
-    ws.w_rl = (vx + vy - sum_lw * omega) / r;
-    ws.w_fr = (vx + vy + sum_lw * omega) / r;
-    ws.w_rr = (vx - vy + sum_lw * omega) / r;
-
+    ws.w_fl = left  / WHEEL_RADIUS;
+    ws.w_rl = left  / WHEEL_RADIUS;
+    ws.w_fr = right / WHEEL_RADIUS;
+    ws.w_rr = right / WHEEL_RADIUS;
     return ws;
 }
 
 /**
- * Convert wheel velocities back to robot velocity (forward kinematics)
- * Used for odometry verification
+ * [DEPRECATED] Alias cho differentialInverseKinematics (back-compat).
+ * Project đổi từ mecanum sang 4WD — function này chỉ ignore vy.
+ */
+inline WheelSpeeds mecanumInverseKinematics(
+    float vx, float /*vy*/,
+    float omega,
+    float L = ROBOT_LENGTH / 2.0f,
+    float W = ROBOT_WIDTH / 2.0f
+) {
+    return differentialInverseKinematics(vx, omega, L, W);
+}
+
+/**
+ * Forward kinematics cho 4WD differential — average 2 bánh mỗi bên.
  */
 inline VelocityCommand mecanumForwardKinematics(
     float w_fl, float w_rl, float w_fr, float w_rr,
-    float L = ROBOT_LENGTH / 2.0f,
+    float /*L*/ = ROBOT_LENGTH / 2.0f,
     float W = ROBOT_WIDTH / 2.0f
 ) {
     float r = WHEEL_RADIUS;
 
     VelocityCommand cmd;
 
-    // Average to reduce noise
-    float w_sum1 = w_fl + w_rr;
-    float w_sum2 = w_rl + w_fr;
-    float w_diff1 = w_fl - w_rr;
-    float w_diff2 = w_fr - w_rl;
+    // 4WD differential: left wheel = (w_fl + w_rl)/2, right wheel = (w_fr + w_rr)/2
+    float w_left  = (w_fl + w_rl) * 0.5f;
+    float w_right = (w_fr + w_rr) * 0.5f;
 
-    cmd.vx = (r / 4.0f) * (w_sum1 + w_sum2);
-    cmd.vy = (r / 4.0f) * (-w_sum1 + w_sum2);
-    cmd.omega = (-r / (4.0f * (L + W))) * (-w_diff1 + w_diff2);
+    cmd.vx    = r * (w_left + w_right) * 0.5f;
+    cmd.vy    = 0;   // 4WD không có lateral velocity
+    cmd.omega = (r / W) * (w_left - w_right) * 0.5f;
 
     return cmd;
 }

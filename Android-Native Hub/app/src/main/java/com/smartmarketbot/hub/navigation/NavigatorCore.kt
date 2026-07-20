@@ -152,8 +152,8 @@ class NavigatorCore(val slamEngine: SLAMEngine) {
         val finalLinear = safeVel.linearVel.coerceIn(-maxLinearVel, maxLinearVel)
         val finalAngular = safeVel.angularVel.coerceIn(-maxAngularVel, maxAngularVel)
 
-        // Send to ESP32
-        motorLink.sendVelocity(finalLinear, 0f, finalAngular)
+        // Send to ESP32 qua WebSocket JSON (4WD differential: linear + angular)
+        motorLink.sendVelocity(finalLinear, finalAngular)
         onVelocityCommand?.invoke(finalLinear, finalAngular)
     }
 

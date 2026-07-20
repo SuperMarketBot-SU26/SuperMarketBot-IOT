@@ -1,16 +1,17 @@
 /**
  * udp_socket.h
- * UDP socket wrapper cho Android NDK — Phase 5.3 Mecanum bridge.
+ * UDP socket wrapper cho Android NDK — LEGACY (không còn dùng).
  *
- * Gửi 9-byte motor command packet xuống ESP32 qua WiFi UDP (port 4210).
+ * Project đã chuyển sang WebSocket JSON (OkHttp Kotlin client).
+ * Giữ file/header để tham khảo, không build vào binary.
  *
- * Packet format (xem MotorCommandPacket::encode trong RobotMotorCommand.h):
+ * Packet format cũ (MotorCommandPacket::encode):
  *   [0]    0xAA        header
  *   [1]    0x01        cmd velocity
  *   [2-3]  vx int16 LE (mm/s)
  *   [4-5]  vy int16 LE (mm/s)
  *   [6-7]  omega int16 LE (mrad/s)
- *   [8]    XOR checksum (byte 0..7)
+ *   [8]    XOR checksum
  */
 
 #ifndef UDP_SOCKET_H

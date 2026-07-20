@@ -1,99 +1,157 @@
 package com.smartmarketbot.hub.navigation
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
 
 /**
- * MotorLink — Phase 5.3: UDP bridge xuống ESP32.
+ * MotorLink — Phase 8: WebSocket JSON bridge tới ESP32.
  *
- * Gửi 9-byte velocity command packet (vx, vy, omega) tới ESP32 qua WiFi UDP
- * (port 4210 mặc định — phải khớp với ESP32 firmware).
+ * ESP32 firmware dùng WebSocket Server (port 81, library [WebSocketsServer]).
+ * Protocol JSON (xem [CtrlJson.h] / [Config.h] của ESP32):
+ *   - `{t:"joy", x:turn, y:fwd, s:strafe}`   — joystick/manual drive
+ *   - `{t:"spd", v:pct}`                    — baseSpeed percent (0..100)
+ *   - `{t:"mode", m:N}`                     — chuyển mode (0=manual, 1=auto, 2=waypoint)
+ *   - `{t:"estop"}`                          — emergency stop
+ *   - `{t:"waypoint", x, y}`                 — goal target (Android → ESP32, optional)
  *
- * Packet format (xem [com.smartmarketbot.hub.cpp.RobotMotorCommand]):
- *   [0]    0xAA        header
- *   [1]    0x01        cmd velocity
- *   [2-3]  vx int16 LE (mm/s)
- *   [4-5]  vy int16 LE (mm/s)
- *   [6-7]  omega int16 LE (mrad/s)
- *   [8]    XOR checksum
+ * Drive convention cho 4WD differential (bánh thường):
+ *   - `y` (forward): ±100  (âm = lùi, dương = tiến)
+ *   - `x` (turn):    ±100  (âm = CCW, dương = CW)
+ *   - `s` (strafe):  ±100  — KHÔNG dùng cho 4WD thường, luôn = 0
  *
- * Dùng native (JNI) thay cho DatagramSocket Kotlin vì:
- *  - Tránh GC pause trong control loop 10Hz
- *  - Dùng chung code với native SLAM stack
+ * 4WD differential → ESP32 gọi [botDrive(turn, fwd, base)]:
+ *   left  = fwd + turn
+ *   right = fwd - turn
  *
- * Đơn vị (Phase 5.3 cũ dùng rad/s, đổi sang mm/s / mrad/s cho khớp ESP32 protocol):
- *  - vx, vy: m/s → mm/s khi gửi
- *  - omega: rad/s → mrad/s khi gửi
+ * Đơn vị Android gửi: m/s, rad/s. Conversion ở đây:
+ *   - Pure Pursuit ra (v, ω) m/s, rad/s
+ *   - Linear m/s → % PWM (0..100) của maxSpeed
+ *   - Angular rad/s → % turn dựa trên maxYawRate (rad/s)
  */
 class MotorLink(
     private val esp32Host: String = "192.168.4.1",
-    private val esp32Port: Int = 4210
+    private val esp32WsPort: Int = 81,
+    private val maxLinearMps: Float = 0.5f,   // m/s max ứng với 100% PWM
+    private val maxAngularRps: Float = 2.0f    // rad/s max ứng với 100% turn
 ) {
     companion object {
         private const val TAG = "MotorLink"
-
-        init {
-            try {
-                System.loadLibrary("native_slam")
-            } catch (e: UnsatisfiedLinkError) {
-                Log.e(TAG, "Failed to load native_slam: ${e.message}")
-            }
-        }
     }
 
-    @Volatile
-    private var open: Boolean = false
+    @Volatile private var connected = false
+    @Volatile private var webSocket: WebSocket? = null
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .pingInterval(20, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)  // WebSocket forever
+        .build()
 
-    /** Mở UDP socket native. Idempotent. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Mở WebSocket connection. Idempotent. */
     @Synchronized
     fun open() {
-        if (open) return
-        nativeOpen()
-        open = true
-        Log.i(TAG, "MotorLink opened → $esp32Host:$esp32Port")
+        if (connected) return
+        val url = "ws://$esp32Host:$esp32WsPort/"
+        val request = Request.Builder().url(url).build()
+        webSocket = client.newWebSocket(request, listener)
+        Log.i(TAG, "MotorLink connecting → $url")
     }
 
-    /** Đóng UDP socket. */
     @Synchronized
     fun close() {
-        if (!open) return
-        nativeClose()
-        open = false
+        webSocket?.close(1000, "shutdown")
+        webSocket = null
+        connected = false
+    }
+
+    /** Gửi raw JSON message. */
+    fun sendJson(json: String): Boolean {
+        val ws = webSocket ?: return false
+        if (!connected) return false
+        return ws.send(json)
     }
 
     /**
-     * Gửi velocity command.
+     * Gửi differential drive command (4WD thường).
      *
-     * @param vx    forward velocity (m/s)
-     * @param vy    strafe velocity (m/s)
-     * @param omega angular velocity (rad/s)
+     * @param linearMps forward velocity (m/s) — dương = tiến
+     * @param angularRps angular velocity (rad/s) — dương = CW
      * @return true nếu gửi thành công
      */
-    fun sendVelocity(vx: Float, vy: Float, omega: Float): Boolean {
-        if (!open) open()
-        val vxMm = (vx * 1000f).toInt()
-        val vyMm = (vy * 1000f).toInt()
-        val omegaMrad = (omega * 1000f).toInt()
-        return nativeSendVelocity(esp32Host, esp32Port, vxMm, vyMm, omegaMrad)
+    fun sendVelocity(linearMps: Float, angularRps: Float): Boolean {
+        // Map m/s → % PWM (0..100)
+        val fwdPct = ((linearMps / maxLinearMps) * 100f).coerceIn(-100f, 100f).toInt()
+        // Map rad/s → % turn (0..100)
+        val turnPct = ((angularRps / maxAngularRps) * 100f).coerceIn(-100f, 100f).toInt()
+
+        val msg = """{"t":"joy","x":$turnPct,"y":$fwdPct,"s":0}"""
+        return sendJson(msg)
     }
 
-    /** Emergency stop. */
-    fun stop() = sendVelocity(0f, 0f, 0f)
-
-    /** Tính Mecanum IK ở native (cho debug/telemetry). Trả về [w_fl, w_rl, w_fr, w_rr] (rad/s). */
-    fun mecanumIK(vx: Float, vy: Float, omega: Float): FloatArray {
-        return nativeMecanumIK(vx, vy, omega)
+    /** Emergency stop — gửi joystick (0,0,0) + estop flag. */
+    fun stop(): Boolean {
+        sendJson("""{"t":"joy","x":0,"y":0,"s":0}""")
+        return sendJson("""{"t":"estop"}""")
     }
 
-    // ----- JNI -----
-    private external fun nativeOpen()
-    private external fun nativeClose()
-    private external fun nativeSendVelocity(
-        host: String,
-        port: Int,
-        vxMmS: Int,
-        vyMmS: Int,
-        omegaMradS: Int
-    ): Boolean
+    /**
+     * Set baseSpeed percent (ESP32 → PWM_MAX).
+     */
+    fun setSpeed(pct: Int): Boolean {
+        val p = pct.coerceIn(0, 100)
+        return sendJson("""{"t":"spd","v":$p}""")
+    }
 
-    private external fun nativeMecanumIK(vx: Float, vy: Float, omega: Float): FloatArray
+    /**
+     * Chuyển ESP32 mode.
+     * @param mode 0 = MANUAL (Android điều khiển), 1 = AUTO, 2 = WAYPOINT
+     */
+    fun setMode(mode: Int): Boolean {
+        val m = mode.coerceIn(0, 2)
+        return sendJson("""{"t":"mode","m":$m}""")
+    }
+
+    /**
+     * Gửi waypoint goal cho ESP32 nếu muốn ESP32 tự navigate (mode 2).
+     * @param x target X (m)
+     * @param y target Y (m)
+     */
+    fun sendWaypoint(x: Float, y: Float): Boolean {
+        return sendJson("""{"t":"waypoint","x":$x,"y":$y}""")
+    }
+
+    fun isConnected(): Boolean = connected
+
+    // ----- Listener -----
+    private val listener = object : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            connected = true
+            Log.i(TAG, "WebSocket OPEN to ESP32")
+            // Khi connect, đảm bảo mode = MANUAL (0) để nhận joy cmd
+            sendJson("""{"t":"mode","m":0}""")
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            Log.d(TAG, "RX: $text")
+            // TODO: parse telemetry nếu cần
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            connected = false
+            Log.w(TAG, "WebSocket closing: $code $reason")
+            webSocket.close(1000, null)
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            connected = false
+            Log.e(TAG, "WebSocket failure: ${t.message}")
+        }
+    }
 }

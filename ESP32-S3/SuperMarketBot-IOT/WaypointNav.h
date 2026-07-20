@@ -45,12 +45,8 @@ extern void usFilterReset();
 #define WP_ARRIVE_THRESH_M    0.12f   // Ngưỡng "đến nơi" (m)
 #define WP_STEER_K            55.f    // Hệ số steer Pure Pursuit
 #define WP_CRUISE_SPEED_PCT   (ROBOT_HEAVY_LOAD ? 50 : 40)
-#ifndef LOC_PWM_TO_MPS
-// Calibration: do thực tế robot đi bao xa khi chạy 1 giây ở 100% PWM.
-// Nếu robot đi quá xa (dist sai), giảm giá trị này xuống.
-// Giá trị mặc định 0.0015 = 100% PWM → ~0.15 m/s (tuỳnh theo thực tế robot chậm).
-#define LOC_PWM_TO_MPS  0.0015f
-#endif
+
+
 #define WP_SLOW_RADIUS_M      0.4f    // Bán kính giảm tốc (m)
 #define WP_SLOW_SPEED_PCT     (ROBOT_HEAVY_LOAD ? 35 : 28)
 #define WP_MAX_STEER_RAD      1.2f    // ~70° — quá lệch thì xoay tại chỗ trước

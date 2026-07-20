@@ -34,7 +34,11 @@
 #endif
 
 #ifndef LOC_PWM_TO_MPS
-#define LOC_PWM_TO_MPS  0.0040f  // m/s trên 1% PWM (ước lượng: 100% → 0.40 m/s)
+// Calibration hệ số tốc độ: 100% PWM → ? m/s
+// Đo thực tế: cho robot chạy thẳng 1 giây, đo khoảng cách thực.
+// Nếu pose drift quá xa → giảm giá trị này.
+// Ví dụ: robot thực tế chạy ~0.15m/s ở 100% PWM → 0.0015
+#define LOC_PWM_TO_MPS  0.0015f
 #endif
 
 struct Pose2D {

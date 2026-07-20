@@ -12,6 +12,7 @@
 
 #define LOG_TAG "SLAM_JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static SLAMEngine* g_slamEngine = nullptr;
@@ -181,8 +182,11 @@ Java_com_smartmarketbot_hub_navigation_MotorLink_nativeClose(
 }
 
 /**
- * Gửi velocity command packet (vx_mm/s, vy_mm/s, omega_mrad/s) tới ESP32.
- * Packet format: MotorCommandPacket::encode (9 bytes).
+ * [LEGACY] Gửi 9-byte UDP velocity packet (vx_mm/s, vy_mm/s, omega_mrad/s) tới ESP32.
+ *
+ * KHÔNG còn được gọi từ Kotlin — project đã chuyển sang WebSocket JSON
+ * (xem MotorLink.kt). JNI này giữ làm stub để tránh break build nếu có
+ * native code khác reference.
  */
 JNIEXPORT jboolean JNICALL
 Java_com_smartmarketbot_hub_navigation_MotorLink_nativeSendVelocity(
@@ -194,32 +198,10 @@ Java_com_smartmarketbot_hub_navigation_MotorLink_nativeSendVelocity(
     jint vyMmS,
     jint omegaMradS
 ) {
-    if (!g_motorUdp || !g_motorUdp->isOpen()) {
-        LOGE("MotorLink: socket not open");
-        return JNI_FALSE;
-    }
-
-    // Encode packet (clamp int16)
-    auto clamp16 = [](jint v) -> int16_t {
-        if (v > 32767) return 32767;
-        if (v < -32768) return -32768;
-        return static_cast<int16_t>(v);
-    };
-
-    auto pkt = MotorCommandPacket::encode(
-        clamp16(vxMmS),
-        clamp16(vyMmS),
-        clamp16(omegaMradS)
-    );
-
-    const char* hostStr = env->GetStringUTFChars(host, nullptr);
-    bool ok = g_motorUdp->sendTo(pkt.data(), pkt.size(), hostStr, port);
-    env->ReleaseStringUTFChars(host, hostStr);
-
-    if (!ok) {
-        LOGE("MotorLink: sendTo %s:%d failed", hostStr, port);
-    }
-    return ok ? JNI_TRUE : JNI_FALSE;
+    LOGW("MotorLink.nativeSendVelocity: legacy UDP path, project dùng WebSocket JSON");
+    (void)env; (void)host; (void)port;
+    (void)vxMmS; (void)vyMmS; (void)omegaMradS;
+    return JNI_FALSE;
 }
 
 /**

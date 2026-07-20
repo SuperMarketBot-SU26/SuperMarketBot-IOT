@@ -1,6 +1,9 @@
 /**
  * PurePursuit.h
- * Path Tracking Controller for Mecanum Wheels
+ * Path Tracking Controller for 4WD Differential Drive (non-holonomic)
+ *
+ * Project dùng 4WD bánh thường (không mecanum). Controller chỉ output
+ * (vx, omega), vy luôn = 0.
  */
 
 #ifndef PURE_PURSUIT_H
@@ -104,7 +107,7 @@ public:
 
         // Forward velocity (maintain current or target speed)
         cmd.vx = speed * std::cos(cmd.omega * 0.1f);  // Slight speed reduction on turns
-        cmd.vy = 0;  // Mecanum: lateral movement handled by omega
+        cmd.vy = 0;  // 4WD differential: không có lateral (vy = 0 luôn)
 
         return cmd;
     }
