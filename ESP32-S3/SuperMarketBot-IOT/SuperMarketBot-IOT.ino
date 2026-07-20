@@ -36,7 +36,8 @@
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
-#include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
+// YDLIDAR X3 driver đã chuyển sang Android-Native Hub
+// #include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -94,7 +95,7 @@ RobotState g_state = {
   .rotateSpeedMinPct = 10,
   .usStopCm = 30,
   .usOaDetectCm = 42,
-  .usPathClearCm = 48,
+  .usPathClearCm = 35,            // Hành lang hẹp: giảm từ 48→35cm để tránh OA trigger liên tục
   .usPathClearStreak = 18,
   .yawKp = 40.0f,
   .yawKi = 0.0f,
@@ -112,215 +113,166 @@ SemaphoreHandle_t g_mqttMutex;
 volatile int8_t g_motorDir[4] = {0, 0, 0, 0};
 
 /* =====================================================================
- *  Tự hành (LiDAR trước/sau): CRUISE → chặn → STOP_HOLD → quét tìm hướng
- *  trống (xoay có ramp, CW rồi CCW tới khi đủ xa phía trước) → hãm nhẹ
- *  → CRUISE. SR04 bật thì thêm bẻ cạnh. (SLAM / bản đồ: sau này thay FSM.)
+ *  Tự hành (AUTO MODE) — Reactive obstacle avoidance, đơn giản và rõ ràng.
+ *
+ *  3 trạng thái:
+ *    AN_CRUISE       — đi thẳng giữ heading bằng IMU
+ *    AN_BACKUP       — lùi khi sát vật trước (front ≤ stopCm)
+ *    AN_SPIN_SEARCH  — xoay tại chỗ CW cho tới khi front đủ xa
+ *
+ *  Mỗi trạng thái đều giữ heading bằng IMU + PID Yaw khi có movement.
+ *  Đây là bản viết lại đơn giản, thay thế toàn bộ FSM phức tạp trước.
  * =================================================================== */
 enum AutoNavFsm : uint8_t {
   AN_CRUISE = 0,
-  AN_BACKUP,   // Lùi khi OA blocked hoàn toàn
-  AN_SPIN_SEARCH // Xoay tìm hướng thoát khi kẹt 4 phía
+  AN_BACKUP,
+  AN_SPIN_SEARCH
 };
 
+static AutoNavFsm s_auto_fsm = AN_CRUISE;
+static uint32_t    s_auto_t0 = 0;
+volatile uint8_t   g_autoFsmState = 0;
+volatile uint32_t  s_settleUntilMs = 0;
+
+/* Biến OA cũ — giữ để tương thích với WebUI (nếu có telemetry field liên quan),
+   nhưng autoNavigateAvoidance() đơn giản mới KHÔNG dùng đến nó nữa. */
 static OaContext s_autoOa;
 
-static AutoNavFsm s_auto_fsm = AN_CRUISE;
-volatile uint8_t g_autoFsmState = 0;  /* expose → WebSocket field "afs" */
-static uint32_t s_auto_t0 = 0;
-volatile uint32_t s_settleUntilMs = 0; // Trễ ổn định sau khi đổi hướng/trạng thái
-/* Phase 1 — Stuck detection */
-static uint32_t s_stuckCheckMs = 0;
-static float    s_stuckLastDist = 0.f;
-static uint8_t  s_stuckCount = 0;
-static RobotMode s_ctrl_prev_mode = MODE_MANUAL;
-
+/** Lấy PWM cruise từ cấu hình. (extern trong LocalObstacleAvoid.h) */
 uint16_t autoSpeedPwm() {
   uint16_t s = g_state.autoBaseSpeed;
   if (s == 0) s = g_state.baseSpeed;
-  uint16_t cap = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_CRUISE_SPEED_PCT / 100u);
+  uint16_t cap = (uint16_t)((uint32_t)PWM_MAX * AUTO_CRUISE_SPEED_PCT / 100u);
   if (s > cap) s = cap;
-  uint16_t lo = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_MIN_PWM_FRAC / 100u);
+  uint16_t lo = (uint16_t)((uint32_t)PWM_MAX * AUTO_MIN_PWM_FRAC / 100u);
   if (s < lo) s = lo;
   return s;
 }
 
-/* Timestamp cho PID CRUISE */
-static uint32_t s_pidLastMs = 0;
-
+/** AUTO mode handler — đơn giản: giữ heading IMU + né vật cản US. */
 static void autoNavigateAvoidance() {
-  const uint16_t spd = autoSpeedPwm();
   const uint32_t now = millis();
-  const int16_t f = obsFrontCm();
-  const int16_t b = obsBackCm();
+  const int16_t  f   = obsFrontCm();
+  const uint16_t spd = autoSpeedPwm();
 
-  /* Telemetry: 0=CRUISE, 10+=OA sub-state */
-  g_autoFsmState = (s_autoOa.state == OA_IDLE) ? (uint8_t)s_auto_fsm
-                   : (uint8_t)(10 + (uint8_t)s_autoOa.state);
-
-  /* ── Local OA đang chạy (quét → lách → vượt) ─────────────────── */
-  if (s_autoOa.state != OA_IDLE) {
-    OaTickResult r = oaTick(s_autoOa, f, now);
-    if (r == OA_RES_DONE) {
-      s_auto_fsm = AN_CRUISE;
-      s_settleUntilMs = now + 450;
-      usFilterReset();
-      s_autoOa.cruiseHeading = g_pose.headingRad;
-      // [P0-2 FIX] Reset Yaw PID khi quay về CRUISE để CRUISE heading lock bắt đầu sạch
-      pidYawReset();
-      Serial.println(F("[AUTO] OA done — cruise (duong truoc du xa). Settle 450ms."));
-    } else if (r == OA_RES_BLOCKED) {
-      s_auto_fsm = AN_BACKUP;
-      s_auto_t0 = now;
-      oaReset(s_autoOa); // Reset s_autoOa state to OA_IDLE immediately so we can execute AN_BACKUP!
-      Serial.println(F("[AUTO] OA blocked — backup."));
-    }
-    return;
-  }
+  /* Expose FSM ra WebSocket: 0=CRUISE, 1=BACKUP, 2=SPIN_SEARCH */
+  g_autoFsmState = (uint8_t)s_auto_fsm;
 
   switch (s_auto_fsm) {
     case AN_CRUISE: {
-      if (s_settleUntilMs > 0) {
-        if (now < s_settleUntilMs) {
-          botStop();
-          pidSpeedReset();
-          break;
-        } else {
-          s_settleUntilMs = 0;
-          Serial.println(F("[AUTO] Settle delay done — bat dau di tiep."));
-        }
-      }
-
+      /* 1) Vật cản quá gần → dừng + lùi */
       if (obsFrontBlocked()) {
-        Serial.println(F("[AUTO] Phia truoc bi chan sat nut -> Chuyen sang AN_BACKUP de lui lai."));
         botStop();
-        pidSpeedReset();
+        pidYawReset();
         s_auto_fsm = AN_BACKUP;
-        s_auto_t0 = now;
+        s_auto_t0  = now;
+        Serial.println(F("[AUTO] Front blocked → BACKUP"));
         break;
       }
 
-      /* Gặp vật → quét 2 bên, cần ≥1m mới lách (LocalObstacleAvoid.h) */
+      /* 2) Vật cản trong vùng detect (≤ usOaDetectCm) → xoay tìm hướng thoát */
       if (obsOaTriggered(f)) {
-        s_autoOa.cruiseHeading = g_pose.headingRad;
-        if (oaBegin(s_autoOa, f, now)) {
-          return;
-        }
+        botStop();
+        pidYawReset();
+        s_auto_fsm = AN_SPIN_SEARCH;
+        s_auto_t0  = now;
+        Serial.println(F("[AUTO] Obstacle detected → SPIN_SEARCH"));
+        break;
       }
 
-      /* Chỉ tiến khi phía trước ≥ PATH_CLEAR_MIN_CM (1m) ổn định */
-      if (!oaCruiseForward(s_autoOa, f, spd)) {
-        if (!obsPathClear(f)) {
-          s_autoOa.cruiseHeading = g_pose.headingRad;
-          oaBegin(s_autoOa, f, now);
+      /* 3) Đường trống → đi thẳng + giữ heading */
+      {
+        static float s_targetHeading = 0.f;
+        static bool  s_haveHeading   = false;
+
+        /* Heading đã bị reset khi vừa chuyển sang AUTO hoặc sau OA → lấy lại 1 lần */
+        if (!s_haveHeading) {
+          s_targetHeading = g_pose.headingRad;
+          s_haveHeading   = true;
         }
+
+        /* Nếu drift quá lớn (≥ 25°) do OA → re-lock heading */
+        float dh = wpNormalizeAngle(g_pose.headingRad - s_targetHeading);
+        if (fabsf(dh) > 0.436f) {  // 25°
+          s_targetHeading = g_pose.headingRad;
+          pidYawReset();
+        }
+
+        float dt_s = (float)SAFE_LOOP_MS / 1000.f;
+        float steer = pidYawCompute(s_targetHeading, g_pose.headingRad, dt_s);
+        steer = constrain(steer, -85.f, 85.f);
+        botDrive((int16_t)steer, 100, spd);
       }
       break;
     }
+
     case AN_BACKUP: {
-      /* Lùi an toàn: kiểm tra Luna sau trước khi lùi */
-      if (obsRearBlocked()) {
-        /* Sau cũng chặn -> Chuyển sang xoay tại chỗ tìm hướng thoát! */
-        s_auto_fsm = AN_SPIN_SEARCH;
-        s_auto_t0 = now;
-        botStop();
-        Serial.println(F("[AUTO] Sau cung bi chan -> Xoay tai cho tim huong thoat."));
-        break;
+      /* Lùi thẳng (giữ heading) trong AUTO_BACKUP_REVERSE_MS */
+      {
+        static float s_backHeading = 0.f;
+        static bool  s_backHave    = false;
+        if (!s_backHave) {
+          s_backHeading = g_pose.headingRad;
+          s_backHave    = true;
+          pidYawReset();
+        }
+        float dt_s = (float)SAFE_LOOP_MS / 1000.f;
+        float steer = pidYawCompute(s_backHeading, g_pose.headingRad, dt_s);
+        steer = constrain(steer, -85.f, 85.f);
+        botDrive((int16_t)steer, -100, spd);
       }
-      uint16_t bkSpd = g_state.swerveBaseSpeed;
-      if (bkSpd == 0) bkSpd = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)AUTO_BACKUP_SPEED_PCT / 100u);
-      botBackward(bkSpd);
+
       if (now - s_auto_t0 >= AUTO_BACKUP_REVERSE_MS) {
         botStop();
-        oaReset(s_autoOa);
-        usFilterReset();
-        s_auto_fsm = AN_CRUISE;
-        s_auto_t0 = now;
-        s_settleUntilMs = now + 450;
-        s_stuckCount = 0;
-        s_autoOa.cruiseHeading = g_pose.headingRad;
-        pidYawReset();
-        Serial.println(F("[AUTO] Backup done -> Settle 450ms."));
+        s_auto_fsm = AN_SPIN_SEARCH;
+        s_auto_t0  = now;
+        Serial.println(F("[AUTO] Backup done → SPIN_SEARCH"));
       }
       break;
     }
+
     case AN_SPIN_SEARCH: {
-      // Xoay tại chỗ tìm hướng thoát
-      uint16_t spinSpd = g_state.swerveBaseSpeed;
-      if (spinSpd == 0) spinSpd = oaPct2Pwm(OA_SCAN_SPEED_PCT);
-      botRotateCW(spinSpd);
-      // Nếu hướng trước mặt đã thông thoáng
+      /* Xoay CW cho tới khi đường trước thông (≥ usPathClearCm) hoặc hết timeout */
+      botRotateCW(oaPct2Pwm(OA_SCAN_SPEED_PCT));
+
       if (obsPathClear(f)) {
         botStop();
-        oaReset(s_autoOa);
-        usFilterReset();
         s_auto_fsm = AN_CRUISE;
-        s_auto_t0 = now;
-        s_settleUntilMs = now + 450;
-        s_autoOa.cruiseHeading = g_pose.headingRad;
+        /* Reset heading lock cho cruise mới */
         pidYawReset();
-        Serial.println(F("[AUTO] Tim thay loi thoat khi xoay quet -> Settle 450ms."));
+        Serial.println(F("[AUTO] Found clear path → CRUISE"));
       }
-      // Giới hạn xoay tối đa 6s tránh xoay vòng vô hạn nếu bị nhốt kín
       if (now - s_auto_t0 >= 6000u) {
         botStop();
-        oaReset(s_autoOa);
-        usFilterReset();
-        s_auto_fsm = AN_CRUISE;
-        s_auto_t0 = now;
-        s_settleUntilMs = now + 450;
-        s_autoOa.cruiseHeading = g_pose.headingRad;
-        pidYawReset();
-        Serial.println(F("[AUTO] Het 6s spin search -> Settle 450ms."));
+        s_auto_fsm = AN_BACKUP;
+        s_auto_t0  = now;
+        Serial.println(F("[AUTO] Spin timeout 6s → BACKUP"));
       }
       break;
-    }
-    default:
-      s_auto_fsm = AN_CRUISE;
-      break;
-  }
-
-  /* ── Stuck detection (chạy CRUISE mà không tiến được) ───────────── */
-  if (s_auto_fsm == AN_CRUISE && g_state.mode == MODE_AUTO) {
-    if (now - s_stuckCheckMs >= STUCK_CHECK_INTERVAL_MS) {
-      s_stuckCheckMs = now;
-      float currDist = g_state.distFL + g_state.distFR;
-      float currentPwm = (float)autoSpeedPwm();
-      if (currentPwm >= (float)STUCK_MIN_PWM) {
-        float moved = currDist - s_stuckLastDist;
-        if (moved < 0.f) moved = -moved;
-        if (moved < 0.001f) {
-          s_stuckCount++;
-          if (s_stuckCount >= STUCK_THRESHOLD) {
-            s_stuckCount = 0;
-            s_auto_fsm = AN_BACKUP;
-            s_auto_t0 = now;
-            botStop();
-          }
-        } else {
-          s_stuckCount = 0;
-        }
-      }
-      s_stuckLastDist = currDist;
     }
   }
 }
 
 /* =====================================================================
- *  TASK CORE 1 — Điều khiển real-time (cảm biến + động cơ)
- *  Ưu tiên cao để đảm bảo tính thời gian thực
+ *  TASK CORE 1 — Điều khiển real-time (cảm biến + IMU + động cơ)
+ *
+ *  Quy trình mỗi tick (SAFE_LOOP_MS):
+ *    1. Đọc IMU (heading), LiDAR, US.
+ *    2. Gọi odomUpdate() mỗi ODOM_PERIOD_MS → locUpdate() tích phân pose.
+ *    3. Tùy mode:
+ *       - MODE_MANUAL  : lái thẳng từ joystick (cmdX/cmdY). KHÔNG heading lock.
+ *                        Nếu cmdY != 0 và cmdX == 0 → bật heading lock nhẹ cho dễ lái.
+ *       - MODE_AUTO    : autoNavigateAvoidance() — 3 state CRUISE/BACKUP/SPIN_SEARCH.
+ *       - MODE_WAYPOINT: wpNavTick() — Pure Pursuit + OA + Align.
  * =================================================================== */
 static void taskControl(void *pvParams) {
   const TickType_t xPeriod = pdMS_TO_TICKS(SAFE_LOOP_MS);
   TickType_t xLastWake = xTaskGetTickCount();
 
   TickType_t odomTick = xTaskGetTickCount();
-  TickType_t usTick   = xTaskGetTickCount();
-
-  static bool s_headingLocked = false;
-  static float s_targetHeading = 0.f;
 
   while (true) {
-    /* 12s đầu: ép MANUAL — tránh MQTT/backend hoặc mode cũ khiến robot tự chạy */
+    /* ── Guard: 12s đầu luôn MANUAL, không cho tự chạy ───────────── */
     if (millis() < BOOT_GUARD_MS) {
       if (g_state.mode != MODE_MANUAL) {
         robotForceManualStop();
@@ -330,156 +282,105 @@ static void taskControl(void *pvParams) {
       }
     }
 
-    if (g_state.mode == MODE_AUTO && s_ctrl_prev_mode != MODE_AUTO) {
-      g_state.estop = false;
-      s_auto_fsm = AN_CRUISE;
-      s_auto_t0 = millis();
-      s_pidLastMs = millis();
-      s_stuckCount = 0;
-      oaReset(s_autoOa);
-      s_autoOa.cruiseHeading = g_pose.headingRad;
-      pidSpeedReset();
+    /* ── Transition callbacks ─────────────────────────────────────── */
+    static RobotMode s_prevMode = MODE_MANUAL;
+    if (g_state.mode != s_prevMode) {
+      /* Vừa chuyển mode → dừng motor + reset heading lock + PID */
+      botStop();
       pidYawReset();
-      usFilterReset();
-      s_settleUntilMs = millis() + 450;
-      /* Báo backend chuyển mode */
-      strncpy((char *)g_mqttPendingStatus, "auto", sizeof(g_mqttPendingStatus) - 1);
-      g_mqttStatusPending = true;
+      s_prevMode = g_state.mode;
+      Serial.printf("[Mode] Switched → %s\n",
+        g_state.mode == MODE_MANUAL ? "MANUAL" :
+        g_state.mode == MODE_AUTO ? "AUTO" : "WAYPOINT");
     }
-    if (g_state.mode != MODE_AUTO && s_ctrl_prev_mode == MODE_AUTO) {
-      s_auto_fsm = AN_CRUISE;
-      oaReset(s_autoOa);
-      strncpy((char *)g_mqttPendingStatus, "manual", sizeof(g_mqttPendingStatus) - 1);
-      g_mqttStatusPending = true;
-    }
-    s_ctrl_prev_mode = g_state.mode;
 
+    /* ── 1) IMU → heading ─────────────────────────────────────────── */
 #if USE_IMU_MPU6050
-    float imuHeading = g_pose.headingRad;
-    if (imuMpu6050Update(imuHeading)) {
-      // [NV-SMOOTH] Heading rate limiter: ngăn heading nhảy >2.5 rad/s
-      // Chặn spike từ IMU noise / wrap-around discontinuity.
-      static float s_prevHeading = 0.f;
-      static bool s_firstHeading = true;
-      if (!s_firstHeading) {
-        float dHeading = wpNormalizeAngle(imuHeading - s_prevHeading);
-        const float MAX_DHEADING = 2.5f * (float)SAFE_LOOP_MS * 0.001f; // rad per tick
-        if (fabsf(dHeading) > MAX_DHEADING) {
-          float clamped = s_prevHeading + copysignf(MAX_DHEADING, dHeading);
-          imuHeading = wpNormalizeAngle(clamped);
+    {
+      float imuHeading = g_pose.headingRad;
+      if (imuMpu6050Update(imuHeading)) {
+        // Heading rate limiter — chống spike từ IMU noise.
+        static float s_prevHeading = 0.f;
+        static bool  s_firstHeading = true;
+        if (!s_firstHeading) {
+          float dHeading = wpNormalizeAngle(imuHeading - s_prevHeading);
+          const float MAX_DHEADING = 2.5f * (float)SAFE_LOOP_MS * 0.001f;
+          if (fabsf(dHeading) > MAX_DHEADING) {
+            float clamped = s_prevHeading + copysignf(MAX_DHEADING, dHeading);
+            imuHeading = wpNormalizeAngle(clamped);
+          }
         }
+        s_firstHeading = false;
+        s_prevHeading  = imuHeading;
+        g_pose.headingRad = imuHeading;
       }
-      s_firstHeading = false;
-      s_prevHeading = imuHeading;
-      g_pose.headingRad = imuHeading;
     }
 #endif
 
+    /* ── 2) Sensors: LiDAR + US ───────────────────────────────────── */
 #if USE_LIDAR_HARDWARE
     sensorsPollLidar();
 #endif
-
     sensorsPollUS();
 
+    /* ── 3) Odom + Localization ───────────────────────────────────── */
     if ((xTaskGetTickCount() - odomTick) >= pdMS_TO_TICKS(ODOM_PERIOD_MS)) {
       odomUpdate();
       odomTick = xTaskGetTickCount();
     }
 
+    /* ── 4) EStop ─────────────────────────────────────────────────── */
     if (g_state.estop) {
       botStop();
-      wpNavStop();   // Cũng abort waypoint nav nếu đang chạy
+      wpNavStop();
       if (g_state.cmdX == 0 && g_state.cmdY == 0) g_state.estop = false;
-    } else if (g_state.mode == MODE_WAYPOINT) {
-      wpNavTick();
-    } else if (g_state.mode == MODE_AUTO) {
-      autoNavigateAvoidance();
-    } else {
-      if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
-        botStop();
-        s_headingLocked = false;
-      } else {
-        // Khóa hướng (Heading Lock) tự động bằng IMU khi đi thẳng / đi ngang
-        if (g_imuEnabled && (g_state.cmdY != 0 || g_state.cmdStrafe != 0) && g_state.cmdX == 0) {
-          if (!s_headingLocked) {
-            s_targetHeading = g_pose.headingRad;
-            pidYawReset();
-            s_headingLocked = true;
-          }
-          float dt_s = (float)SAFE_LOOP_MS / 1000.f;
-          float yawCorrection = pidYawCompute(s_targetHeading, g_pose.headingRad, dt_s);
-          // [NV1c FIX] Tăng lực bù lái từ ±35 lên ±85 để chống lệch cơ khí mạnh.
-          // Khi scale trái/phải đã cân (NV1a) thì steer thường chỉ cần ±20-30,
-          // nhưng khi chưa calibrate (scale=1.0 cả 2 bên) robot có thể lệch
-          // 5-10° → cần steer ±70-85 để bù kịp.
-          int32_t steer = (int32_t)constrain(yawCorrection, -85, 85);
+      vTaskDelayUntil(&xLastWake, xPeriod);
+      continue;
+    }
 
-          // [NV1c FIX] Auto-calibrate motor trim dựa trên yaw drift.
-          // Chỉ chạy khi đi thẳng (không xoay, không trượt ngang) để tránh
-          // drift giả do rotation tạo ra.
-          if (g_state.cmdStrafe == 0) {
-            static uint32_t lastTrimMs = 0;
-            static float prevHeading = 0.f;
-            uint32_t nowTrim = millis();
-            if (nowTrim - lastTrimMs >= AUTO_CAL_INTERVAL_MS) {
-              motorTrimTick(nowTrim, g_pose.headingRad, prevHeading);
-              prevHeading = g_pose.headingRad;
-              lastTrimMs = nowTrim;
-            }
-          }
-
-          botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, steer, g_state.baseSpeed);
+    /* ── 5) Mode dispatch ─────────────────────────────────────────── */
+    switch (g_state.mode) {
+      case MODE_MANUAL: {
+        if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
+          botStop();
         } else {
-          s_headingLocked = false;
-          botDriveMecanum(g_state.cmdStrafe, g_state.cmdY, g_state.cmdX, g_state.baseSpeed);
+          /* Lái thẳng tự do. Có heading lock nhẹ khi cmdY!=0 và cmdX==0
+             để robot đi thẳng không bị lệch do sai lệch cơ khí. */
+          static float s_tgtH = 0.f;
+          static bool  s_have = false;
+          if (g_imuEnabled && g_state.cmdY != 0 && g_state.cmdX == 0 && g_state.cmdStrafe == 0) {
+            if (!s_have) {
+              s_tgtH = g_pose.headingRad;
+              pidYawReset();
+              s_have = true;
+            }
+            /* Nếu drift quá 25° → re-lock */
+            float dh = wpNormalizeAngle(g_pose.headingRad - s_tgtH);
+            if (fabsf(dh) > 0.436f) {
+              s_tgtH = g_pose.headingRad;
+              pidYawReset();
+            }
+            float dt_s = (float)SAFE_LOOP_MS / 1000.f;
+            float steer = constrain(pidYawCompute(s_tgtH, g_pose.headingRad, dt_s), -85.f, 85.f);
+            botDrive((int16_t)steer, g_state.cmdY, g_state.baseSpeed);
+          } else {
+            s_have = false;
+            botDrive(g_state.cmdX, g_state.cmdY, g_state.baseSpeed);
+          }
         }
+        break;
+      }
+
+      case MODE_AUTO: {
+        autoNavigateAvoidance();
+        break;
+      }
+
+      case MODE_WAYPOINT: {
+        wpNavTick();
+        break;
       }
     }
-
-#if USE_YDLIDAR_X3
-    // ── YDLidar X3 — đọc bytes mới từ Serial1 vào buffer ───────
-    // Chạy mỗi SAFE_LOOP_MS (50ms) để giữ CPU nhẹ; X3 tự buffer trong hardware.
-    x3Poll();
-
-    // Mỗi ~200ms, nếu có scan mới → lấy min trong cung trước (±45°)
-    // và cập nhật g_state.lidarFront (đơn vị cm) để fusion với HC-SR04.
-    static uint32_t lastX3Front = 0;
-    if (g_x3Scan.scanReady && (millis() - lastX3Front > 200u)) {
-      lastX3Front = millis();
-      g_x3Scan.scanReady = false;
-
-      uint16_t minMm = x3MinInArc(0.0f, 45.0f);  // trước ±45°
-      if (minMm != 0xFFFF && minMm > 0) {
-        uint16_t cm = minMm / 10u;
-        if (cm < LIDAR_MAX_CM && cm >= LIDAR_MIN_VALID_CM) {
-          g_state.lidarFront = (int16_t)cm;
-          g_state.lidarLastUpdateMs = millis();
-        }
-      }
-      // Sau ±45° (chỉ tham khảo, không dùng để stop)
-      uint16_t backMm = x3MinInArc(180.0f, 45.0f);
-      if (backMm != 0xFFFF && backMm > 0) {
-        uint16_t cm = backMm / 10u;
-        if (cm < LIDAR_MAX_CM && cm >= LIDAR_MIN_VALID_CM) {
-          g_state.lidarBack = (int16_t)cm;
-        }
-      }
-    }
-
-    // ── Publish scan lên MQTT cho BE/SLAM (mỗi ~500ms) ──────────
-    // Format mong muốn: topic "robot/<code>/scan" với JSON {ts, seq, points:[{a,d}]}
-    // Hiện tại skeleton chỉ in log để verify parser hoạt động; phần publish qua MQTT
-    // cần thêm cờ `g_mqttScanPending` riêng + copy buffer để tránh race với parser
-    // (parser chạy cùng taskControl, nên publish có thể đặt thẳng ở đây).
-    static uint32_t lastX3Pub = 0;
-    if (g_x3Scan.count > 0 && (millis() - lastX3Pub > 500u)) {
-      lastX3Pub = millis();
-      Serial.printf("[X3] scanSeq=%lu, points=%u, last=%lu ms ago\n",
-                    (unsigned long)g_x3Scan.scanSeq,
-                    (unsigned)g_x3Scan.count,
-                    (unsigned long)(millis() - g_x3Scan.lastScanMs));
-    }
-#endif
 
     vTaskDelayUntil(&xLastWake, xPeriod);
   }
@@ -571,9 +472,8 @@ void setup() {
   odomInit();
   locInit();
   imuMpu6050Init();
-#if USE_YDLIDAR_X3
-  x3Init();   // Khởi tạo YDLidar X3 (UART, start scan)
-#endif
+  // YDLIDAR X3: Đã chuyển sang Android-Native Hub
+  // x3Init() không còn cần thiết - LiDAR kết nối trực tiếp với Tablet
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();

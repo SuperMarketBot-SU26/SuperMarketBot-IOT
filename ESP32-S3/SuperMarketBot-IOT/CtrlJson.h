@@ -128,6 +128,83 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     if (!wpNavParseAndStart(payloadStr)) {
       Serial.println(F("[WS-Navigate ERROR] Loi parse hoac start lo trinh tu WebSocket!"));
     }
+  } else if (strcmp(t, "wheelMode") == 0) {
+    // Đã bỏ — hệ thống cố định differential drive (bánh thường). Bỏ qua lệnh.
+    Serial.println(F("[WS-WheelMode] Bo qua — chi dung differential drive"));
+  } else if (strcmp(t, "motorInv") == 0) {
+    // Đảo chiều bánh: payload = "slot_invert" (VD: "0_1" = đảo bánh 0)
+    const char *payloadStr = doc["payload"] | "";
+    int slot = -1;
+    int invert = -1;
+    if (sscanf(payloadStr, "%d_%d", &slot, &invert) == 2) {
+      if (slot >= 0 && slot < 4 && (invert == 0 || invert == 1)) {
+        extern void motorInvertSlot(uint8_t slot, uint8_t invert);
+        motorInvertSlot((uint8_t)slot, (uint8_t)invert);
+        // Lưu vào NVS
+        extern bool motorLayoutSaveCurrent(Preferences &prefs);
+        motorLayoutSaveCurrent(g_prefs);
+        Serial.printf("[WS-MotorInv] Slot %d -> %s\n", slot, invert ? "DAO CHIEU" : "BINH THUONG");
+      }
+    }
+  } else if (strcmp(t, "motorInvToggle") == 0) {
+    // Toggle đảo chiều 1 bánh: payload = "slot"
+    const char *payloadStr = doc["payload"] | "";
+    int slot = -1;
+    if (sscanf(payloadStr, "%d", &slot) == 1) {
+      if (slot >= 0 && slot < 4) {
+        extern uint8_t motorLayoutToggleInvert(uint8_t slot);
+        uint8_t newVal = motorLayoutToggleInvert((uint8_t)slot);
+        // Lưu vào NVS
+        extern bool motorLayoutSaveCurrent(Preferences &prefs);
+        motorLayoutSaveCurrent(g_prefs);
+        Serial.printf("[WS-MotorInvToggle] Slot %d -> %s\n", slot, newVal ? "DAO CHIEU" : "BINH THUONG");
+      }
+    }
+  } else if (strcmp(t, "motorMap") == 0) {
+    // Cập nhật motor layout: payload = "[0,1,2,3]" (map) + "[0,0,0,0]" (inv)
+    // Xử lý trong motorLayoutApplyJson
+    extern bool motorLayoutApplyJson(JsonDocument &doc, Preferences &prefs);
+    if (motorLayoutApplyJson((JsonDocument&)doc, g_prefs)) {
+      Serial.println("[WS-MotorMap] Cap nhat thanh cong!");
+    } else {
+      Serial.println("[WS-MotorMap] Loi cap nhat!");
+    }
+  } else if (strcmp(t, "motorTestAll") == 0) {
+    // Test từng bánh 1 để kiểm tra đảo chiều
+    // payload = "1" hoặc "-1" (chiều quay)
+    const char *payloadStr = doc["payload"] | "";
+    int direction = 1;
+    sscanf(payloadStr, "%d", &direction);
+    int32_t speedVal = (int32_t)PWM_MAX * direction;
+    int32_t sp[4] = {speedVal, speedVal, speedVal, speedVal};
+    extern void motorApplyLayout(const int32_t speedBySlot[4]);
+    motorApplyLayout(sp);
+    Serial.printf("[WS-MotorTestAll] Test all motors, direction=%d\n", direction);
+  } else if (strcmp(t, "motorScale") == 0) {
+    // Đặt scale cho 1 bánh: payload = "slot_scale" (VD: "0_0.95")
+    const char *payloadStr = doc["payload"] | "";
+    int slot = -1;
+    float scale = 1.0f;
+    if (sscanf(payloadStr, "%d_%f", &slot, &scale) == 2) {
+      if (slot >= 0 && slot < 4 && scale >= 0.5f && scale <= 1.5f) {
+        extern void motorSetScale(uint8_t slot, float scale);
+        motorSetScale((uint8_t)slot, scale);
+        motorLayoutSaveCurrent(g_prefs);
+        Serial.printf("[WS-MotorScale] Slot %d -> %.3f\n", slot, scale);
+      }
+    }
+  } else if (strcmp(t, "motorBalance") == 0) {
+    // Auto-balance: đặt tất cả bánh về cùng scale
+    extern void motorAutoBalance();
+    motorAutoBalance();
+    motorLayoutSaveCurrent(g_prefs);
+    Serial.println("[WS-MotorBalance] Auto-balanced all motors");
+  } else if (strcmp(t, "motorResetScales") == 0) {
+    // Reset tất cả scale về 1.0
+    extern void motorResetScales();
+    motorResetScales();
+    motorLayoutSaveCurrent(g_prefs);
+    Serial.println("[WS-MotorReset] Scales reset to 1.0");
   }
 }
 

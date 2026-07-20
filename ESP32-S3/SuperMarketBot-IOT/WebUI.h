@@ -298,6 +298,14 @@ input[type=range]:not(.spd-range)::-moz-range-thumb{width:22px;height:22px;borde
 .mode-btn:hover{transform:translateY(-1px)}
 .mode-btn.active{background:linear-gradient(135deg,#2dd4bf,#22d3ee);color:#041016;box-shadow:0 4px 16px rgba(34,211,238,.3)}
 .mode-btn:not(.active){background:var(--line);color:var(--text);border:1px solid var(--line2)}
+/* Test Motor Buttons */
+.test-mot-btn{
+  padding:8px 4px;border:none;border-radius:8px;font-size:.65rem;cursor:pointer;font-weight:600;
+  font-family:inherit;transition:all .15s;
+  background:var(--card);color:var(--accent);border:1px solid var(--line2);
+}
+.test-mot-btn:hover{background:var(--accent);color:var(--bg0);border-color:var(--accent)}
+.test-mot-btn:active{transform:scale(0.95)}
 .estop{
   width:100%;padding:14px 16px;border:none;border-radius:12px;margin-top:4px;cursor:pointer;font-weight:700;letter-spacing:.04em;
   font-family:inherit;font-size:.95rem;
@@ -594,6 +602,58 @@ details pre{
         <div class="layout-form" id="motGrid"></div>
         <button type="button" class="mode-btn" style="margin-top:8px;width:100%" onclick="saveMotorLayout()">Lưu vào bộ nhớ robot (NVS)</button>
         <p class="hint" id="motLayMsg" style="margin-top:8px;min-height:1.2em"></p>
+
+        <!-- Test Motor Section -->
+        <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)">
+          <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;color:var(--accent)">Kiểm tra động cơ</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+            <button type="button" class="test-mot-btn" onclick="testMotor(0,100)">FL Tiến</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(1,100)">RL Tiến</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(2,100)">FR Tiến</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(3,100)">RR Tiến</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+            <button type="button" class="test-mot-btn" onclick="testMotor(0,-100)">FL Lùi</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(1,-100)">RL Lùi</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(2,-100)">FR Lùi</button>
+            <button type="button" class="test-mot-btn" onclick="testMotor(3,-100)">RR Lùi</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+            <button type="button" class="mode-btn" style="background:#1a2332" onclick="testAllMotors(1)">▶ Tất cả tiến</button>
+            <button type="button" class="mode-btn" style="background:#1a2332" onclick="testAllMotors(-1)">◀ Tất cả lùi</button>
+          </div>
+          <button type="button" class="mode-btn" style="margin-top:8px;width:100%;background:#2a1520;color:#f87171" onclick="stopAllMotors()">■ Dừng tất cả</button>
+          <p class="hint" style="margin-top:6px;font-size:.6rem;color:var(--muted)">Slot: 0=FL, 1=RL, 2=FR, 3=RR. Lưu Layout trước khi test!</p>
+        </div>
+
+        <!-- Motor Scale & Balance Section -->
+        <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)">
+          <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;color:var(--accent)">Cân bằng động cơ</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+            <div style="text-align:center">
+              <span style="font-size:.6rem;color:var(--muted)">FL</span>
+              <input type="number" id="scaleFL" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            </div>
+            <div style="text-align:center">
+              <span style="font-size:.6rem;color:var(--muted)">RL</span>
+              <input type="number" id="scaleRL" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            </div>
+            <div style="text-align:center">
+              <span style="font-size:.6rem;color:var(--muted)">FR</span>
+              <input type="number" id="scaleFR" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            </div>
+            <div style="text-align:center">
+              <span style="font-size:.6rem;color:var(--muted)">RR</span>
+              <input type="number" id="scaleRR" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <button type="button" class="mode-btn" style="background:#1a3020;font-size:.7rem" onclick="applyMotorScale()">Áp Scale</button>
+            <button type="button" class="mode-btn" style="background:#1a2030;font-size:.7rem" onclick="autoBalanceMotors()">Auto Cân</button>
+            <button type="button" class="mode-btn" style="background:#2a1520;font-size:.7rem" onclick="resetMotorScales()">Reset 1.0</button>
+          </div>
+          <p class="hint" style="margin-top:6px;font-size:.6rem;color:var(--muted)">Scale < 1.0 = giảm tốc bánh đó</p>
+        </div>
       </div>
     </div>
   </div>
@@ -693,7 +753,7 @@ function buildMotorGrid(){
   for(let i=0;i<4;i++){
     h+=`<div class="layout-mot"><label>${SLOT_LBL[i]}</label><select id="motMap${i}"></select><select id="motInv${i}"><option value="0">Tiến = như code</option><option value="1">Đảo chiều (lùi↔tiến)</option></select></div>`;
   }
-  h+=`<div class="layout-mot" style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px"><label>Hệ Bánh Xe</label><select id="wheelModeSelect" style="grid-column:span 2"><option value="0">Bánh Mecanum (Đa hướng)</option><option value="1">Bánh Thường (4WD vi sai)</option></select></div>`;
+  h+=`<div class="layout-mot" style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px"><label>Hệ Bánh Xe</label><span style="grid-column:span 2;color:var(--muted);font-size:.8rem">Bánh Thường (4WD vi sai) — cố định</span></div>`;
   g.innerHTML=h;
   for(let i=0;i<4;i++){
     const sm=document.getElementById('motMap'+i);
@@ -707,8 +767,15 @@ function applyMotorPayload(d){
     if(d.mapMot&&d.mapMot[i]!=null&&sm) sm.value=String(d.mapMot[i]);
     if(d.motInv&&d.motInv[i]!=null&&si) si.value=String(d.motInv[i]);
   }
-  const swm=document.getElementById('wheelModeSelect');
-  if(swm && d.wheelMode!=null) swm.value=String(d.wheelMode);
+  // (wheelMode cố định = bánh thường, không cần đọc dropdown)
+  // Cập nhật scale inputs
+  const scaleIds = ['scaleFL','scaleRL','scaleFR','scaleRR'];
+  for(let i=0;i<4;i++){
+    const el=document.getElementById(scaleIds[i]);
+    if(el && d.motSc && d.motSc[i]!=null){
+      el.value = d.motSc[i].toFixed(2);
+    }
+  }
 }
 function saveMotorLayout(){
   const mapMot=[], motInv=[];
@@ -716,12 +783,83 @@ function saveMotorLayout(){
     mapMot.push(parseInt(document.getElementById('motMap'+i).value,10));
     motInv.push(parseInt(document.getElementById('motInv'+i).value,10));
   }
-  const wheelMode = parseInt(document.getElementById('wheelModeSelect').value,10);
+  const wheelMode = 1; // cố định: bánh thường (4WD vi sai)
   const msg=document.getElementById('motLayMsg');
   if(!isPerm4(mapMot)){ msg.textContent='Lỗi: 4 kênh phải chọn đủ 0–3, không trùng.'; return; }
   msg.textContent='Đang gửi…';
   wsS({t:'motLayout',mapMot,motInv,wheelMode});
 }
+
+// Motor Test Functions
+let _testMotorTimer = null;
+function testMotor(slot, speedPct) {
+  // speedPct: 100 = forward, -100 = reverse
+  if(_testMotorTimer) { clearTimeout(_testMotorTimer); _testMotorTimer = null; }
+  // Gửi test_motor với payload "slot_speedPct"
+  const payload = slot + '_' + speedPct;
+  wsS({t:'test_motor', payload: payload});
+  console.log('[TestMotor] Slot:', slot, 'Speed:', speedPct + '%');
+  // Tự động dừng sau 3 giây
+  _testMotorTimer = setTimeout(() => {
+    wsS({t:'test_motor', payload: slot + '_0'});
+    _testMotorTimer = null;
+  }, 3000);
+}
+function testAllMotors(direction) {
+  // direction: 1 = forward, -1 = reverse
+  wsS({t:'motorTestAll', payload: String(direction)});
+  console.log('[TestAllMotors] Direction:', direction > 0 ? 'Forward' : 'Reverse');
+  // Tự động dừng sau 3 giây
+  if(_testMotorTimer) { clearTimeout(_testMotorTimer); }
+  _testMotorTimer = setTimeout(() => {
+    wsS({t:'motorTestAll', payload: '0'});
+    stopAllMotors();
+    _testMotorTimer = null;
+  }, 3000);
+}
+function stopAllMotors() {
+  wsS({t:'estop'});  // EStop để dừng tất cả
+  console.log('[StopAllMotors] Stopped!');
+  if(_testMotorTimer) { clearTimeout(_testMotorTimer); _testMotorTimer = null; }
+}
+function toggleMotorInvert(slot) {
+  wsS({t:'motorInvToggle', payload: String(slot)});
+  console.log('[ToggleInvert] Slot:', slot);
+}
+
+// Motor Scale Functions
+function applyMotorScale() {
+  const scales = [
+    parseFloat(document.getElementById('scaleFL').value) || 1.0,
+    parseFloat(document.getElementById('scaleRL').value) || 1.0,
+    parseFloat(document.getElementById('scaleFR').value) || 1.0,
+    parseFloat(document.getElementById('scaleRR').value) || 1.0
+  ];
+  // Send each scale
+  for(let i = 0; i < 4; i++) {
+    const scale = Math.max(0.5, Math.min(1.5, scales[i]));
+    wsS({t:'motorScale', payload: i + '_' + scale.toFixed(2)});
+  }
+  console.log('[ApplyScale] Applied:', scales);
+}
+function autoBalanceMotors() {
+  wsS({t:'motorBalance'});
+  console.log('[AutoBalance] Balancing all motors...');
+  // Reset inputs to 1.00 after auto-balance
+  for(let i = 0; i < 4; i++) {
+    const id = ['scaleFL','scaleRL','scaleFR','scaleRR'][i];
+    document.getElementById(id).value = '1.00';
+  }
+}
+function resetMotorScales() {
+  wsS({t:'motorResetScales'});
+  console.log('[ResetScales] Reset to 1.0');
+  for(let i = 0; i < 4; i++) {
+    const id = ['scaleFL','scaleRL','scaleFR','scaleRR'][i];
+    document.getElementById(id).value = '1.00';
+  }
+}
+
 function saveLayout(){
   const us=[], enc=[];
   for(let i=0;i<4;i++){
@@ -856,9 +994,9 @@ function applyTelemetry(d){
       ml.textContent=(d.mode===2)?'MQTT (Lộ trình)':((d.mode===1)?'Tự hành':'Lái tay');
       ml.className=(d.mode===1||d.mode===2)?'mode-auto':'mode-manual';
       const wl=document.getElementById('wheelLabel');
-      if(wl && d.wheelMode!=null){
-        wl.textContent=(d.wheelMode===1)?'Bánh Thường (4WD)':'Bánh Mecanum';
-        wl.style.color=(d.wheelMode===1)?'#10b981':'#38bdf8';
+      if(wl){
+        wl.textContent='Bánh Thường (4WD vi sai)';
+        wl.style.color='#10b981';
       }
       const il=document.getElementById('imuLabel');
       if(il && d.HeadingRad!=null){

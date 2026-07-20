@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- UDP socket tới ESP32 (port 4210) — Phase 5.3 motor command bridge -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Quyền chạy Foreground Service cho Robot điều khiển thời gian thực (được cấp phép từ Android 9+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     
@@ -23,6 +26,20 @@
         <!-- Foreground Service xử lý việc đọc luồng Serial USB liên tục cho LiDAR và ESP32 -->
         <service
             android:name="com.smartmarketbot.hub.UsbSerialService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- SLAM Service cho xử lý LiDAR + SLAM -->
+        <service
+            android:name="com.smartmarketbot.hub.slam.SLAMService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Waypoint Navigator Service cho Navigation -->
+        <service
+            android:name="com.smartmarketbot.hub.navigation.WaypointNavigatorService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />

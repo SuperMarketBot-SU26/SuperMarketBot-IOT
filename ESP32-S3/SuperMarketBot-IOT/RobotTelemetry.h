@@ -95,9 +95,11 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
     doc["lidF"] = g_lidarFrontUart;
     JsonArray mm = doc["mapMot"].to<JsonArray>();
     JsonArray mi = doc["motInv"].to<JsonArray>();
+    JsonArray ms = doc["motSc"].to<JsonArray>();
     for (int i = 0; i < 4; i++) {
       mm.add(g_mapMotSlot[i]);
       mi.add(g_motInv[i]);
+      ms.add(g_motorScale[i]);
     }
   }
   doc["rFL"] = g_state.rpmFL;
@@ -165,7 +167,7 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
   doc["HeadingRad"] = g_pose.headingRad;
   doc["xCoord"] = g_pose.x;
   doc["yCoord"] = g_pose.y;
-  doc["wheelMode"] = (uint8_t)g_state.wheelMode;
+  doc["wheelMode"] = 1; // cố định = Normal (differential drive) — giữ field để tương thích UI cũ
   uint32_t spdPct =
       (g_state.baseSpeed * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
   doc["spdPct"] = spdPct;

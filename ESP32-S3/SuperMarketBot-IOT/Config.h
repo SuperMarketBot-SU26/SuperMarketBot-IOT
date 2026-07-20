@@ -342,14 +342,11 @@ enum RobotMode : uint8_t {
   MODE_WAYPOINT = 2     // Tự hành bám waypoint (Pure Pursuit, Phase 3)
 };
 
-enum WheelMode : uint8_t {
-  WHEEL_MECANUM = 0,    // Bánh Mecanum (di chuyển đa hướng)
-  WHEEL_NORMAL  = 1     // Bánh thường (4WD vi sai)
-};
+// (enum WheelMode đã bỏ — hệ thống chỉ dùng differential drive (bánh thường))
 
 /* -------------------- CẤU TRÚC CHIA SẺ GIỮA 2 CORE ----------------- */
 struct RobotState {
-  volatile WheelMode wheelMode; // Kiểu bánh xe
+  volatile uint8_t wheelMode __attribute__((unused)); // Giữ để tránh sửa layout NVS cũ, không còn ý nghĩa
   // Cảm biến khoảng cách (cm)
   volatile int16_t usFront, usBack, usLeft, usRight;
   /** 4 góc xe (sau remap web) — Trái trước / Trái sau / Phải trước / Phải sau */

@@ -167,10 +167,8 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     } else if (doc["payload"].is<const char*>()) {
       v = atoi(doc["payload"].as<const char*>());
     }
-    Serial.printf(">>> LỆNH: ĐẶT TRƯỢT NGANG (SET_STRAFE) từ Backend! %d%%\n", v);
-    if (v >= 0 && v <= 100) {
-      g_state.cmdStrafe = (int16_t)constrain((int)(v - 50) * 2, -100, 100);
-    }
+    Serial.printf(">>> LỆNH: ĐẶT TRƯỢT NGANG (SET_STRAFE) từ Backend! %d%% - BO QUA (banh thuong)\n", v);
+    // Bỏ — bánh thường không hỗ trợ trượt ngang
 
   } else if (strcmp(cmd, "test_motor") == 0) {
     const char *payloadStr = doc["payload"] | "";

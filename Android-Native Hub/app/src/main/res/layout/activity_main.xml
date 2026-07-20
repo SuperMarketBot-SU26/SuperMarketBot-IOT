@@ -12,7 +12,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="12dp">
 
         <TextView
             android:layout_width="0dp"
@@ -20,7 +20,7 @@
             android:layout_weight="1"
             android:text="SMARTMARKETBOT HUB"
             android:textColor="#FFFFFF"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:letterSpacing="0.05" />
 
@@ -43,172 +43,304 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="#1E1E1E"
-        android:padding="12dp"
-        android:layout_marginBottom="16dp">
+        android:padding="10dp"
+        android:layout_marginBottom="12dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="CHẾ ĐỘ KẾT NỐI (CONNECTION MODE)"
+            android:text="CHẾ ĐỘ KẾT NỐI"
             android:textColor="#AAAAAA"
             android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="6dp" />
 
         <RadioGroup
             android:id="@+id/radioGroupMode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+            android:layout_marginBottom="6dp">
 
             <RadioButton
                 android:id="@+id/radioUsb"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cáp USB (Có dây - LiDAR+ESP32)"
+                android:text="USB"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:checked="true"
                 android:buttonTint="#00E676"
-                android:layout_marginRight="16dp" />
+                android:layout_marginRight="12dp" />
 
             <RadioButton
                 android:id="@+id/radioWifi"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="WiFi WebSocket (Không dây - ESP32)"
+                android:text="WiFi"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:buttonTint="#00E676" />
         </RadioGroup>
 
-        <!-- WiFi IP Configuration Section (Visible only when WiFi mode is active) -->
         <LinearLayout
             android:id="@+id/layoutWifiConfig"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="2dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Địa chỉ IP Robot:"
+                android:text="IP:"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
-                android:layout_marginRight="12dp" />
+                android:textSize="12sp"
+                android:layout_marginRight="8dp" />
 
             <EditText
                 android:id="@+id/editRobotIp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="192.168.1.100"
+                android:text="192.168.4.1"
                 android:textColor="#00FF00"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:backgroundTint="#00E676"
                 android:inputType="text"
-                android:hint="Ví dụ: 192.168.4.1"
-                android:padding="6dp" />
+                android:hint="192.168.4.1"
+                android:padding="4dp" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Connection Status Cards -->
+    <!-- Connection Status + Service Buttons (compact row) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="16dp"
-        android:weightSum="2">
+        android:layout_marginBottom="12dp"
+        android:weightSum="4">
 
-        <!-- ESP32 Card -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
             android:background="#1E1E1E"
-            android:padding="12dp"
-            android:layout_marginRight="8dp">
+            android:padding="8dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="ESP32-S3 BOARD"
+                android:text="ESP32"
                 android:textColor="#AAAAAA"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/txtEspStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="DISCONNECTED"
+                android:text="OFF"
                 android:textColor="#FFFF1744"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:textSize="13sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- LiDAR Card -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
             android:background="#1E1E1E"
-            android:padding="12dp"
-            android:layout_marginLeft="8dp">
+            android:padding="8dp"
+            android:layout_marginLeft="4dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="YDLIDAR X3"
+                android:text="LiDAR"
                 android:textColor="#AAAAAA"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/txtLidarStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="DISCONNECTED"
+                android:text="OFF"
                 android:textColor="#FFFF1744"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:textSize="13sp"
+                android:textStyle="bold" />
         </LinearLayout>
-    </LinearLayout>
-
-    <!-- Control Buttons -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="16dp"
-        android:weightSum="2">
 
         <Button
             android:id="@+id/btnStartService"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="START HUB"
+            android:text="START"
             android:backgroundTint="#00E676"
             android:textColor="#000000"
-            android:layout_marginRight="8dp" />
+            android:layout_marginLeft="4dp" />
 
         <Button
             android:id="@+id/btnStopService"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="STOP HUB"
+            android:text="STOP"
             android:backgroundTint="#FF1744"
             android:textColor="#FFFFFF"
-            android:layout_marginLeft="8dp" />
+            android:layout_marginLeft="4dp" />
+    </LinearLayout>
+
+    <!-- SLAM MAP CANVAS (Phase 7.1) -->
+    <com.smartmarketbot.hub.slam.ui.SLAMMapView
+        android:id="@+id/slamMapView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
+        android:background="#0A0A0A"
+        android:layout_marginBottom="12dp" />
+
+    <!-- SLAM Status + Mode Selector -->
+    <LinearLayout
+        android:id="@+id/layoutSlamControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#1E1E1E"
+        android:padding="10dp"
+        android:layout_marginBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="6dp">
+
+            <TextView
+                android:id="@+id/txtSlamStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="SLAM: IDLE"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnStartSlam"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="START SLAM"
+                android:textSize="11sp"
+                android:backgroundTint="#00E676"
+                android:textColor="#000000" />
+
+            <Button
+                android:id="@+id/btnStopSlam"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="STOP"
+                android:textSize="11sp"
+                android:backgroundTint="#FF1744"
+                android:textColor="#FFFFFF"
+                android:layout_marginLeft="4dp" />
+
+            <Button
+                android:id="@+id/btnResetMap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RESET"
+                android:textSize="11sp"
+                android:backgroundTint="#FFA726"
+                android:textColor="#000000"
+                android:layout_marginLeft="4dp" />
+
+            <Button
+                android:id="@+id/btnSaveMap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SAVE"
+                android:textSize="11sp"
+                android:backgroundTint="#7B1FA2"
+                android:textColor="#FFFFFF"
+                android:layout_marginLeft="4dp" />
+
+            <Button
+                android:id="@+id/btnLoadMap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LOAD"
+                android:textSize="11sp"
+                android:backgroundTint="#0288D1"
+                android:textColor="#FFFFFF"
+                android:layout_marginLeft="4dp" />
+        </LinearLayout>
+
+        <!-- Navigation waypoint input -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Nav:"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:layout_gravity="center_vertical"
+                android:layout_marginRight="6dp" />
+
+            <EditText
+                android:id="@+id/editNavX"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="0.0"
+                android:textColor="#00FF00"
+                android:textSize="12sp"
+                android:backgroundTint="#00E676"
+                android:inputType="numberDecimal|numberSigned"
+                android:hint="x (m)" />
+
+            <EditText
+                android:id="@+id/editNavY"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="0.0"
+                android:textColor="#00FF00"
+                android:textSize="12sp"
+                android:backgroundTint="#00E676"
+                android:inputType="numberDecimal|numberSigned"
+                android:hint="y (m)"
+                android:layout_marginLeft="4dp" />
+
+            <Button
+                android:id="@+id/btnNavigate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="GO"
+                android:textSize="11sp"
+                android:backgroundTint="#2196F3"
+                android:textColor="#FFFFFF"
+                android:layout_marginLeft="4dp" />
+
+            <Button
+                android:id="@+id/btnEStop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="STOP"
+                android:textSize="11sp"
+                android:backgroundTint="#D32F2F"
+                android:textColor="#FFFFFF"
+                android:layout_marginLeft="4dp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Terminal Console Log -->
@@ -218,16 +350,16 @@
         android:layout_weight="1"
         android:orientation="vertical"
         android:background="#0A0A0A"
-        android:padding="12dp">
+        android:padding="8dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="SYSTEM CONSOLE LOG"
+            android:text="CONSOLE LOG"
             android:textColor="#00E676"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
-            android:layout_marginBottom="6dp" />
+            android:layout_marginBottom="4dp" />
 
         <ScrollView
             android:id="@+id/scrollConsole"
@@ -240,9 +372,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
-                android:text="[Ready] Khởi động ứng dụng, chờ kết nối...\n"
+                android:text="[Ready] Khởi động...\n"
                 android:textColor="#00FF00"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
         </ScrollView>
     </LinearLayout>
 </LinearLayout>

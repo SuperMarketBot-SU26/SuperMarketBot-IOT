@@ -1,19 +1,27 @@
 /* =====================================================================
- *  Localization.h — Dead Reckoning (2D pose estimate)
+ *  Localization.h — Pose estimate dùng IMU (heading) + PWM dead-reckoning (translation)
  *
- *  Mô hình: Differential Drive — trung bình encoder trái & phải
- *    left  = avg(FL, RL)
- *    right = avg(FR, RR)
- *    ds    = (dLeft + dRight) / 2
- *    dTheta= (dRight - dLeft) / WHEEL_BASE_M
- *    x    += ds * cos(heading + dTheta/2)
- *    y    += ds * sin(heading + dTheta/2)
+ *  QUAN TRỌNG: Project này KHÔNG dùng encoder nữa.
+ *    - Heading (góc xoay)   ← MPU6050 (cập nhật ở taskControl)
+ *    - Translation (x, y)   ← PWM lệnh cuối × hệ số PWM_TO_MPS × dt
+ *
+ *  Cách hoạt động:
+ *    - Motors.h gọi locSetDriveCmd(leftPct, rightPct) mỗi lần botDrive() chạy.
+ *    - Odometry.h gọi locUpdate() mỗi ODOM_PERIOD_MS (100ms).
+ *      locUpdate() tính ds từ PWM lệnh trong dt kể từ lần cuối.
+ *
+ *  Hiệu chỉnh:
+ *    - LOC_PWM_TO_MPS: hệ số PWM → m/s. Cần đo thực tế:
+ *        PWM 100% trong 1 giây đi được bao xa → chia 100 = giá trị mới.
+ *      Mặc định 0.0040 = 100% PWM → ~0.40 m/s.
  *
  *  API:
- *    locInit()          — Reset pose về gốc toạ độ
- *    locUpdate(dTicks)  — Gọi từ odomUpdate() sau mỗi ODOM_PERIOD_MS
- *    locResetPose()     — Reset về (0, 0, 0)
- *    g_pose             — struct { x, y, headingRad } đọc từ các module khác
+ *    locInit()              — Reset pose về (0,0,0)
+ *    locUpdate()            — Tích phân ds/dTheta → cập nhật pose (gọi mỗi ODOM_PERIOD_MS)
+ *    locSetDriveCmd(L, R)   — Motors báo lệnh hiện tại (-100..+100 %)
+ *    locSetEncoderless(b)   — Bật/tắt fallback PWM (luôn true trong project này)
+ *    locResetPose()         — Đặt pose về (0,0,0) + reset heading về 0
+ *    g_pose                 — struct {x, y, headingRad} đọc từ mọi module
  * =====================================================================*/
 #ifndef LOCALIZATION_H
 #define LOCALIZATION_H
@@ -21,118 +29,87 @@
 #include "Config.h"
 #include <math.h>
 
-/* -------------------- Thông số cơ học ----------------------------- */
-/** Khoảng cách tâm bánh trái → tâm bánh phải (m). Đo thực tế trên robot. */
 #ifndef WHEEL_BASE_M
-#define WHEEL_BASE_M    0.365f  // Khung 25.5x15cm: L_W (track width) ~17.0cm + L_L (axle distance) ~19.5cm = 36.5cm hiệu dụng cho xoay Mecanum
+#define WHEEL_BASE_M    0.365f  // khoảng cách tâm 2 bên bánh (m) — dùng cho dTheta khi lách
 #endif
 
-/* -------------------- Cấu trúc Pose ------------------------------- */
+#ifndef LOC_PWM_TO_MPS
+#define LOC_PWM_TO_MPS  0.0040f  // m/s trên 1% PWM (ước lượng: 100% → 0.40 m/s)
+#endif
+
 struct Pose2D {
   float x;           // mét, trục X về phía trước lúc boot
   float y;           // mét, trục Y sang phải
-  float headingRad;  // radian, [0, 2π), 0 = hướng ban đầu
+  float headingRad;  // radian, [0, 2π)
 };
 
 Pose2D g_pose = {0.f, 0.f, 0.f};
 
-/** Chiều vật lý từ Motors.h — ký hiệu hóa ticks để phân biệt tiến/lùi/xoay */
-extern volatile int8_t g_motorDir[4];
+/** Lệnh drive cuối cùng (PWM % trái/phải) + thời điểm cập nhật. */
+struct LocDriveCmd {
+  int16_t  leftPct;
+  int16_t  rightPct;
+  uint32_t tMs;
+};
+static LocDriveCmd s_locDriveCmd = {0, 0, 0};
+static bool        s_locEnabled  = true;  // luôn true vì project không dùng encoder
 
-/* -------------------- Biến tích lũy ticks (Phase 2 bổ sung) ------- */
-/** Tổng ticks trên từng bánh kể từ lần locUpdate() cuối — được cộng bởi ISR qua odomUpdate() */
-static uint32_t s_locTotalFL = 0;
-static uint32_t s_locTotalFR = 0;
-static uint32_t s_locTotalRL = 0;
-static uint32_t s_locTotalRR = 0;
-
-/* =====================================================================
- *  locInit() — Reset state. Gọi 1 lần sau odomInit() trong setup().
- * ===================================================================*/
 inline void locInit() {
   g_pose = {0.f, 0.f, 0.f};
-  s_locTotalFL = s_locTotalFR = s_locTotalRL = s_locTotalRR = 0;
+  s_locDriveCmd = {0, 0, 0};
 }
 
-extern uint8_t g_mapMotSlot[4];
-extern uint8_t g_motInv[4];
-
-static inline int8_t locGetPhysicalDir(uint8_t p) {
-  for (int s = 0; s < 4; s++) {
-    if (g_mapMotSlot[s] == p) {
-      int8_t d = g_motorDir[p];
-      if (g_motInv[s]) return -d;
-      return d;
-    }
-  }
-  return g_motorDir[p];
+inline void locSetDriveCmd(int16_t leftPct, int16_t rightPct) {
+  s_locDriveCmd.leftPct  = leftPct;
+  s_locDriveCmd.rightPct = rightPct;
+  s_locDriveCmd.tMs      = millis();
 }
 
-/* =====================================================================
- *  locUpdate() — Cập nhật pose dựa trên Δticks từ lần gọi trước.
- *
- *  Tham số: snapshot tổng ticks hiện tại (từ g_totalFL/FR/RL/RR trong Odometry.h).
- *           Đọc giá trị này trong atomic section trước khi gọi locUpdate().
- * ===================================================================*/
-inline void locUpdate(uint32_t totalFL, uint32_t totalFR,
-                      uint32_t totalRL, uint32_t totalRR) {
-  /* Delta ticks so với lần gọi trước */
-  uint32_t dFL = totalFL - s_locTotalFL;
-  uint32_t dFR = totalFR - s_locTotalFR;
-  uint32_t dRL = totalRL - s_locTotalRL;
-  uint32_t dRR = totalRR - s_locTotalRR;
-  s_locTotalFL = totalFL;
-  s_locTotalFR = totalFR;
-  s_locTotalRL = totalRL;
-  s_locTotalRR = totalRR;
+inline void locSetEncoderless(bool enabled) { s_locEnabled = enabled; }
 
-  /* Ký hiệu hóa delta bằng hướng vật lý (g_motorDir) — phân biệt tiến/lùi (có xét đảo chiều) */
-  int32_t sdPhy[4];
-  sdPhy[0] = (int32_t)dFL * locGetPhysicalDir(0); // Physical FL
-  sdPhy[1] = (int32_t)dRL * locGetPhysicalDir(1); // Physical RL
-  sdPhy[2] = (int32_t)dFR * locGetPhysicalDir(2); // Physical FR
-  sdPhy[3] = (int32_t)dRR * locGetPhysicalDir(3); // Physical RR
-
-  // Ánh xạ các xung vật lý về các slot logic (LF, LR, RF, RR)
-  int32_t sdLF = sdPhy[g_mapEncSlot[SLOT_LF]];
-  int32_t sdLR = sdPhy[g_mapEncSlot[SLOT_LR]];
-  int32_t sdRF = sdPhy[g_mapEncSlot[SLOT_RF]];
-  int32_t sdRR = sdPhy[g_mapEncSlot[SLOT_RR]];
-
-  /* Quãng đường mỗi bên (m) — trung bình trước + sau của các slot logic */
-  const float ticksToM = (WHEEL_CIRC_M / ENC_PPR) * ODOM_CALIB_FACTOR;
-  float dLeft  = ((float)(sdLF + sdLR) * 0.5f) * ticksToM;
-  float dRight = ((float)(sdRF + sdRR) * 0.5f) * ticksToM;
-
-  /* Tính ds và dθ */
-  float ds     = (dLeft + dRight) * 0.5f;
-  float dTheta = (dRight - dLeft) / WHEEL_BASE_M;
-
-  if (g_imuEnabled) {
-    // Nếu có IMU hoạt động, dùng góc headingRad cập nhật từ Gyro ở taskControl độc lập.
-    // Ta chỉ dùng ds từ encoder để chiếu dịch chuyển lên hệ tọa độ thế giới.
-    float midH = g_pose.headingRad;
-    g_pose.x          += ds * cosf(midH);
-    g_pose.y          += ds * sinf(midH);
-  } else {
-    // Nếu không có IMU hoặc IMU chưa sẵn sàng/lỗi, tự động hạ cấp xuống dùng bộ tích lũy Encoder (Dead Reckoning)
-    float midH = g_pose.headingRad + dTheta * 0.5f;
-    g_pose.x          += ds * cosf(midH);
-    g_pose.y          += ds * sinf(midH);
-    g_pose.headingRad += dTheta;
-
-    /* Giữ heading trong [0, 2π) */
-    while (g_pose.headingRad < 0.f)         g_pose.headingRad += 2.f * (float)M_PI;
-    while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
-  }
-}
-
-/* =====================================================================
- *  locResetPose() — Đặt lại gốc toạ độ (ví dụ: khi dock station).
- * ===================================================================*/
 inline void locResetPose() {
   g_pose = {0.f, 0.f, 0.f};
-  s_locTotalFL = s_locTotalFR = s_locTotalRL = s_locTotalRR = 0;
+  s_locDriveCmd = {0, 0, 0};
+}
+
+/**
+ * Tích phân pose từ lệnh PWM cuối. Gọi mỗi ODOM_PERIOD_MS (100ms) từ taskControl.
+ * - vL = leftPct  × LOC_PWM_TO_MPS  (m/s)
+ * - vR = rightPct × LOC_PWM_TO_MPS
+ * - ds = (vL + vR)/2 × dt
+ * - dTheta = (vR - vL)/WHEEL_BASE_M × dt
+ * - x += ds*cos(h), y += ds*sin(h)
+ * - Heading update CHỈ từ IMU (g_pose.headingRad đã được taskControl ghi đè).
+ */
+inline void locUpdate() {
+  if (!s_locEnabled) return;
+
+  static uint32_t s_lastTMs = 0;
+  uint32_t nowMs = millis();
+  uint32_t dtMs;
+  if (s_lastTMs == 0) {
+    s_lastTMs = nowMs;
+    return;  // lần đầu chỉ lưu timestamp
+  }
+  dtMs = nowMs - s_lastTMs;
+  s_lastTMs = nowMs;
+  if (dtMs == 0 || dtMs > 2000) return;  // dt bất thường → bỏ qua
+
+  float dt = (float)dtMs * 0.001f;
+
+  // Dùng lệnh drive TẠI THỜI ĐIỂM locUpdate() chạy (không phải locSetDriveCmd tại tick trước)
+  // → đơn giản, sai số ~1 tick, chấp nhận được cho waypoint nav vì goal xa vài m.
+  float vL = (float)s_locDriveCmd.leftPct  * LOC_PWM_TO_MPS;
+  float vR = (float)s_locDriveCmd.rightPct * LOC_PWM_TO_MPS;
+
+  float dLeft  = vL * dt;
+  float dRight = vR * dt;
+  float ds     = (dLeft + dRight) * 0.5f;
+
+  // Heading đã được IMU set; ở đây ta chỉ update x,y theo heading hiện tại.
+  float h = g_pose.headingRad;
+  g_pose.x += ds * cosf(h);
+  g_pose.y += ds * sinf(h);
 }
 
 #endif // LOCALIZATION_H

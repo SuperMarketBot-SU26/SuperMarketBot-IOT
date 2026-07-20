@@ -1,26 +1,28 @@
 /* =====================================================================
- *  PidController.h — Cải tiến PID Controller cho di chuyển MƯỢT MÀ
+ *  PidControllerPro.h — Cải tiến PID Controller cho di chuyển MƯỢT MÀ
  *  
  *  Cải tiến so với PidController.h gốc:
  *    1. Adaptive PID gains theo tốc độ
  *    2. Derivative filtering (chống noise)
  *    3. Bang-bang pre-action trước khi vào PID
  *    4. Better anti-windup
- *    5. Dead-zone cho error nhỏ
+ *    5. Feedforward term
+ *    6. Dead-zone cho error nhỏ
  *
+ *  API tương thích ngược với PidController.h
  * =====================================================================*/
-#ifndef PID_CONTROLLER_H
-#define PID_CONTROLLER_H
+#ifndef PID_CONTROLLER_PRO_H
+#define PID_CONTROLLER_PRO_H
 
 #include "Config.h"
 
 /* ==================== IMPROVED CONSTANTS ========================= */
 /** Speed PID — Cải tiến với feedforward */
-#define PID_SPEED_KP      8.0f    // Tăng từ 0 → responsive hơn
+#define PID_SPEED_KP      8.0f    // Tăng nhẹ từ 0 → P-only responsive
 #define PID_SPEED_KI      0.5f    // Thêm I term cho steady-state accuracy
 #define PID_SPEED_KD      1.5f    // Thêm D term cho damping
 #define PID_SPEED_I_MAX   0.5f    // Giảm từ 0.8 → ít overshoot hơn
-#define PID_SPEED_OUT_MAX ((float)PWM_MAX)
+#define PID_SPEED_OUT_MAX  ((float)PWM_MAX)
 
 /** Yaw/Heading PID — Cải tiến */
 #define PID_YAW_KP        25.0f   // Tăng từ 15 → responsive hơn
@@ -77,7 +79,7 @@ static PidState s_pidYaw = {
  * - Anti-windup cải tiến
  * - Adaptive gains
  */
-static inline float pidCompute(
+static inline float pidComputePro(
     PidState &pid, 
     float setpoint, 
     float measured, 
@@ -117,6 +119,7 @@ static inline float pidCompute(
     pid.integral += err * dt_s;
     
     // Clamping anti-windup
+    float kpErr = kp * err;
     float kiInt = pid.ki * pid.integral;
     
     // Nếu output bị clamp, giảm integral
@@ -149,29 +152,10 @@ inline void pidSpeedReset() {
 }
 
 /**
- * @param targetMps  Tốc độ mong muốn (m/s)
- * @param actualMps  Tốc độ thực (tính từ RPM trung bình)
- * @param dt_s       Chu kỳ điều khiển (giây)
- * @return PWM delta — cộng vào baseSpeed
+ * Speed PID với deadzone
  */
 inline float pidSpeedCompute(float targetMps, float actualMps, float dt_s) {
-    return pidCompute(s_pidSpeed, targetMps, actualMps, dt_s, PID_SPEED_DEADZONE);
-}
-
-/** Chuyển đổi RPM → m/s */
-inline float rpmToMps(float rpm) {
-    return (rpm / 60.0f) * WHEEL_CIRC_M;
-}
-
-/** Tốc độ thực tế (trung bình 4 bánh, m/s) */
-inline float robotActualSpeedMps() {
-    float rpm = (g_state.rpmFL + g_state.rpmFR + g_state.rpmRL + g_state.rpmRR) * 0.25f;
-    return rpmToMps(rpm);
-}
-
-/** Chuyển đổi PWM → m/s ước lượng */
-inline float pwmToEstMps(uint16_t pwm) {
-    return (float)pwm * 0.8f / (float)PWM_MAX;
+    return pidComputePro(s_pidSpeed, targetMps, actualMps, dt_s, PID_SPEED_DEADZONE);
 }
 
 /* ==================== YAW PID ================================ */
@@ -183,9 +167,7 @@ inline void pidYawReset() {
 }
 
 /**
- * @param targetRad  Heading mong muốn (rad)
- * @param actualRad  Heading thực từ g_pose.headingRad
- * @param dt_s       Chu kỳ điều khiển
+ * Yaw PID với deadzone và pre-action
  * @return cmdX delta [-100, 100]
  */
 inline float pidYawCompute(float targetRad, float actualRad, float dt_s) {
@@ -194,16 +176,40 @@ inline float pidYawCompute(float targetRad, float actualRad, float dt_s) {
     while (err >  (float)M_PI) err -= 2.f * (float)M_PI;
     while (err < -(float)M_PI) err += 2.f * (float)M_PI;
     
-    // Pre-action: chỉ dùng bang-bang khi góc lệch cực lớn (> 0.8 rad ~ 46°), giúp PID mượt mà hơn
-    if (abs(err) > 0.80f) {
+    // Pre-action: bang-bang khi lệch lớn → nhanh vào PID range
+    if (abs(err) > PID_PREACT_THRESH) {
         // Sử dụng sign của error làm output tạm
-        float preact = (err > 0) ? PID_YAW_OUT_MAX * 0.7f : -PID_YAW_OUT_MAX * 0.7f;
+        float preact = (err > 0) ? PID_YAW_OUT_MAX * 0.8f : -PID_YAW_OUT_MAX * 0.8f;
         // Reset integral để tránh windup
         s_pidYaw.integral *= 0.5f;
         return preact;
     }
     
-    return pidCompute(s_pidYaw, targetRad, actualRad, dt_s, PID_YAW_DEADZONE);
+    return pidComputePro(s_pidYaw, targetRad, actualRad, dt_s, PID_YAW_DEADZONE);
+}
+
+/* ==================== FEEDFORWARD TERM ========================= */
+/**
+ * Feedforward term cho speed control
+ * Bù trước PWM cần thiết dựa trên target speed
+ */
+inline float pidSpeedFeedforward(float targetMps) {
+    // Linear model: PWM = k * speed + offset
+    // Ước tính: PWM_MAX ≈ 0.8 m/s → k ≈ 1023/0.8 ≈ 1279
+    constexpr float FF_K = 1279.0f;
+    constexpr float FF_OFFSET = (float)MOTOR_DEADBAND_MIN; // Deadband compensation
+    
+    return FF_K * targetMps + FF_OFFSET;
+}
+
+/**
+ * Feedforward cho heading (dựa trên velocity)
+ */
+inline float pidYawFeedforward(float targetOmega, float speed) {
+    // Centripetal compensation: cần steer nhiều hơn khi quay nhanh + đi nhanh
+    // Đơn giản: steer = k * omega * speed
+    constexpr float FF_K = 10.0f;
+    return FF_K * targetOmega * speed;
 }
 
 /* ==================== TUNING HELPERS ========================== */
@@ -255,4 +261,4 @@ inline PidDiagnostics pidYawGetDiagnostics() {
     return d;
 }
 
-#endif // PID_CONTROLLER_H
+#endif // PID_CONTROLLER_PRO_H

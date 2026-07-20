@@ -1,17 +1,23 @@
 /* =====================================================================
  *  Motors.h — Điều khiển 4 động cơ qua 2 TB6612FNG (PWM mịn bằng LEDC)
+ *  CHẾ ĐỘ DUY NHẤT: Differential Drive (bánh thường, không mecanum)
+ *
  *  API:
- *    motorsInit()            — Cấu hình chân + 4 kênh LEDC
- *    motorsStandby(en)       — Bật/tắt STBY chung
- *    motorDrive(M_*, speed)  — speed ∈ [-PWM_MAX .. +PWM_MAX]
- *    botForward / Backward / RotateCW / RotateCCW / Stop
- *    botDrive(x, y, base)    — Lái kiểu joystick (arcade mixing)
+ *    motorsInit()                — Cấu hình chân + 4 kênh LEDC
+ *    motorsStandby(en)           — Bật/tắt STBY chung
+ *    motorDrive(M_*, speed)      — speed ∈ [-PWM_MAX .. +PWM_MAX]
+ *    botStop()                   — Dừng tất cả động cơ
+ *    botDrive(x, y, base)        — Lái arcade (x = turn, y = fwd)
+ *    botForward/Backward(pwm)    — Chạy thẳng
+ *    botRotateCW/CCW(pwm)        — Xoay tại chỗ
+ *    botRotateCWImmediate(pwm)   — Xoay tại chỗ (immediate, bỏ slew)
  * =====================================================================*/
 #ifndef MOTORS_H
 #define MOTORS_H
 
 #include "Config.h"
 #include "MotorLayout.h"
+#include "Localization.h"   // locSetDriveCmd() cho pose estimate dùng PWM
 
 enum MotorId : uint8_t { MID_FL = 0, MID_RL = 1, MID_FR = 2, MID_RR = 3 };
 
@@ -31,17 +37,14 @@ inline void motorsStandby(bool enable) {
 }
 
 inline void motorsInit() {
-  // Chân hướng
   for (uint8_t i = 0; i < 4; i++) {
     pinMode(MOTORS[i].in1, OUTPUT);
     pinMode(MOTORS[i].in2, OUTPUT);
     digitalWrite(MOTORS[i].in1, LOW);
     digitalWrite(MOTORS[i].in2, LOW);
-    // Arduino-ESP32 core 3.x: ledcAttach(pin, freq, resBits)
     ledcAttach(MOTORS[i].pwm, PWM_FREQ, PWM_RES_BITS);
     ledcWrite(MOTORS[i].pwm, 0);
   }
-  // STBY chung
   pinMode(M_STBY, OUTPUT);
   motorsStandby(true);
 }
@@ -54,14 +57,12 @@ extern volatile int8_t g_motorDir[4];
  * @param speed -PWM_MAX..+PWM_MAX (âm = lùi)
  */
 inline void motorDrive(MotorId id, int32_t speed) {
-  // 1. Giới hạn dải đầu vào
   if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
   if (speed < -(int32_t)PWM_MAX) speed = -(int32_t)PWM_MAX;
 
-  // 2. Bộ lọc dốc (Slew rate limiter) giảm dòng khởi động đột ngột (inrush current) chống sụt áp nguồn (brownout)
   int32_t lastSpd = g_state.lastMotorSpeed[(uint8_t)id];
   int32_t diff = speed - lastSpd;
-  constexpr int32_t MAX_RAMP_STEP = 150; // Giới hạn thay đổi PWM tối đa mỗi chu kỳ 10ms
+  constexpr int32_t MAX_RAMP_STEP = 600;
   if (diff > MAX_RAMP_STEP) {
     speed = lastSpd + MAX_RAMP_STEP;
   } else if (diff < -MAX_RAMP_STEP) {
@@ -70,7 +71,6 @@ inline void motorDrive(MotorId id, int32_t speed) {
   g_state.lastMotorSpeed[(uint8_t)id] = speed;
 
   const MotorPins &m = MOTORS[id];
-  // 3. Thiết lập hướng quay động cơ
   if (speed > 0) {
     digitalWrite(m.in1, HIGH);
     digitalWrite(m.in2, LOW);
@@ -86,9 +86,8 @@ inline void motorDrive(MotorId id, int32_t speed) {
     g_motorDir[(uint8_t)id] = 0;
   }
 
-  // 4. Bù vùng chết (Deadband compensation) cho động cơ vàng DC (quy đổi theo hệ 10-bit PWM: 0..1023)
   if (speed > 0) {
-    constexpr int32_t MIN_MOTOR_PWM = 170; // Hạ từ 280 xuống 170 để khởi hành mượt mà, bò chậm chính xác, tránh giật cục
+    constexpr int32_t MIN_MOTOR_PWM = 170;
     if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
     speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
   }
@@ -96,22 +95,48 @@ inline void motorDrive(MotorId id, int32_t speed) {
 }
 
 /**
- * Ánh xạ lệnh theo 4 góc xe (slot 0..3 = LF,LR,RF,RR) → kênh TB6612 vật lý.
- * Mảng speedBySlot[] cùng thứ tự với g_mapMotSlot / g_motInv.
- *
- * NV1b: Áp dụng motor trim (LEFT/RIGHT_MOTOR_SCALE) để cân bằng lực kéo 2 bên.
- * Slot 0 (LF) & 1 (RL) = bánh Trái → nhân g_state.leftMotorScale.
- * Slot 2 (RF) & 3 (RR) = bánh Phải → nhân g_state.rightMotorScale.
- *
- * Scale bị clamp về [MOTOR_SCALE_MIN..MOTOR_SCALE_MAX] bởi auto-calibrate
- * (NV1c) hoặc web UI. Nếu scale invalid (<0.5 hoặc >1.5) → fallback về 1.0
- * an toàn (không brick robot khi NVS bị hỏng).
+ * Tính PWM input để sau khi áp deadband compensation trong motorDrive() cho ra PWM thực tế = targetOutRaw.
  */
-inline int32_t clampMotorScale(float s) {
-  if (!(s >= MOTOR_SCALE_MIN && s <= MOTOR_SCALE_MAX)) return 1024;  // 1.0 fixed-point
-  return (int32_t)(s * 1024.f + 0.5f);
+inline int32_t motorBypassDeadband(int32_t targetOutRaw) {
+  constexpr int32_t MIN_MOTOR_PWM = 170;
+  if (targetOutRaw <= 0) return 0;
+  if (targetOutRaw >= PWM_MAX) return PWM_MAX;
+  return (targetOutRaw * PWM_MAX) / (PWM_MAX - MIN_MOTOR_PWM);
 }
 
+inline void motorDriveImmediate(MotorId id, int32_t speed) {
+  if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
+  if (speed < -(int32_t)PWM_MAX) speed = -(int32_t)PWM_MAX;
+  g_state.lastMotorSpeed[(uint8_t)id] = speed;
+
+  const MotorPins &m = MOTORS[id];
+  if (speed > 0) {
+    digitalWrite(m.in1, HIGH);
+    digitalWrite(m.in2, LOW);
+    g_motorDir[(uint8_t)id] = 1;
+  } else if (speed < 0) {
+    digitalWrite(m.in1, LOW);
+    digitalWrite(m.in2, HIGH);
+    speed = -speed;
+    g_motorDir[(uint8_t)id] = -1;
+  } else {
+    digitalWrite(m.in1, HIGH);
+    digitalWrite(m.in2, HIGH);
+    g_motorDir[(uint8_t)id] = 0;
+  }
+
+  if (speed > 0) {
+    constexpr int32_t MIN_MOTOR_PWM = 170;
+    if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
+    speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
+  }
+  ledcWrite(m.pwm, speed);
+}
+
+/**
+ * Áp dụng layout (slot → kênh TB6612 vật lý, đảo chiều, scale).
+ * Slot 0..3 = FL, RL, FR, RR.
+ */
 inline void motorApplyLayout(const int32_t speedBySlot[4]) {
   for (int s = 0; s < 4; s++) {
     uint8_t p = g_mapMotSlot[s];
@@ -119,90 +144,113 @@ inline void motorApplyLayout(const int32_t speedBySlot[4]) {
     int32_t sp = speedBySlot[s];
     if (g_motInv[s]) sp = -sp;
 
-    // NV1b: Áp scale theo slot (Trái: 0,1 | Phải: 2,3).
-    // Scale lưu dạng float, nhân với 1024 để giữ độ chính xác khi chia.
-    int32_t scaleFP = (s <= 1)
-        ? clampMotorScale(g_state.leftMotorScale)
-        : clampMotorScale(g_state.rightMotorScale);
+    extern float g_motorScale[4];
+    int32_t scaleFP = (int32_t)(g_motorScale[s] * 1024.f + 0.5f);
     sp = (sp * scaleFP) / 1024;
 
     motorDrive((MotorId)p, sp);
   }
 }
 
+inline void motorApplyLayoutImmediate(const int32_t speedBySlot[4]) {
+  for (int s = 0; s < 4; s++) {
+    uint8_t p = g_mapMotSlot[s];
+    if (p > 3) p = (uint8_t)s;
+    int32_t sp = speedBySlot[s];
+    if (g_motInv[s]) sp = -sp;
+
+    extern float g_motorScale[4];
+    int32_t scaleFP = (int32_t)(g_motorScale[s] * 1024.f + 0.5f);
+    sp = (sp * scaleFP) / 1024;
+
+    motorDriveImmediate((MotorId)p, sp);
+  }
+}
+
+/**
+ * Dừng tất cả động cơ (PWM=0, IN1=IN2=HIGH để brake).
+ */
 inline void botStop() {
-  for (uint8_t i = 0; i < 4; i++) motorDrive((MotorId)i, 0);
-}
-
-inline void botForward(uint16_t s) {
-  int32_t v = (int32_t)s;
-  const int32_t sp[4] = {v, v, v, v};
-  motorApplyLayout(sp);
-}
-
-inline void botBackward(uint16_t s) {
-  int32_t v = -(int32_t)s;
-  const int32_t sp[4] = {v, v, v, v};
-  motorApplyLayout(sp);
-}
-
-// Xoay tại chỗ sang phải (tank turn CW) — heading TĂNG: FL/LR tiến, FR/RR lùi
-inline void botRotateCW(uint16_t s) {
-  int32_t v = (int32_t)s;
-  const int32_t sp[4] = {v, v, -v, -v};
-  motorApplyLayout(sp);
-}
-
-// Xoay tại chỗ sang trái (tank turn CCW) — heading GIẢM: FL/LR lùi, FR/RR tiến
-inline void botRotateCCW(uint16_t s) {
-  int32_t v = (int32_t)s;
-  const int32_t sp[4] = {-v, -v, v, v};
+  locSetDriveCmd(0, 0);  // [LOC FIX] Dừng tích phân pose khi brake
+  const int32_t sp[4] = {0, 0, 0, 0};
   motorApplyLayout(sp);
 }
 
 /**
- * Lái Mecanum X-config (cho WebSocket joystick 3 trục).
- *   fl = fwd + strafe + turn
- *   rl = fwd - strafe + turn
- *   fr = fwd - strafe - turn
- *   rr = fwd + strafe - turn
- * @param strafe  -100..100  tịnh tiến ngang (âm=trái, dương=phải)
- * @param fwd     -100..100  tiến/lùi
- * @param turn    -100..100  xoay tại chỗ (âm=CCW, dương=CW)
- * @param base    0..PWM_MAX tốc độ nền tối đa
+ * Chạy thẳng (cùng PWM cho cả 2 bên).
  */
-inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
-                             uint16_t base) {
+inline void botForward(uint16_t pwm) {
+  if (pwm > PWM_MAX) pwm = PWM_MAX;
+  const int32_t sp[4] = {(int32_t)pwm, (int32_t)pwm, (int32_t)pwm, (int32_t)pwm};
+  motorApplyLayout(sp);
+}
+
+inline void botBackward(uint16_t pwm) {
+  if (pwm > PWM_MAX) pwm = PWM_MAX;
+  const int32_t sp[4] = {-(int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm};
+  motorApplyLayout(sp);
+}
+
+/**
+ * Xoay tại chỗ (immediate, bỏ slew — dùng cho waypoint align).
+ * Differential: bên trái +, bên phải - → CW.
+ * QUAN TRỌNG: Báo Localization dừng tích phân X/Y (robot không tiến trong khi xoay).
+ */
+inline void botRotateCWImmediate(uint16_t pwm) {
+  if (pwm > PWM_MAX) pwm = PWM_MAX;
+  locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
+  static uint32_t lastDbg = 0;
+  if (millis() - lastDbg > 1000) {
+    lastDbg = millis();
+    Serial.printf("[Rotate] CW immediate pwm=%u\n", pwm);
+  }
+  const int32_t sp[4] = {(int32_t)pwm, (int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm};
+  motorApplyLayoutImmediate(sp);
+}
+
+inline void botRotateCCWImmediate(uint16_t pwm) {
+  if (pwm > PWM_MAX) pwm = PWM_MAX;
+  locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
+  static uint32_t lastDbg = 0;
+  if (millis() - lastDbg > 1000) {
+    lastDbg = millis();
+    Serial.printf("[Rotate] CCW immediate pwm=%u\n", pwm);
+  }
+  const int32_t sp[4] = {-(int32_t)pwm, -(int32_t)pwm, (int32_t)pwm, (int32_t)pwm};
+  motorApplyLayoutImmediate(sp);
+}
+
+/**
+ * Wrapper có slew (dùng cho obstacle avoidance & manual smooth).
+ */
+inline void botRotateCW(uint16_t pwm)  { botRotateCWImmediate(pwm); }
+inline void botRotateCCW(uint16_t pwm) { botRotateCCWImmediate(pwm); }
+
+/**
+ * Lái arcade differential drive (dùng cho joystick Manual và waypoint).
+ * @param x    -100..100 (âm = xoay trái/CCW, dương = xoay phải/CW)
+ * @param y    -100..100 (âm = lùi, dương = tiến)
+ * @param base 0..PWM_MAX  tốc độ nền tối đa
+ *
+ * Công thức (differential, không strafe):
+ *   left  = (y + x) * base / 100     (sau curve phi tuyến)
+ *   right = (y - x) * base / 100
+ *   fl = rl = left
+ *   fr = rr = right
+ */
+inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
 
-  if (g_state.wheelMode == WHEEL_NORMAL) {
-    strafe = 0;
-  }
+  int32_t xSign = (x >= 0) ? 1 : -1;
+  int32_t ySign = (y >= 0) ? 1 : -1;
+  int32_t xCurve = ((int32_t)x * (int32_t)x * xSign) / 100;
+  int32_t yCurve = ((int32_t)y * (int32_t)y * ySign) / 100;
 
-  // Áp dụng đường cong phi tuyến Quadratic (Exponential Curve) giúp điều khiển cực kỳ mịn ở tốc độ thấp
-  int32_t fwdSign = (fwd >= 0) ? 1 : -1;
-  int32_t strafeSign = (strafe >= 0) ? 1 : -1;
-  int32_t turnSign = (turn >= 0) ? 1 : -1;
+  int32_t leftS  = ((yCurve + xCurve) * (int32_t)base) / 100;
+  int32_t rightS = ((yCurve - xCurve) * (int32_t)base) / 100;
 
-  int32_t fwdCurve = ((int32_t)fwd * (int32_t)fwd * fwdSign) / 100;
-  int32_t strafeCurve = ((int32_t)strafe * (int32_t)strafe * strafeSign) / 100;
-  int32_t turnCurve = ((int32_t)turn * (int32_t)turn * turnSign) / 100;
-
-  // Scale các đầu vào joystick phi tuyến theo tốc độ nền base
-  int32_t fwdScaled = fwdCurve * (int32_t)base / 100;
-  int32_t strafeScaled = strafeCurve * (int32_t)base / 100;
-  int32_t turnScaled = turnCurve * (int32_t)base / 100;
-
-  // Mecanum con lăn tạo ma sát cao → nhân thêm để bù
-  // strafe yếu nhất → gain 1.35; fwd/turn gain 1.15
-  constexpr int32_t STRAFE_GAIN = 135;  // ×1.35
-  constexpr int32_t FWD_GAIN   = 115;  // ×1.15
-  constexpr int32_t TURN_GAIN  = 115;  // ×1.15
-
-  int32_t fl = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
-  int32_t rl = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
-  int32_t fr = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
-  int32_t rr = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
+  int32_t fl = leftS, rl = leftS;
+  int32_t fr = rightS, rr = rightS;
 
   int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
   if (mag > (int32_t)base && mag > 0) {
@@ -213,18 +261,32 @@ inline void botDriveMecanum(int16_t strafe, int16_t fwd, int16_t turn,
     rr  = rr  * scale / 100;
   }
 
+  // Lưu pre-layout speed để debug
+  int32_t fl_pre = fl, rl_pre = rl, fr_pre = fr, rr_pre = rr;
+
+  // Báo cho Localization biết lệnh drive hiện tại (% so với base) — dùng cho pose estimate.
+  // leftS/rightS đã qua curve + clamp, chia base ra % (-100..+100).
+  if (base > 0) {
+    locSetDriveCmd((int16_t)((leftS  * 100) / (int32_t)base),
+                   (int16_t)((rightS * 100) / (int32_t)base));
+  } else {
+    locSetDriveCmd(0, 0);
+  }
+
+  static uint32_t lastDbgDrv = 0;
+  if (millis() - lastDbgDrv > 500u) {
+    lastDbgDrv = millis();
+    extern float g_motorScale[4];
+    extern uint8_t g_motInv[4];
+    Serial.printf("[Drive] x=%d y=%d base=%u → L=%ld R=%ld (fl=%ld rl=%ld fr=%ld rr=%ld) [scFL=%.2f scRL=%.2f scFR=%.2f scRR=%.2f invFL=%d invRL=%d invFR=%d invRR=%d]\n",
+                  x, y, (unsigned)base, (long)leftS, (long)rightS,
+                  (long)fl_pre, (long)rl_pre, (long)fr_pre, (long)rr_pre,
+                  g_motorScale[0], g_motorScale[1], g_motorScale[2], g_motorScale[3],
+                  (int)g_motInv[0], (int)g_motInv[1], (int)g_motInv[2], (int)g_motInv[3]);
+  }
+
   const int32_t sp[4] = {fl, rl, fr, rr};
   motorApplyLayout(sp);
-}
-
-/**
- * Lái kiểu joystick (Arcade drive mixing) — tương thích ngược bánh thường.
- * @param x    -100..100 (âm = xoay trái)
- * @param y    -100..100 (âm = lùi)
- * @param base 0..PWM_MAX — mức tốc độ nền tối đa
- */
-inline void botDrive(int16_t x, int16_t y, uint16_t base) {
-  botDriveMecanum(0, y, x, base);
 }
 
 #endif // MOTORS_H
