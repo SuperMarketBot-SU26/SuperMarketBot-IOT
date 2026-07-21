@@ -254,6 +254,41 @@ class MainActivity : AppCompatActivity() {
                 emergencyStop()
             }
 
+            // [Phase 9] Line sensor telemetry → LineSensorBridge
+            val navigator = WaypointNavigatorService.getInstance()?.navigator
+            if (navigator != null) {
+                WaypointNavigatorService.getInstance()?.motorLink?.let { ml ->
+                    ml.addTelemetryListener { t ->
+                        // Parse line data
+                        navigator.lineBridge.onTelemetry(t)
+                        // Auto-register node nếu thiếu
+                        navigator.syncBridgeToSLAMPose()
+                    }
+                }
+
+                // Subscribe node events để snap pose
+                val coroutineScope = kotlinx.coroutines.CoroutineScope(
+                    kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.Job())
+                coroutineScope.launch {
+                    navigator.lineBridge.nodeEvents.collect { ev ->
+                        navigator.onNodeCrossed(ev.nodeId)
+                        appendLog("[NODE] Crossed node #${ev.nodeId}")
+                        slamMapView?.invalidate()
+                    }
+                }
+
+                // [Phase 9] Initial render of nodes when map loaded
+                coroutineScope.launch {
+                    navigator.lineBridge.snapshot.collect {
+                        // refresh node list trên UI mỗi frame change
+                        val list = navigator.nodeRegistry.all().map { n ->
+                            SLAMMapView.NodeRenderData(n.id, n.x, n.y, n.label)
+                        }
+                        slamMapView?.setNodes(list)
+                    }
+                }
+            }
+
             // Set initial status
             txtSlamStatus.text = "SLAM: IDLE"
 
@@ -312,7 +347,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val persistence = MapPersistence(this)
-        val path = persistence.saveMap(engine)
+        val navigator = WaypointNavigatorService.getInstance()?.navigator
+        val path = persistence.saveMap(engine, "default", navigator?.nodeRegistry)
         appendLog(if (path != null) "[SAVE] Map → $path" else "[SAVE] Failed")
         txtSlamStatus.text = if (path != null) "SAVED" else "SAVE FAIL"
     }
@@ -333,12 +369,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val latest = maps.last()  // sorted alphabetically, last = newest
-        val ok = persistence.loadMap(engine, latest)
+        val navigator = WaypointNavigatorService.getInstance()?.navigator
+        val ok = persistence.loadMap(engine, latest, navigator?.nodeRegistry)
         appendLog(if (ok) "[LOAD] Map ← $latest" else "[LOAD] Failed")
         txtSlamStatus.text = if (ok) "LOADED" else "LOAD FAIL"
 
         // Refresh SLAMMapView
         slamMapView?.updateGrid(engine.getRawGrid())
+        val nodes = navigator?.nodeRegistry?.all() ?: emptyList()
+        slamMapView?.setNodes(nodes.map { SLAMMapView.NodeRenderData(it.id, it.x, it.y, it.label) })
     }
 
     /**

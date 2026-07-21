@@ -76,6 +76,9 @@ struct OaContext {
   bool       dynamicCheckDone = false;
 };
 
+/** Global OA context (defined in SuperMarketBot-IOT.ino). */
+extern OaContext g_oaCtx;
+
 /* ==================== HELPERS ==================== */
 static inline float oaNorm(float a) {
   while (a >  (float)M_PI) a -= 2.f * (float)M_PI;

@@ -18,12 +18,16 @@
 #include "SensorLayout.h"
 #include "MotorLayout.h"
 #include "MotorTrim.h"   // NV1c — motorTrimInit() gọi từ webUIInit()
+#include "LineDecoder.h" // cần extern g_lineSpeedPct (slider mode LINE)
 
 Preferences g_prefs;
 #include "CtrlJson.h"
 #include "VisionTablet.h"
 #include "VisionHttps.h"
 #include "MqttClient.h"
+
+// Fallback extern g_lineSpeedPct — chắc chắn thấy
+extern uint8_t g_lineSpeedPct;
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
@@ -257,6 +261,7 @@ input.spd-range{
   -webkit-appearance:none;appearance:none;
 }
 input.spd-range--auto{--fill-a:#fbbf24;--fill-b:#38bdf8}
+input.spd-range--line{--fill-a:#a78bfa;--fill-b:#22d3ee}
 /* WebKit: vạch nền + phần đã chọn */
 input.spd-range::-webkit-slider-runnable-track{
   height:14px;border-radius:7px;
@@ -271,6 +276,9 @@ input.spd-range::-webkit-slider-thumb{
 }
 .spd-block--auto input.spd-range::-webkit-slider-thumb{
   border-color:#fbbf24;box-shadow:0 4px 14px rgba(251,191,36,.35),0 2px 4px rgba(0,0,0,.4);
+}
+.spd-block--line input.spd-range--line::-webkit-slider-thumb{
+  border-color:#a78bfa;box-shadow:0 4px 14px rgba(167,139,250,.35),0 2px 4px rgba(0,0,0,.4);
 }
 /* Firefox */
 input.spd-range::-moz-range-track{
@@ -368,10 +376,11 @@ details pre{
 <div class="wrap">
   <header class="brand">
     <h1>SMARTMARKETBOT</h1>
-    <p class="desc">IoT Edge HMI &mdash; <strong>4× HC-SR04</strong> (trái/phải trước–sau): dừng &lt;30&nbsp;cm, tự hành lách theo bên trống. Vòng tròn lớn = min trước/sau; thanh 4 góc = từng cảm biến.</p>
+    <p class="desc">IoT Edge HMI &mdash; <strong>4× HC-SR04</strong> (TRIG chung GPIO16, ECHO 35-38): dừng &lt;30&nbsp;cm, tự hành lách theo bên trống. Vòng tròn lớn = min trước/sau; thanh 4 góc = từng cảm biến.</p>
     <div class="pillrow">
       <span class="pill">TF-Luna &middot; quét 2 hướng</span>
       <span class="pill safety">Né vật · LiDAR (+ SR04 tùy chọn)</span>
+      <span class="pill">8× TCRT5000 &middot; ADC1: 1,2,3,10,11,12,13,14</span>
     </div>
   </header>
 
@@ -447,15 +456,21 @@ details pre{
     <div class="col col-drive" id="sec-drive">
       <p class="rail-title">Vận hành</p>
       <div class="card">
-        <h2>Điều khiển</h2>
+        <h2><span class="dot"></span> 🎮 ĐIỀU KHIỂN &amp; VẬN HÀNH</h2>
         <div class="ctrl-stack">
           <div id="jsZone"><div id="jsKnob"></div></div>
-          <div class="toggle-row">
-            <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">Lái tay</button>
-            <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">Tự hành (demo)</button>
-            <button type="button" class="mode-btn" id="btnRoute" onclick="setMode(2)">MQTT (Lộ trình)</button>
+          <p class="hint" style="margin-top:8px;margin-bottom:4px;font-size:.68rem;font-weight:700;letter-spacing:.05em;color:var(--muted);text-transform:uppercase">CHUYỂN CHẾ ĐỘ ĐIỀU KHIỂN:</p>
+          <div class="toggle-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+            <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">LÁI TAY</button>
+            <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">TỰ HÀNH</button>
+            <button type="button" class="mode-btn" id="btnRoute" onclick="setMode(2)">WAYPOINT</button>
+            <button type="button" class="mode-btn" id="btnLine" onclick="setMode(3)">DÒ LINE</button>
           </div>
-          <div class="spd-block spd-block--manual">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <button type="button" class="estop" style="margin-top:0;font-size:.8rem" onclick="sendEstop()">ESTOP (DỪNG KHẨN)</button>
+            <button type="button" class="btn-ghost" style="margin-top:0;font-size:.8rem;font-weight:600" onclick="odomReset()">🔄 Đặt lại Odom</button>
+          </div>
+          <div class="spd-block spd-block--manual" style="margin-top:10px">
             <div class="spd-block__head">
               <div>
                 <div class="spd-block__label">Tốc độ · Lái tay</div>
@@ -503,8 +518,18 @@ details pre{
               oninput="sendSpeedSwerve(this.value)" aria-label="Tốc độ tránh vật phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>45%</span><span>100%</span></div>
           </div>
-          <p class="hint" style="margin-top:8px;font-size:.68rem">Demo: <b>đi thẳng</b> → trước &lt; <code>AUTO_LIDAR_BLOCK_CM</code> thì <b>dừng</b> (<code>AUTO_STOP_HOLD_MS</code>) → <b>xoay quét</b> CW rồi CCW (<code>AUTO_SCAN_*_MS</code>) → lại <b>đi thẳng</b>. LiDAR sau vẫn đo trong lúc dừng. Không mắt ngang → không bẻ hông (trừ khi bật SR04).</p>
-          <button type="button" class="estop" onclick="sendEstop()">DỪNG KHẨN CẤP</button>
+          <div class="spd-block spd-block--line">
+            <div class="spd-block__head">
+              <div>
+                <div class="spd-block__label">Tốc độ · Dò line</div>
+                <div class="spd-block__hint">TCRT5000 8-ch — bám line, dấu +, né vật (15–100%)</div>
+              </div>
+              <span class="spd-block__badge" id="spdLineVal">60%</span>
+            </div>
+            <input type="range" class="spd-range spd-range--line" id="spdLineSlider" min="15" max="100" value="60"
+              oninput="sendSpeedLine(this.value)" aria-label="Tốc độ dò line phần trăm"/>
+            <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
+          </div>
         </div>
       </div>
 
@@ -573,8 +598,12 @@ details pre{
       </div>
 
       <div class="card" id="sec-layout">
-        <h2><span class="dot"></span> Bố trí cảm biến (team — không đổi dây GPIO)</h2>
-        <p class="hint">Chọn cổng Siêu âm vật lý tương ứng với vị trí trên xe (0–3, không trùng).</p>
+        <h2><span class="dot"></span> Bố trí cảm biến (team &mdash; kh&ocirc;ng đổi d&acirc;y GPIO)</h2>
+        <p class="hint">Chọn cổng Siêu &acirc;m vật lý tương ứng với vị trí tr&ecirc;n xe (0&ndash;3, kh&ocirc;ng tr&ugrave;ng).</p>
+        <p class="hint" style="margin-top:4px">
+          <b>HC-SR04 (đã move):</b> TRIG chung GPIO16 &middot; ECHO 35 (Trước-trái), 36 (Sau-trái), 37 (Trước-phải), 38 (Sau-phải, RGB LED đ&atilde; tắt).
+          GPIO35-38 input-only &rarr; nếu module kh&ocirc;ng c&oacute; pull-up 10K sẵn, cần th&ecirc;m R 10K&Omega; l&ecirc;n 3V3.
+        </p>
         <div class="layout-form" id="layGrid"></div>
         <div class="layout-lid" style="display:none">
           <label>LiDAR phía <b>trước</b> xe đang là UART</label>
@@ -665,7 +694,15 @@ let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=200;
 const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
 const SENS_LBL=['Trước (Front)','Sau (Back)','Trái (Left)','Phải (Right)'];
-const PHY_US=[{v:0,t:'US Trước (Echo 10)'},{v:1,t:'US Sau (Echo 11)'},{v:2,t:'US Trái (Echo 12)'},{v:3,t:'US Phải (Echo 13)'}];
+// ★ Move US sang GPIO16,35,36,37,38 để nhường ADC1 cho TCRT5000 (xem Config.h).
+//   Index 0..3 = 4 cảm biến HC-SR04; GPIO ghi đúng với US_TRIG=16, US_ECHO_LF=35, _RL=36, _RF=37, _RR=38.
+//   Lưu ý: GPIO35..38 là input-only, cần pull-up 10K ngoài nếu module HC-SR04 không có sẵn.
+const PHY_US=[
+  {v:0, t:'US #0 — TRIG 16 / ECHO_LF 35 (Trước-trái)'},
+  {v:1, t:'US #1 — TRIG 16 / ECHO_RL 36 (Sau-trái)'},
+  {v:2, t:'US #2 — TRIG 16 / ECHO_RF 37 (Trước-phải)'},
+  {v:3, t:'US #3 — TRIG 16 / ECHO_RR 38 (Sau-phải, RGB LED đã tắt)'}
+];
 const PHY_ENC=[{v:0,t:'Enc FL (GPIO39)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
 const PHY_MOT=[
   {v:0,t:'#1-A FL — PWM4, AIN 5/6 → AO1-AO2'},
@@ -992,8 +1029,8 @@ function applyTelemetry(d){
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
-      ml.textContent=(d.mode===2)?'MQTT (Lộ trình)':((d.mode===1)?'Tự hành':'Lái tay');
-      ml.className=(d.mode===1||d.mode===2)?'mode-auto':'mode-manual';
+      ml.textContent=(d.mode===3)?'DÒ LINE':((d.mode===2)?'WAYPOINT':((d.mode===1)?'Tự hành':'Lái tay'));
+      ml.className=(d.mode>0)?'mode-auto':'mode-manual';
       const wl=document.getElementById('wheelLabel');
       if(wl){
         wl.textContent='Bánh Thường (4WD vi sai)';
@@ -1007,9 +1044,11 @@ function applyTelemetry(d){
       const btnMan = document.getElementById('btnManual');
       const btnAut = document.getElementById('btnAuto');
       const btnRot = document.getElementById('btnRoute');
+      const btnLin = document.getElementById('btnLine');
       if(btnMan) btnMan.classList.toggle('active', d.mode===0);
       if(btnAut) btnAut.classList.toggle('active', d.mode===1);
       if(btnRot) btnRot.classList.toggle('active', d.mode===2);
+      if(btnLin) btnLin.classList.toggle('active', d.mode===3);
       const eb=document.getElementById('eBadge');
       if(d.estop) eb.classList.add('on'); else eb.classList.remove('on');
       if(d.tempC!=null && d.tempC>=0){
@@ -1091,6 +1130,16 @@ function applyTelemetry(d){
           document.getElementById('spdSwerveVal').textContent=String(d.spdSwervePct)+'%';
         }
       }
+      if(d.spdLinePct!=null){
+        const sl=document.getElementById('spdLineSlider');
+        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
+        if(sl && document.activeElement!==sl && !touched){
+          const lv=Math.max(15,Math.min(100,d.spdLinePct));
+          sl.value=lv;
+          paintSpdTrack(sl,lv);
+          document.getElementById('spdLineVal').textContent=String(d.spdLinePct)+'%';
+        }
+      }
       if(!window._rawJTick) window._rawJTick=0;
       if((++window._rawJTick%8)===0){
         const rj=document.getElementById('rawJ');
@@ -1139,13 +1188,23 @@ function sendSpeedSwerve(v){
   document.getElementById('spdSwerveVal').textContent=v+'%';
   wsS({t:'spdSwerve',v:parseInt(v,10)});
 }
+function sendSpeedLine(v){
+  window._lastSliderTouch = Date.now();
+  const el=document.getElementById('spdLineSlider');
+  paintSpdTrack(el,v);
+  document.getElementById('spdLineVal').textContent=v+'%';
+  wsS({t:'spdLine',v:parseInt(v,10)});
+}
 function setMode(m){
-  document.getElementById('btnManual').classList.toggle('active',m===0);
-  document.getElementById('btnAuto').classList.toggle('active',m===1);
-  document.getElementById('btnRoute').classList.toggle('active',m===2);
+  const bM = document.getElementById('btnManual'); if(bM) bM.classList.toggle('active',m===0);
+  const bA = document.getElementById('btnAuto'); if(bA) bA.classList.toggle('active',m===1);
+  const bR = document.getElementById('btnRoute'); if(bR) bR.classList.toggle('active',m===2);
+  const bL = document.getElementById('btnLine'); if(bL) bL.classList.toggle('active',m===3);
   const ml=document.getElementById('modeLabel');
-  ml.textContent=(m===2)?'MQTT (Lộ trình)':((m===1)?'Tự hành (demo)':'Lái tay');
-  ml.className=(m===1||m===2)?'mode-auto':'mode-manual';
+  if(ml) {
+    ml.textContent=(m===3)?'DÒ LINE':((m===2)?'WAYPOINT':((m===1)?'Tự hành (demo)':'Lái tay'));
+    ml.className=(m>0)?'mode-auto':'mode-manual';
+  }
   wsS({t:'mode',m});
 }
 function sendEstop(){ wsS({t:'estop'}); }
@@ -1237,10 +1296,11 @@ initSecNav();
 buildLayoutGrid();
 buildMotorGrid();
 buildBump();
-(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider');
+(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider'),d=document.getElementById('spdLineSlider');
   if(a){paintSpdTrack(a,a.value);document.getElementById('spdVal').textContent=a.value+'%';}
   if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}
-  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}})();
+  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}
+  if(d){paintSpdTrack(d,d.value);document.getElementById('spdLineVal').textContent=d.value+'%';}})();
 connectWS();
 </script>
 </body>
@@ -1391,6 +1451,8 @@ inline void webUIInit() {
   g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", PWM_MAX * 60 / 100);
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 40 / 100);
   g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 10 / 100);
+  g_lineSpeedPct = g_prefs.getUChar("lineSpeedPct", 60);
+  if (g_lineSpeedPct < 15) g_lineSpeedPct = 15;
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);

@@ -33,6 +33,10 @@ class WaypointNavigatorService : Service() {
     companion object {
         private const val TAG = "WaypointNavigator"
 
+        // Static instance for cross-component access (e.g., MainActivity)
+        @Volatile private var sInstance: WaypointNavigatorService? = null
+        fun getInstance(): WaypointNavigatorService? = sInstance
+
         // Actions for broadcast
         const val ACTION_NAV_STATE_CHANGED = "com.smartmarketbot.hub.NAV_STATE_CHANGED"
         const val ACTION_TARGET_REACHED = "com.smartmarketbot.hub.TARGET_REACHED"
@@ -77,10 +81,12 @@ class WaypointNavigatorService : Service() {
     inner class NavigatorBinder : Binder() {
         fun getService(): WaypointNavigatorService = this@WaypointNavigatorService
         fun getNavigator(): NavigatorCore? = navigator
+        fun getMotorLink(): MotorLink? = navigator?.motorLink
     }
 
     override fun onCreate() {
         super.onCreate()
+        sInstance = this  // register for cross-component access
         // [Phase 7] Foreground notification
         try {
             val channelId = "waypoint_navigator"
@@ -213,6 +219,7 @@ class WaypointNavigatorService : Service() {
         stopControlLoop()
         navigator?.closeMotorLink()
         navigator?.cancel()
+        sInstance = null  // unregister
         Log.i(TAG, "WaypointNavigatorService destroyed")
     }
 }

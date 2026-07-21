@@ -52,6 +52,19 @@ class MotorLink(
         .readTimeout(0, TimeUnit.MILLISECONDS)  // WebSocket forever
         .build()
 
+    /** Subscribers nhận telemetry frames (parsed JSON). Thread-safe. */
+    private val telemetryListeners = java.util.concurrent.CopyOnWriteArrayList<(org.json.JSONObject) -> Unit>()
+
+    /** Add subscriber. */
+    fun addTelemetryListener(l: (org.json.JSONObject) -> Unit) {
+        telemetryListeners.add(l)
+    }
+
+    /** Remove subscriber. */
+    fun removeTelemetryListener(l: (org.json.JSONObject) -> Unit) {
+        telemetryListeners.remove(l)
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** Mở WebSocket connection. Idempotent. */
@@ -139,8 +152,15 @@ class MotorLink(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, "RX: $text")
-            // TODO: parse telemetry nếu cần
+            // Telemetry frames from ESP32 (50Hz). Parse + dispatch to subscribers.
+            // Telemetry KHÔNG có `t` key (only `t:"joy"`, `t:"estop"` for inbound cmd).
+            try {
+                if (text.contains("\"t\"")) return  // ignore echo of our own cmd
+                val obj = org.json.JSONObject(text)
+                telemetryListeners.forEach { it(obj) }
+            } catch (e: Exception) {
+                // Truncated buffer / non-JSON → ignore
+            }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

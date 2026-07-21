@@ -10,17 +10,34 @@
 #include "Sensors.h"
 #include "Odometry.h"
 #include "MotorTrim.h"   // NV1c — motor trim state accessor for telemetry
+#include "LineDecoder.h" // cần extern g_lineSpeedPct (slider mode LINE)
+#include "LineSensor.h"  // Phase 9 — line sensor pattern enum
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <cstdio>
 #include <esp_heap_caps.h>
 
+// Fallback extern để chắc chắn thấy biến
+extern uint8_t g_lineSpeedPct;
+
 /** Đọc nhiệt độ chip (°C). Trả về NAN nếu không đọc được. */
 inline float readChipTempCelsius() {
   float t = temperatureRead();
   if (t < -40.f || t > 125.f) return NAN;
   return t;
+}
+
+/** Convert LinePattern enum → string cho WebSocket telemetry. */
+inline const char* linePatternToStr(LinePattern p) {
+  switch (p) {
+    case LINE_PAT_UNKNOWN:  return "unknown";
+    case LINE_PAT_LOST:     return "lost";
+    case LINE_PAT_TRACKING: return "track";
+    case LINE_PAT_JUNCTION: return "junc";
+    case LINE_PAT_NODE:     return "node";
+  }
+  return "unknown";
 }
 
 /** 0 = OK, 1 = cảnh báo, 2 = nghiêm trọng (nhiệt + heap SRAM nội bộ). */
@@ -118,6 +135,18 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
   doc["upMs"] = (uint32_t)millis();
   doc["apCli"] = WiFi.softAPgetStationNum();
 
+#if USE_LINE_SENSOR
+  // Phase 9 — Line sensor telemetry
+  JsonArray lr = doc["lineR"].to<JsonArray>();
+  for (int i = 0; i < 8; i++) lr.add(g_state.lineRaw[i]);
+  doc["lineOff"]    = g_state.lineOffset;
+  doc["lineMask"]   = g_state.lineActiveMask;
+  doc["lineStab"]   = g_state.lineStableFrames;
+  doc["linePat"]    = linePatternToStr((LinePattern)g_state.linePattern);
+  doc["linePatRaw"] = (uint8_t)g_state.linePattern;
+  doc["lastNode"]   = g_state.lastNodeId;
+#endif
+
   // NV1c — Motor trim telemetry (để web/BE debug drift + auto-cal)
   doc["scaleL"] = (double)g_state.leftMotorScale;
   doc["scaleR"] = (double)g_state.rightMotorScale;
@@ -179,6 +208,8 @@ inline void robotTelemetryFillJson(JsonDocument &doc, bool includeSlow = true) {
       g_state.swerveBaseSpeed ? g_state.swerveBaseSpeed : (PWM_MAX * 40 / 100);
   doc["spdSwervePct"] =
       (swerveSpdUse * 100u) / (uint32_t)(PWM_MAX ? PWM_MAX : 1u);
+  // Line mode speed (slider)
+  doc["spdLinePct"] = (int)g_lineSpeedPct;
   uint32_t rotateSpdUse =
       g_state.rotateBaseSpeed ? g_state.rotateBaseSpeed : (PWM_MAX * 10 / 100);
   doc["spdRotatePct"] =

@@ -71,11 +71,25 @@ class SLAMMapView @JvmOverloads constructor(
         style = Paint.Style.FILL
         isAntiAlias = true
     }
-    
+
     private val waypointTextPaint = Paint().apply {
         color = Color.WHITE
         textSize = 28f
         textAlign = Paint.Align.CENTER
+        isAntiAlias = true
+    }
+
+    // Phase 9 — line node rendering
+    private val nodePaint = Paint().apply {
+        color = Color.rgb(0, 200, 100)
+        strokeWidth = 4f
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    private val nodeTextPaint = Paint().apply {
+        color = Color.rgb(0, 200, 100)
+        textSize = 24f
         isAntiAlias = true
     }
     
@@ -95,6 +109,21 @@ class SLAMMapView @JvmOverloads constructor(
     private var robotPose: SLAMEngine.Pose = SLAMEngine.Pose()
     private var pathPoints: List<PointF> = emptyList()
     private var waypoints: List<WaypointData> = emptyList()
+
+    // Phase 9 — line nodes
+    private var nodes: List<NodeRenderData> = emptyList()
+    private var showNodes = true
+
+    /**
+     * Update nodes to render. Call from MainActivity or NavigatorCore.
+     */
+    fun setNodes(list: List<NodeRenderData>) {
+        nodes = list
+        invalidate()
+    }
+
+    /** Simple data class for rendering. */
+    data class NodeRenderData(val id: Int, val x: Float, val y: Float, val label: String = "")
 
     // View settings
     private var viewScale = 50f  // pixels per meter
@@ -377,15 +406,44 @@ class SLAMMapView @JvmOverloads constructor(
         for (wp in waypoints) {
             val screenX = centerX + (wp.x - robotPose.x) * viewScale
             val screenY = centerY - (wp.y - robotPose.y) * viewScale
-            
+
             // Draw circle
             val color = if (wp.isTarget) Color.rgb(255, 87, 34) else Color.rgb(255, 152, 0)
             waypointPaint.color = color
-            
+
             canvas.drawCircle(screenX, screenY, 20f, waypointPaint)
-            
+
             // Draw index
             canvas.drawText(wp.index.toString(), screenX, screenY + 10f, waypointTextPaint)
+        }
+
+        // Phase 9 — render line nodes (dấu +)
+        if (showNodes) drawNodes(canvas, centerX, centerY)
+    }
+
+    /**
+     * Phase 9 — Render line nodes: dấu + với label "N1", "N2", ...
+     * Mỗi node = vị trí tuyệt đối (snap point) trên line backbone.
+     */
+    private fun drawNodes(canvas: Canvas, centerX: Float, centerY: Float) {
+        for (node in nodes) {
+            val screenX = centerX + (node.x - robotPose.x) * viewScale
+            val screenY = centerY - (node.y - robotPose.y) * viewScale
+
+            // Dấu + : hai đường giao nhau
+            val armLen = 18f
+            nodePaint.color = Color.rgb(0, 200, 100)  // xanh lá nổi bật
+            canvas.drawLine(screenX - armLen, screenY, screenX + armLen, screenY, nodePaint)
+            canvas.drawLine(screenX, screenY - armLen, screenX, screenY + armLen, nodePaint)
+
+            // Vòng tròn bao (để dễ thấy)
+            nodePaint.style = Paint.Style.STROKE
+            canvas.drawCircle(screenX, screenY, armLen + 4f, nodePaint)
+            nodePaint.style = Paint.Style.FILL
+
+            // Label
+            val label = "N${node.id}"
+            canvas.drawText(label, screenX + armLen + 8f, screenY + 8f, nodeTextPaint)
         }
     }
 

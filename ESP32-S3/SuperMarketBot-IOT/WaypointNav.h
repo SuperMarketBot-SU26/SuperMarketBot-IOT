@@ -255,9 +255,8 @@ inline void wpNavTick() {
   const int16_t  fCm   = obsFrontCm();
   const int16_t  bCm   = obsBackCm();
 
-  /* ── Safety hardstop — chỉ dừng khi đã align xong ───────── */
-  const bool hardFront = obsFrontBlocked();
-  if (hardFront && s_wpAligned) {
+  /* ── Safety hardstop — chỉ dừng khi không né được (OA_BLOCKED) ── */
+  if (s_wpOa.state == OA_BLOCKED) {
     botStop();
   }
 
@@ -425,7 +424,7 @@ inline void wpNavTick() {
     float alpha = wpAngleDiff(s_wpSegmentHeading, g_pose.headingRad);
 
     if (!s_wpAligned) {
-      if (fabsf(alpha) > 1.047f) {   // > 60° → cần xoay trước khi tiến
+      if (fabsf(alpha) > 0.349f) {   // > 20° → cần xoay trước khi tiến
         // ──── Khóa chiều xoay ĐÚNG ngay từ đầu, KHÔNG bao giờ đổi lại ────
         // Đã xác nhận từ log: botRotateCWImmediate → heading TĂNG
         //                     botRotateCCWImmediate → heading GIẢM
@@ -438,7 +437,7 @@ inline void wpNavTick() {
           Serial.printf("[WP SPIN START] alpha=%.2f rad → dir=%s (shortest path)\n",
                         alpha, s_wpSpinDir < 0 ? "CW(+hdg)" : "CCW(-hdg)");
         }
-        // KHÔNG update s_wpSpinDir nữa — khóa hoàn toàn cho đến khi alpha < 60°
+        // KHÔNG update s_wpSpinDir nữa — khóa hoàn toàn cho đến khi alpha < 20°
 
         // PWM tỉ lệ 200..250, mượt không vọt lố
         uint16_t spinPwm = 200u + (uint16_t)(fabsf(alpha) * 13.0f);
@@ -467,7 +466,7 @@ inline void wpNavTick() {
         return;  // Chưa aligned → không tiến
 
       } else {
-        // alpha <= 60°: đủ thẳng → aligned, bắt đầu tiến thẳng
+        // alpha <= 20°: đủ thẳng hướng → aligned, bắt đầu tiến thẳng
         s_wpAligned = true;
         s_wpSpinStart = 0; s_wpSpinDir = 0;
         pidSpeedReset(); pidYawReset();

@@ -35,6 +35,8 @@
 #include "MqttClient.h"
 #include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "WebUI.h"
+#include "LineSensor.h"      // Phase 9 — TCRT5000 8-ch line sensor
+#include "LineDecoder.h"     // Phase 9 — line state machine + steering PID
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
@@ -112,6 +114,16 @@ SemaphoreHandle_t g_mqttMutex;
  *  Sử dụng để ký hiệu hóa số xung đếm từ encoder không chiều. */
 volatile int8_t g_motorDir[4] = {0, 0, 0, 0};
 
+// ── Line Sensor & Decoder Global Definitions (Phase 9) ─────────────
+LineState        g_lineState;
+float            g_lineOffsetEMA = 0.0f;
+float            g_lineOffsetVariance = 0.0f;
+LineDecoderState g_ldState = LD_IDLE;
+uint32_t         g_ldStateEnterMs = 0;
+uint32_t         g_lostSinceMs = 0;
+uint8_t          g_lineSpeedPct = 60;   // 0..100 — slider mode LINE (lưu NVS)
+
+
 /* =====================================================================
  *  Tự hành (AUTO MODE) — Reactive obstacle avoidance, đơn giản và rõ ràng.
  *
@@ -136,7 +148,7 @@ volatile uint32_t  s_settleUntilMs = 0;
 
 /* Biến OA cũ — giữ để tương thích với WebUI (nếu có telemetry field liên quan),
    nhưng autoNavigateAvoidance() đơn giản mới KHÔNG dùng đến nó nữa. */
-static OaContext s_autoOa;
+OaContext g_oaCtx;
 
 /** Lấy PWM cruise từ cấu hình. (extern trong LocalObstacleAvoid.h) */
 uint16_t autoSpeedPwm() {
@@ -264,6 +276,7 @@ static void autoNavigateAvoidance() {
  *                        Nếu cmdY != 0 và cmdX == 0 → bật heading lock nhẹ cho dễ lái.
  *       - MODE_AUTO    : autoNavigateAvoidance() — 3 state CRUISE/BACKUP/SPIN_SEARCH.
  *       - MODE_WAYPOINT: wpNavTick() — Pure Pursuit + OA + Align.
+ *       - MODE_LINE    : lineDecoderUpdate() — TCRT5000 8-ch line tracking.
  * =================================================================== */
 static void taskControl(void *pvParams) {
   const TickType_t xPeriod = pdMS_TO_TICKS(SAFE_LOOP_MS);
@@ -291,8 +304,20 @@ static void taskControl(void *pvParams) {
       s_prevMode = g_state.mode;
       Serial.printf("[Mode] Switched → %s\n",
         g_state.mode == MODE_MANUAL ? "MANUAL" :
-        g_state.mode == MODE_AUTO ? "AUTO" : "WAYPOINT");
+        g_state.mode == MODE_AUTO ? "AUTO" :
+        g_state.mode == MODE_WAYPOINT ? "WAYPOINT" : "LINE");
     }
+
+    /* ── 0) Line sensor read (50Hz) — chạy trước để LineDecoder có data mới ─ */
+#if USE_LINE_SENSOR
+    {
+      uint32_t nowMs = millis();
+      if (nowMs - g_state.lineLastUpdateMs >= LINE_READ_MS) {
+        lineSensorUpdate();
+        lineSensorPublishState();
+      }
+    }
+#endif
 
     /* ── 1) IMU → heading ─────────────────────────────────────────── */
 #if USE_IMU_MPU6050
@@ -383,6 +408,14 @@ static void taskControl(void *pvParams) {
         wpNavTick();
         break;
       }
+
+#if USE_LINE_SENSOR
+      case MODE_LINE: {
+        float dtS = (float)SAFE_LOOP_MS * 0.001f;
+        lineDecoderUpdate(dtS);
+        break;
+      }
+#endif
     }
 
     vTaskDelayUntil(&xLastWake, xPeriod);
@@ -476,6 +509,13 @@ void setup() {
   imuMpu6050Init();
 #if USE_YDLIDAR_X3
   x3Init();
+#endif
+
+#if USE_LINE_SENSOR
+  lineSensorInit();
+  lineDecoderInit();
+  g_state.lineActiveMask = 0;
+  g_state.linePattern = (uint8_t)LINE_PAT_UNKNOWN;
 #endif
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom

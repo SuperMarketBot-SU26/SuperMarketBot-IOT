@@ -44,6 +44,11 @@ class NavigatorCore(val slamEngine: SLAMEngine) {
     val obstacleAvoider = DWAObstacleAvoider(slamEngine)
     val motorLink = MotorLink()
 
+    // Phase 9 — Line + node fusion
+    val lineBridge = LineSensorBridge()
+    val nodeRegistry = NodeRegistry()
+    private var lineTrackingEnabled = false
+
     // State
     @Volatile var navState: Int = STATE_IDLE
         private set
@@ -176,6 +181,9 @@ class NavigatorCore(val slamEngine: SLAMEngine) {
         currentPath = emptyList()
         hasGoal = false
         replanAttempts = 0
+        lineTrackingEnabled = false
+        motorLink.setMode(0)
+        lineBridge.reset()
         setState(STATE_IDLE)
         onVelocityCommand?.invoke(0f, 0f)
         Log.i(TAG, "Navigation cancelled")
@@ -260,6 +268,71 @@ class NavigatorCore(val slamEngine: SLAMEngine) {
             Log.i(TAG, "Replan successful — resuming navigation")
         } else {
             Log.w(TAG, "Replan attempt $replanAttempts failed, will retry in ${REPLAN_BACKOFF_MS}ms")
+        }
+    }
+
+    /**
+     * [Phase 9] Khi robot đi qua 1 node (dấu +) → snap pose về node pose.
+     *
+     * Triết lý: line là backbone cứng nên position error tích lũy chỉ do
+     * SLAM/odometry drift. Tại node (vị trí tuyệt đối đã biết trước),
+     * ta "sửa" pose của robot về giá trị node. Heading vẫn giữ từ IMU/odometry
+     * (chính xác hơn) trừ khi user cố ý set nodePose.theta.
+     */
+    fun onNodeCrossed(nodeId: Int) {
+        val node = nodeRegistry.get(nodeId)
+        if (node == null) {
+            // Chưa biết node này ở đâu → use SLAM pose hiện tại
+            val cur = slamEngine.getPose()
+            nodeRegistry.addFromPose(nodeId, cur.x, cur.y, cur.theta,
+                label = "auto-$nodeId")
+            Log.i(TAG, "Node #$nodeId auto-registered at (${"%.2f".format(cur.x)}, ${"%.2f".format(cur.y)})")
+            return
+        }
+
+        // Snap pose
+        slamEngine.setPose(node.x, node.y, node.theta)
+        Log.i(TAG, "Snap pose to node #$nodeId → (${"%.2f".format(node.x)}, ${"%.2f".format(node.y)})")
+
+        // Nếu có goal → check xem đã tới chưa
+        if (hasGoal) {
+            val cur = slamEngine.getPose()
+            val dx = goalX - cur.x
+            val dy = goalY - cur.y
+            val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+            if (dist < GOAL_RADIUS_M) {
+                handleGoalReached()
+            }
+        }
+    }
+
+    /**
+     * [Phase 9] Auto-register node từ SLAM pose khi bridge báo node mới
+     * mà registry chưa có. Cho phép dựng map tự động.
+     */
+    fun syncBridgeToSLAMPose() {
+        val line = lineBridge.snapshot.value
+        if (line.lastNodeId > 0) {
+            // Update registry nếu thiếu
+            if (nodeRegistry.get(line.lastNodeId) == null) {
+                val pose = slamEngine.getPose()
+                nodeRegistry.addFromPose(line.lastNodeId, pose.x, pose.y, pose.theta)
+            }
+        }
+    }
+
+    /**
+     * Bật line tracking: ESP32 sẽ tự bám line + turn ở junction.
+     * Mode này chính xác hơn SLAM cho indoor robot dò line.
+     */
+    fun enableLineMode(enable: Boolean = true) {
+        lineTrackingEnabled = enable
+        if (enable) {
+            motorLink.setMode(3)  // MODE_LINE = 3
+            Log.i(TAG, "Line mode enabled — ESP32 will follow line + stop at nodes")
+        } else {
+            motorLink.setMode(0)
+            Log.i(TAG, "Line mode disabled — back to manual")
         }
     }
 

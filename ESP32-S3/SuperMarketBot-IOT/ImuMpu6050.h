@@ -77,7 +77,7 @@ inline void imuMpu6050Init() {
   delay(10);
 
   // Hiệu chuẩn Gyro Z-axis: Đọc 250 mẫu hợp lệ khi robot tĩnh để tìm sai số tĩnh (bias)
-  Serial.println(F("[IMU] Đang hiệu chuẩn Gyro (giữ robot đứng yên)..."));
+  Serial.println(F("[IMU] Dang hieu chuan Gyro (giu robot dung yen)..."));
   long sumZ = 0;
   int validSamples = 0;
   int16_t val = 0;
@@ -88,17 +88,18 @@ inline void imuMpu6050Init() {
       validSamples++;
     }
     delay(4);
+    yield(); // Feed WDT — tránh Watchdog reset khi calibrate lâu
   }
 
   if (validSamples > 0) {
     s_gyroBiasZ = (float)sumZ / (float)validSamples;
     s_lastImuTimeMs = millis();
     g_imuEnabled = true;
-    Serial.printf("[IMU] Hiệu chuẩn xong. Mẫu hợp lệ: %d/%d. Gyro Bias Z: %.3f\n", validSamples, 250, s_gyroBiasZ);
+    Serial.printf("[IMU] Hieu chuan xong. Mau hop le: %d/250. Gyro Bias Z: %.3f\n", validSamples, s_gyroBiasZ);
   } else {
     s_gyroBiasZ = 0.f;
     g_imuEnabled = false;
-    Serial.println(F("[IMU ERROR] Không thể đọc mẫu hiệu chuẩn từ MPU6050! I2C lỗi nặng."));
+    Serial.println(F("[IMU ERROR] Khong the doc du lieu tu MPU6050 Z-axis!"));
   }
 }
 

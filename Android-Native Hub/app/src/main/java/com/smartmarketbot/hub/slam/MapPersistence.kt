@@ -2,6 +2,7 @@ package com.smartmarketbot.hub.slam
 
 import android.content.Context
 import android.util.Log
+import com.smartmarketbot.hub.navigation.NodeRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -37,7 +38,7 @@ class MapPersistence(private val context: Context) {
      * Save map tới file internal storage.
      * @return absolute file path nếu thành công, null nếu lỗi.
      */
-    fun saveMap(engine: SLAMEngine, name: String = "default"): String? {
+    fun saveMap(engine: SLAMEngine, name: String = "default", nodes: NodeRegistry? = null): String? {
         return try {
             val dir = File(context.filesDir, MAPS_DIR)
             if (!dir.exists()) dir.mkdirs()
@@ -70,6 +71,13 @@ class MapPersistence(private val context: Context) {
                 put("stats", JSONObject().apply {
                     put("updates", engine.totalUpdates)
                 })
+
+                // Phase 9 — line backbone nodes
+                if (nodes != null) {
+                    put("nodes", nodes.toJsonArray())
+                } else {
+                    put("nodes", JSONArray())
+                }
             }
 
             file.writeText(root.toString())
@@ -85,7 +93,7 @@ class MapPersistence(private val context: Context) {
      * Load map từ file.
      * @return true nếu load thành công.
      */
-    fun loadMap(engine: SLAMEngine, name: String = "default"): Boolean {
+    fun loadMap(engine: SLAMEngine, name: String = "default", nodes: NodeRegistry? = null): Boolean {
         return try {
             val file = File(File(context.filesDir, MAPS_DIR), "$name.json")
             if (!file.exists()) {
@@ -122,6 +130,13 @@ class MapPersistence(private val context: Context) {
             }
 
             Log.i(TAG, "Loaded map ← ${file.absolutePath} (${height}x${width})")
+
+            // Phase 9 — load nodes
+            val nodesArr = root.optJSONArray("nodes")
+            if (nodes != null && nodesArr != null) {
+                nodes.loadFromJsonArray(nodesArr)
+            }
+
             true
         } catch (e: Exception) {
             Log.e(TAG, "loadMap failed: ${e.message}")
