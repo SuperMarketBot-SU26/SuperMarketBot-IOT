@@ -28,6 +28,8 @@
 #define LIDAR_STREAM_WS_H
 
 #include "Config.h"
+#include <WebServer.h>
+#include "YdlidarX3.h"
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include "Localization.h"   // g_pose (x, y, headingRad)
@@ -137,6 +139,22 @@ inline void lidarStreamLoop() {
    *
    * Dùng thủ công sprintf thay vì ArduinoJson để cực nhanh và tiết kiệm RAM.
    * ──────────────────────────────────────────────────────────────── */
+#if USE_YDLIDAR_X3
+  // Stream mây điểm quét 360° thời gian thực từ YDLIDAR X3
+  static char scanBuf[8192];
+  int pos = snprintf(scanBuf, sizeof(scanBuf), "{\"t\":\"scan\",\"pts\":[");
+  bool first = true;
+  for (uint16_t i = 0; i < g_x3Scan.count; i++) {
+    const LidarPoint &pt = g_x3Scan.points[i];
+    if (pt.distanceMm == 0) continue;
+    float deg = pt.angleRad * 180.0f / (float)M_PI;
+    pos += snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "%s[%.1f,%u]", (first ? "" : ","), deg, pt.distanceMm);
+    first = false;
+    if (pos >= (int)sizeof(scanBuf) - 128) break; // Tránh tràn buffer
+  }
+  snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "],\"ox\":%.3f,\"oy\":%.3f,\"oh\":%.4f,\"ts\":%lu}", ox, oy, oh, (unsigned long)now);
+  g_wsLidarServer.broadcastTXT(scanBuf);
+#else
   char buf[200];
   int n = snprintf(buf, sizeof(buf),
     "{\"pts\":[[0,%ld],[180,%ld]],\"ox\":%.3f,\"oy\":%.3f,\"oh\":%.4f,\"ts\":%lu}",
@@ -146,8 +164,9 @@ inline void lidarStreamLoop() {
   );
 
   if (n > 0 && n < (int)sizeof(buf)) {
-    g_wsLidarServer.sendTXT(g_lidarStreamClientNum, buf);
+    g_wsLidarServer.broadcastTXT(buf);
   }
+#endif
 }
 
 /* ─── Đăng ký HTTP /lidar_info vào WebServer hiện có ───────────────

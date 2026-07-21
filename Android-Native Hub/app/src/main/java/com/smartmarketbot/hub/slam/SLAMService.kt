@@ -106,6 +106,7 @@ class SLAMService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        connectLidar()
         return START_STICKY
     }
 
@@ -254,10 +255,8 @@ class SLAMService : Service() {
             }
             sendBroadcast(intent)
             
-            // Broadcast scan ready periodically
-            if (slamEngine.totalUpdates % 5 == 0) {
-                sendBroadcast(Intent(ACTION_SCAN_READY))
-            }
+            // Broadcast scan ready to update UI map
+            sendBroadcast(Intent(ACTION_SCAN_READY))
 
         } catch (e: Exception) {
             Log.e(TAG, "Error processing scan: ${e.message}")

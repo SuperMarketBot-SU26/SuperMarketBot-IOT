@@ -99,6 +99,7 @@ class SLAMEngine(
             initialGuess = ICPLocalizer.Companion.Transform()
         )
         prevCartesianPairs = cartesianPoints.map { it.x to it.y }
+        prevScanPoints = cartesianPoints
 
         // Update pose estimate
         currentPose.x += motion.dx
@@ -266,6 +267,19 @@ class SLAMEngine(
     fun isOccupied(wx: Float, wy: Float, threshold: Float = 0.5f): Boolean {
         return getProbability(wx, wy)?.let { it > threshold } ?: false
     }
+
+    /**
+     * Get latest scan points for UI rendering
+     */
+    fun getLatestScanPoints(): List<android.graphics.PointF> {
+        val pts = prevScanPoints ?: return emptyList()
+        return pts.map { android.graphics.PointF(it.x, it.y) }
+    }
+
+    /**
+     * Get raw log-odds grid for zero-allocation ultra-fast UI rendering
+     */
+    fun getRawGrid(): IntArray = grid
 
     /**
      * Get occupancy grid for visualization

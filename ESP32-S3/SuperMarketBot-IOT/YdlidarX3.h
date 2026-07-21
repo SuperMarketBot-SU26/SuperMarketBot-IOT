@@ -81,40 +81,68 @@ inline void x3Init() {
  * Lưu ý: protocol cụ thể cần verify với X3 datasheet — đây là skeleton.
  */
 inline void x3Poll() {
-  static uint8_t  s_buf[YDLIDAR_SCAN_BUFF_SIZE];
+  static uint8_t  s_buf[1024];
   static uint16_t s_bufLen = 0;
 
   while (Serial1.available() > 0) {
     uint8_t b = Serial1.read();
     if (s_bufLen >= sizeof(s_buf)) {
-      // overflow → reset
       s_bufLen = 0;
     }
     s_buf[s_bufLen++] = b;
 
-    // Tìm header 0xAA 0x55
     if (s_bufLen >= 2) {
       if (s_buf[0] != 0xAA || s_buf[1] != 0x55) {
-        // không đúng header → shift buffer
         s_buf[0] = s_buf[1];
         s_bufLen = 1;
         continue;
       }
     }
 
-    // Chờ đủ length byte (sau header)
-    if (s_bufLen < 3) continue;
-    uint8_t payloadLen = s_buf[2];
-    uint16_t frameLen = 3 + payloadLen + 1; // header(2) + length(1) + payload + checksum
-    if (s_bufLen < frameLen) continue;
+    if (s_bufLen < 10) continue;
+    uint8_t sampleCount = s_buf[3];
+    uint16_t packageLen = 10 + (sampleCount * 2);
 
-    // Đủ frame → parse
-    // (Skeleton — implementation chi tiết phụ thuộc X3 firmware version)
-    g_x3Scan.scanSeq++;
-    g_x3Scan.lastScanMs = millis();
-    g_x3Scan.scanReady = true;
+    if (s_bufLen < packageLen) continue;
 
-    // Reset buffer
+    uint16_t fsa = s_buf[4] | (s_buf[5] << 8);
+    uint16_t lsa = s_buf[6] | (s_buf[7] << 8);
+    float startAngle = (float)(fsa >> 1) / 64.0f;
+    float endAngle   = (float)(lsa >> 1) / 64.0f;
+    float diffAngle = endAngle - startAngle;
+    if (diffAngle < 0) diffAngle += 360.0f;
+
+    if (s_buf[2] == 0x01) { // Zero packet = start of a new 360° scan
+      g_x3Scan.scanSeq++;
+      g_x3Scan.lastScanMs = millis();
+      g_x3Scan.scanReady = true;
+
+      static uint32_t lastLogMs = 0;
+      if (millis() - lastLogMs > 1000) {
+        lastLogMs = millis();
+        Serial.printf("[YDLIDAR X3] 360° Scan #%u Active | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
+      }
+      g_x3Scan.count = 0; // Reset for new rotation
+    }
+
+    if (sampleCount > 0 && sampleCount < 100) {
+      float angleStep = (sampleCount > 1) ? (diffAngle / (sampleCount - 1)) : 0.0f;
+      for (uint8_t i = 0; i < sampleCount; i++) {
+        uint16_t rawDist = s_buf[10 + i * 2] | (s_buf[11 + i * 2] << 8);
+        uint16_t distMm = rawDist / 4;
+        float angleDeg = startAngle + (angleStep * i);
+        if (angleDeg >= 360.0f) angleDeg -= 360.0f;
+        float angleRad = angleDeg * (float)M_PI / 180.0f;
+
+        if (g_x3Scan.count < X3_MAX_POINTS) {
+          g_x3Scan.points[g_x3Scan.count].angleRad = angleRad;
+          g_x3Scan.points[g_x3Scan.count].distanceMm = distMm;
+          g_x3Scan.points[g_x3Scan.count].quality = (rawDist > 0) ? 200 : 0;
+          g_x3Scan.count++;
+        }
+      }
+    }
+
     s_bufLen = 0;
   }
 }

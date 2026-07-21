@@ -32,12 +32,12 @@
 #include "CtrlJson.h"
 #include "LocalObstacleAvoid.h"
 #include "ObstacleSensors.h"
+#include "MqttClient.h"
+#include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "WebUI.h"
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
-// YDLIDAR X3 driver đã chuyển sang Android-Native Hub
-// #include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -321,6 +321,9 @@ static void taskControl(void *pvParams) {
 #if USE_LIDAR_HARDWARE
     sensorsPollLidar();
 #endif
+#if USE_YDLIDAR_X3
+    x3Poll();
+#endif
     sensorsPollUS();
 
     /* ── 3) Odom + Localization ───────────────────────────────────── */
@@ -470,10 +473,10 @@ void setup() {
   sensorsInit();
   sensorsLogBootSample();
   odomInit();
-  locInit();
   imuMpu6050Init();
-  // YDLIDAR X3: Đã chuyển sang Android-Native Hub
-  // x3Init() không còn cần thiết - LiDAR kết nối trực tiếp với Tablet
+#if USE_YDLIDAR_X3
+  x3Init();
+#endif
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   statusRgbInit();

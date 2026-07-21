@@ -5,6 +5,7 @@
 #define WEBUI_H
 
 #include "Config.h"
+#include "YdlidarX3.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
@@ -1362,8 +1363,27 @@ inline void webUIBroadcast() {
 
   char buf[1200];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  if (n >= sizeof(buf)) return;
-  g_wsServer.broadcastTXT(buf);
+  if (n < sizeof(buf)) {
+    g_wsServer.broadcastTXT(buf);
+  }
+
+#if USE_YDLIDAR_X3
+  if (g_x3Scan.count > 0) {
+    static char scanBuf[4096];
+    int pos = snprintf(scanBuf, sizeof(scanBuf), "{\"t\":\"scan\",\"pts\":[");
+    bool first = true;
+    for (uint16_t i = 0; i < g_x3Scan.count; i++) {
+      const LidarPoint &pt = g_x3Scan.points[i];
+      if (pt.distanceMm == 0) continue;
+      float deg = pt.angleRad * 180.0f / (float)M_PI;
+      pos += snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "%s[%.1f,%u]", (first ? "" : ","), deg, pt.distanceMm);
+      first = false;
+      if (pos >= (int)sizeof(scanBuf) - 128) break;
+    }
+    snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "]}");
+    g_wsServer.broadcastTXT(scanBuf);
+  }
+#endif
 }
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);

@@ -65,10 +65,10 @@
 //   Serial1 = LIDAR_X3_TX=15, LIDAR_X3_RX=16 (dùng cho X3)
 //   Serial2 = LIDAR_B_TX=1,  LIDAR_B_RX=2  (TF-Luna back)
 // Lưu ý: ENC_RL=16 đang dùng; nếu bật X3 phải tắt encoder RL hoặc chuyển ENC_RL sang GPIO khác.
-#define USE_YDLIDAR_X3          0   // 0 = tắt (mặc định); 1 = bật driver YDLidar X3
-#define YDLIDAR_X3_TX           15  // ESP TX → X3 RX (chỉ cần RX để đọc scan; TX để gửi lệnh)
-#define YDLIDAR_X3_RX           16  // ESP RX ← X3 TX
-#define YDLIDAR_X3_BAUD         230400  // X3 mặc định 230400
+#define USE_YDLIDAR_X3          1   // 1 = Bật đọc YDLidar X3 trực tiếp trên ESP32-S3
+#define YDLIDAR_X3_TX           43  // ESP TX (GPIO 43) → Nối sang RX của YDLIDAR Hub
+#define YDLIDAR_X3_RX           44  // ESP RX (GPIO 44) ← Nối sang TX của YDLIDAR Hub
+#define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
 #define YDLIDAR_SCAN_BUFF_SIZE  1024  // Buffer bytes cho mỗi scan packet
 #define YDLIDAR_MAX_POINTS      720  // 360° / 0.5° resolution ≈ 720 points (X3 thực tế ~640 points)

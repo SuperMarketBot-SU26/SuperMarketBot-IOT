@@ -164,7 +164,7 @@ class UsbSerialService : Service() {
             val device = driver.device
             
             // 1. ESP32-S3 Board Detection
-            if (device.vendorId == ESP32_VID || (device.vendorId == CP210X_VID && !isLidarConnected)) {
+            if (device.vendorId == ESP32_VID) {
                 if (!isEspConnected) {
                     try {
                         val connection = usbManager!!.openDevice(device)
@@ -183,25 +183,9 @@ class UsbSerialService : Service() {
                     }
                 }
             } 
-            // 2. YDLidar X3 Detection
+            // 2. YDLidar X3 Detection (CP210x - 0x10C4) -> Quản lý bởi SLAMService
             else if (device.vendorId == CP210X_VID) {
-                if (!isLidarConnected) {
-                    try {
-                        val connection = usbManager!!.openDevice(device)
-                        if (connection != null) {
-                            lidarPort = driver.ports[0]
-                            lidarPort!!.open(connection)
-                            lidarPort!!.setParameters(115200, 8, UsbSerialPort.DATABITS_8, UsbSerialPort.PARITY_NONE)
-                            isLidarConnected = true
-                            logToActivity("[LiDAR] Kết nối thành công YDLIDAR X3 ở baudrate 115200.")
-                            startLidarReadLoop()
-                        } else {
-                            logToActivity("[LiDAR ERROR] Không thể mở thiết bị USB.")
-                        }
-                    } catch (e: Exception) {
-                        logToActivity("[LiDAR ERROR] Lỗi mở cổng: ${e.message}")
-                    }
-                }
+                logToActivity("[LiDAR] Phát hiện YDLIDAR X3 (CP210x). Quản lý độc quyền bởi SLAMService.")
             }
         }
         notifyStatusChanged()

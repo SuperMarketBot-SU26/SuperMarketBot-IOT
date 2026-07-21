@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     
+    <!-- Quyền tự động khởi chạy ngầm khi cắm nguồn hoặc bật nguồn Tablet -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    
     <!-- Yêu cầu máy chủ USB Host -->
     <uses-feature android:name="android.hardware.usb.host" />
 
@@ -22,6 +25,18 @@
         android:label="SmartMarketBot Hub"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        
+        <!-- Boot Receiver tự động kích hoạt Dịch vụ ngầm khi cắm nguồn/bật nguồn -->
+        <receiver
+            android:name="com.smartmarketbot.hub.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+        </receiver>
         
         <!-- Foreground Service xử lý việc đọc luồng Serial USB liên tục cho LiDAR và ESP32 -->
         <service

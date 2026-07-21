@@ -67,8 +67,10 @@ class YDLIDARX3Manager(
     private val dataBuffer = ByteArray(1024)
     private var dataIndex = 0
 
-    // Scan data queue
+    // Scan data queue & accumulation
     private val scanQueue = ConcurrentLinkedQueue<LidarScan>()
+    private var lastStartAngleDeg = 0.0
+    private val accumulatedPoints = mutableListOf<LidarScanPoint>()
 
     // Performance metrics
     var totalBytesReceived = 0L
@@ -160,10 +162,11 @@ class YDLIDARX3Manager(
                     }
                 } catch (e: Exception) {
                     if (isRunning) {
-                        Log.e(TAG, "Read error: ${e.message}")
-                        onError?.invoke("Read error: ${e.message}")
+                        Log.w(TAG, "Transient USB read error: ${e.message}")
+                        try { Thread.sleep(10) } catch (_: Exception) {}
+                    } else {
+                        break
                     }
-                    break
                 }
             }
         }.apply {
@@ -271,18 +274,30 @@ class YDLIDARX3Manager(
             }
 
             if (points.isNotEmpty()) {
+                accumulatedPoints.addAll(points)
                 val now = System.currentTimeMillis()
-                val scan = LidarScan(
-                    points = points,
-                    timestampMs = now,
-                    scanRateHz = if (lastScanTimestamp > 0) {
-                        1000f / (now - lastScanTimestamp)
-                    } else 10f
-                )
-                scanQueue.offer(scan)
-                lastScanTimestamp = now
-                scanCount++
-                onScanReady?.invoke(points)
+
+                // Check if full revolution wrapped around (e.g. angle drops significantly) or 100ms passed
+                val isWrapAround = startAngleDeg < (lastStartAngleDeg - 180.0)
+                val isTimeout = (now - lastScanTimestamp) >= 100 && accumulatedPoints.size > 50
+
+                if (isWrapAround || isTimeout) {
+                    val fullScan = accumulatedPoints.toList()
+                    accumulatedPoints.clear()
+
+                    val scan = LidarScan(
+                        points = fullScan,
+                        timestampMs = now,
+                        scanRateHz = if (lastScanTimestamp > 0) {
+                            1000f / (now - lastScanTimestamp)
+                        } else 10f
+                    )
+                    scanQueue.offer(scan)
+                    lastScanTimestamp = now
+                    scanCount++
+                    onScanReady?.invoke(fullScan)
+                }
+                lastStartAngleDeg = startAngleDeg
             }
 
         } catch (e: Exception) {

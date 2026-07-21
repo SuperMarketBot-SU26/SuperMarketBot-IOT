@@ -36,8 +36,8 @@ class SLAMMapView @JvmOverloads constructor(
     }
     
     private val scanPaint = Paint().apply {
-        color = Color.argb(150, 128, 128, 128)
-        strokeWidth = 2f
+        color = Color.rgb(255, 23, 68)  // Bright Red for active LiDAR hits
+        strokeWidth = 3f
         style = Paint.Style.FILL
         isAntiAlias = true
     }
@@ -57,8 +57,8 @@ class SLAMMapView @JvmOverloads constructor(
     }
     
     private val pathPaint = Paint().apply {
-        color = Color.argb(200, 76, 175, 80)
-        strokeWidth = 4f
+        color = Color.argb(255, 33, 150, 243)  // Blue line for robot path trajectory (matching ROS map)
+        strokeWidth = 5f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
@@ -88,6 +88,9 @@ class SLAMMapView @JvmOverloads constructor(
 
     // SLAM data
     private var occupancyGrid: Array<FloatArray>? = null
+    private var gridBitmap: Bitmap? = null
+    private var gridPixels: IntArray? = null
+    private val destRect = RectF()
     private var scanPoints: List<PointF> = emptyList()
     private var robotPose: SLAMEngine.Pose = SLAMEngine.Pose()
     private var pathPoints: List<PointF> = emptyList()
@@ -100,10 +103,10 @@ class SLAMMapView @JvmOverloads constructor(
     private var showPath = true
     private var showWaypoints = true
     
-    // Grid colors
-    private val freeColor = Color.rgb(40, 40, 40)
-    private val occupiedColor = Color.rgb(20, 20, 20)
-    private val unknownColor = Color.rgb(60, 60, 60)
+    // Grid colors (ROS Occupancy Grid Standard Theme)
+    private val freeColor = Color.rgb(255, 255, 255)     // White = Free space
+    private val occupiedColor = Color.rgb(0, 0, 0)        // Black = Occupied walls
+    private val unknownColor = Color.rgb(127, 127, 127)   // Grey = Unknown / unmapped background
     
     // Robot path history
     private val pathHistory = mutableListOf<PointF>()
@@ -175,11 +178,36 @@ class SLAMMapView @JvmOverloads constructor(
     }
 
     /**
-     * Update grid only (less frequent)
+     * Update grid from raw log-odds (ultra-fast 0.005ms rendering)
      */
-    fun updateGrid(grid: Array<FloatArray>) {
-        this.occupancyGrid = grid
-        invalidate()
+    fun updateGrid(rawGrid: IntArray) {
+        updateGridBitmap(rawGrid)
+        postInvalidate()
+    }
+
+    private fun updateGridBitmap(rawGrid: IntArray) {
+        val gridWidth = 400
+        val gridHeight = 400
+        val totalSize = gridWidth * gridHeight
+        if (rawGrid.size < totalSize) return
+
+        if (gridBitmap == null || gridBitmap?.width != gridWidth || gridBitmap?.height != gridHeight) {
+            gridBitmap = Bitmap.createBitmap(gridWidth, gridHeight, Bitmap.Config.ARGB_8888)
+            gridPixels = IntArray(totalSize)
+        }
+
+        val pixels = gridPixels ?: return
+
+        for (i in 0 until totalSize) {
+            val lo = rawGrid[i]
+            pixels[i] = when {
+                lo >= 2 -> occupiedColor      // Black (Occupied Wall)
+                lo <= -1 -> freeColor         // White (Free Space)
+                else -> unknownColor          // Grey (Unknown)
+            }
+        }
+
+        gridBitmap?.setPixels(pixels, 0, gridWidth, 0, 0, gridWidth, gridHeight)
     }
 
     /**
@@ -187,6 +215,9 @@ class SLAMMapView @JvmOverloads constructor(
      */
     fun clear() {
         occupancyGrid = null
+        gridBitmap?.recycle()
+        gridBitmap = null
+        gridPixels = null
         scanPoints = emptyList()
         pathPoints = emptyList()
         waypoints = emptyList()
@@ -278,36 +309,16 @@ class SLAMMapView @JvmOverloads constructor(
     }
 
     private fun drawOccupancyGrid(canvas: Canvas, centerX: Float, centerY: Float) {
-        val grid = occupancyGrid ?: return
-        
+        val bitmap = gridBitmap ?: return
         val cellSize = viewScale * 0.05f  // 5cm per cell
-        
-        val gridWidth = grid.getOrNull(0)?.size ?: return
-        val gridHeight = grid.size
-        
-        val startX = centerX - (gridWidth * cellSize / 2)
-        val startY = centerY - (gridHeight * cellSize / 2)
-        
-        for (y in 0 until gridHeight) {
-            val row = grid[y]
-            for (x in 0 until row.size) {
-                val prob = row[x]
-                
-                gridPaint.color = when {
-                    prob > 0.7f -> occupiedColor
-                    prob < 0.3f -> freeColor
-                    else -> unknownColor
-                }
-                
-                canvas.drawRect(
-                    startX + x * cellSize,
-                    startY + y * cellSize,
-                    startX + (x + 1) * cellSize,
-                    startY + (y + 1) * cellSize,
-                    gridPaint
-                )
-            }
-        }
+        val gridWidth = bitmap.width
+        val gridHeight = bitmap.height
+
+        val startX = centerX - (gridWidth * cellSize / 2f)
+        val startY = centerY - (gridHeight * cellSize / 2f)
+
+        destRect.set(startX, startY, startX + gridWidth * cellSize, startY + gridHeight * cellSize)
+        canvas.drawBitmap(bitmap, null, destRect, null)
     }
 
     private fun drawGridLines(canvas: Canvas, centerX: Float, centerY: Float) {

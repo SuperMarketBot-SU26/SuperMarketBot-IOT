@@ -69,7 +69,8 @@ class MainActivity : AppCompatActivity() {
             val binder = service as SLAMService.SLAMServiceBinder
             slamService = binder.getService()
             slamServiceBound = true
-            appendLog("[SLAM] Service connected")
+            appendLog("[SLAM] Service connected. Opening LiDAR USB...")
+            slamService?.connectLidar()
             updateSlamUI()
         }
 
@@ -97,10 +98,22 @@ class MainActivity : AppCompatActivity() {
                 SLAMService.ACTION_LIDAR_CONNECTED -> {
                     txtSlamStatus.text = "LiDAR: CONNECTED"
                     txtSlamStatus.setTextColor(0xFF00E676.toInt())
+                    txtLidarStatus.text = "CONNECTED"
+                    txtLidarStatus.setTextColor(0xFF00E676.toInt())
+                    appendLog("[SLAM] LiDAR connected successfully")
                 }
                 SLAMService.ACTION_LIDAR_DISCONNECTED -> {
                     txtSlamStatus.text = "LiDAR: DISCONNECTED"
                     txtSlamStatus.setTextColor(0xFFFF1744.toInt())
+                    txtLidarStatus.text = "DISCONNECTED"
+                    txtLidarStatus.setTextColor(0xFFFF1744.toInt())
+                }
+                SLAMService.ACTION_SCAN_READY -> {
+                    val engine = slamService?.getSLAMEngine()
+                    if (engine != null && slamMapView != null) {
+                        slamMapView?.updateGrid(engine.getRawGrid())
+                        slamMapView?.updateScanPoints(engine.getLatestScanPoints())
+                    }
                 }
                 SLAMService.ACTION_LIDAR_ERROR -> {
                     val error = intent.getStringExtra(SLAMService.EXTRA_ERROR_MSG) ?: "Unknown"
@@ -189,15 +202,18 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putString(KEY_ROBOT_IP, currentIp).apply()
             
             startUsbService(currentIp, radioGroupMode.checkedRadioButtonId == R.id.radioWifi)
+            startSLAMService()
         }
 
         btnStop.setOnClickListener {
             stopUsbService()
+            stopSLAMService()
         }
 
         // Tự động khởi động dịch vụ lần đầu tiên khi mở app
         val currentIp = editRobotIp.text.toString().trim()
         startUsbService(currentIp, radioGroupMode.checkedRadioButtonId == R.id.radioWifi)
+        startSLAMService()
     }
 
     /**
@@ -207,6 +223,7 @@ class MainActivity : AppCompatActivity() {
         try {
             btnStartSlam?.setOnClickListener {
                 startSLAMService()
+                slamService?.connectLidar()
             }
 
             btnStopSlam?.setOnClickListener {
@@ -321,7 +338,7 @@ class MainActivity : AppCompatActivity() {
         txtSlamStatus.text = if (ok) "LOADED" else "LOAD FAIL"
 
         // Refresh SLAMMapView
-        slamMapView?.updateGrid(engine.getGrid())
+        slamMapView?.updateGrid(engine.getRawGrid())
     }
 
     /**
