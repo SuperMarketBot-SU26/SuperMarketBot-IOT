@@ -1,0 +1,69 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"jsonFile" : "directory-.-Debug-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.6.0"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "smartmarketbot_slam",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "native_slam::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-native_slam-Debug-eab23dbf4d5854b11678.json",
+					"name" : "native_slam",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "smartmarketbot_slam::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-smartmarketbot_slam-Debug-0bb8078d94ef168e434b.json",
+					"name" : "smartmarketbot_slam",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "E:/Le Trong Hieu/FPT UNIVERSITY/CN9/SuperMarketBot-IOT/Android-Native Hub/app/.cxx/Debug/4i3w652g/arm64-v8a",
+		"source" : "E:/Le Trong Hieu/FPT UNIVERSITY/CN9/SuperMarketBot-IOT/Android-Native Hub/app/src/main/cpp"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

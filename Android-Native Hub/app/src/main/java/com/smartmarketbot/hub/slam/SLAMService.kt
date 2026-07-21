@@ -66,9 +66,9 @@ class SLAMService : Service() {
             navigatorBound = true
 
             // Forward state changes broadcast
-            navigator?.getNavigator()?.onStateChanged = { state ->
+            binder.getNavigator()?.onStateChanged = { state ->
                 val intent = Intent(ACTION_NAV_STATE_CHANGED).apply {
-                    putExtra(EXTRA_NAV_STATE, state)
+                    putExtra(EXTRA_NAV_STATE, state.toString())
                 }
                 sendBroadcast(intent)
             }
@@ -123,7 +123,7 @@ class SLAMService : Service() {
             
             // Find YDLIDAR device
             val availableDevices = UsbSerialProber.getDefaultProber()
-                .findAllDevices(usbManager)
+                .findAllDrivers(usbManager)
             
             if (availableDevices.isEmpty()) {
                 Log.e(TAG, "No USB serial devices found")
@@ -182,7 +182,7 @@ class SLAMService : Service() {
             )
 
             // Connect
-            if (lidarManager!!.connect(deviceToUse.ports[0])) {
+            if (lidarManager!!.connect(deviceToUse.ports[0], connection)) {
                 isConnected = true
                 Log.i(TAG, "YDLIDAR connected successfully")
                 

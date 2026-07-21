@@ -1,0 +1,10 @@
+# ninja log v5
+0	2540	8063134399129711	CMakeFiles/smartmarketbot_slam.dir/src/utils/udp_socket.cpp.o	f61f840004400f88
+2555	2811	8063134401375575	libsmartmarketbot_slam.a	2154f3f02a0f039d
+11	2668	8063134692074052	CMakeFiles/native_slam.dir/src/jni_wrapper.cpp.o	9aa3a219f7be78e6
+2670	2815	8063134693403439	E:/Le Trong Hieu/FPT UNIVERSITY/CN9/SuperMarketBot-IOT/Android-Native Hub/app/build/intermediates/cxx/Debug/4i3w652g/obj/arm64-v8a/libnative_slam.so	46462151e5bf8385
+0	26	0	clean	783ee98371267ada
+18	1480	8063137215517612	CMakeFiles/smartmarketbot_slam.dir/src/utils/udp_socket.cpp.o	f61f840004400f88
+1481	1881	8063137216800244	libsmartmarketbot_slam.a	2154f3f02a0f039d
+27	5410	8063137254655102	CMakeFiles/native_slam.dir/src/jni_wrapper.cpp.o	9aa3a219f7be78e6
+5412	5535	8063137256064344	E:/Le Trong Hieu/FPT UNIVERSITY/CN9/SuperMarketBot-IOT/Android-Native Hub/app/build/intermediates/cxx/Debug/4i3w652g/obj/arm64-v8a/libnative_slam.so	46462151e5bf8385

@@ -2,6 +2,8 @@ package com.smartmarketbot.hub.slam
 
 import android.util.Log
 import com.smartmarketbot.hub.lidar.YDLIDARX3Manager
+import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -37,6 +39,13 @@ class ICPLocalizer(
 ) {
     companion object {
         private const val TAG = "ICPLocalizer"
+
+        fun normalizeAngle(angle: Float): Float {
+            var a = angle
+            while (a > Math.PI.toFloat()) a -= (2 * Math.PI).toFloat()
+            while (a < -Math.PI.toFloat()) a += (2 * Math.PI).toFloat()
+            return a
+        }
 
         /** Transform 2D: rotation (rad) + translation (m). */
         data class Transform(
@@ -109,8 +118,8 @@ class ICPLocalizer(
 
             val meanError = totalError / pairCount
 
-            // 3) Compute optimal transform via 2D SVD-style closed-form
-            val delta = computeTransform(correspondences) ?: run {
+            val delta = computeTransform(correspondences)
+            if (delta == null) {
                 Log.w(TAG, "iter=$iter: SVD failed, abort")
                 break
             }
@@ -215,13 +224,6 @@ class ICPLocalizer(
         val ty = qmy - (s * pmx + c * pmy)
 
         return Transform(dx = tx, dy = ty, dtheta = theta)
-    }
-
-    private fun normalizeAngle(angle: Float): Float {
-        var a = angle
-        while (a > Math.PI.toFloat()) a -= (2 * Math.PI).toFloat()
-        while (a < -Math.PI.toFloat()) a += (2 * Math.PI).toFloat()
-        return a
     }
 
     /** Hàm tiện ích: convert từ [YDLIDARX3Manager.LidarScanPoint] → (x, y) Cartesian. */

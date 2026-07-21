@@ -22,9 +22,8 @@ include_directories(
 )
 
 # Source files
-# udp_socket.cpp không còn được dùng — project chuyển sang WebSocket JSON.
-# Giữ file trong repo để tham khảo, không include vào build.
 set(UTILITY_SOURCES
+    src/utils/udp_socket.cpp
 )
 
 # Create static library

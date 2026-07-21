@@ -94,7 +94,7 @@ class SLAMEngine(
         // Scan matching: dùng ICP (Phase 4) thay cho centroid heuristic.
         // initialGuess = 0 (odometry bù drift bằng ICP ở pose hiện tại).
         val motion = icpLocalizer.match(
-            prevScanPoints = prevCartesianPairs ?: emptyList(),
+            prevScan = prevCartesianPairs ?: emptyList(),
             currScan = cartesianPoints.map { it.x to it.y },
             initialGuess = ICPLocalizer.Companion.Transform()
         )
@@ -107,8 +107,9 @@ class SLAMEngine(
 
         // [Phase 4.2] Wall-following correction: bù lateral offset + heading drift
         // dựa trên so sánh tường LiDAR thực vs map.
-        if (::wallFollower.isInitialized) {
-            val corr = wallFollower.computeCorrection(scanPoints, currentPose)
+        val wf = wallFollower
+        if (wf != null) {
+            val corr = wf.computeCorrection(scanPoints, currentPose)
             if (corr.valid) {
                 // Apply correction (small, EMA-smoothed)
                 val (lateralCmd, headingCmd) = corr.toControlGains()
@@ -237,8 +238,8 @@ class SLAMEngine(
         }
     }
 
-    private fun clampLogOdds(v: Int): Int {
-        return maxOf(LOG_ODDS_MIN.toInt(), minOf(LOG_ODDS_MAX.toInt(), v))
+    private fun clampLogOdds(v: Float): Int {
+        return maxOf(LOG_ODDS_MIN.toInt(), minOf(LOG_ODDS_MAX.toInt(), v.toInt()))
     }
 
     /**
@@ -286,7 +287,7 @@ class SLAMEngine(
         if (mx < 0 || mx >= mapWidth || my < 0 || my >= mapHeight) {
             return null
         }
-        return grid[my * mapWidth + mx]
+        return grid[my * mapWidth + mx].toFloat()
     }
 
     private fun logOddsToProbability(lo: Int): Float {

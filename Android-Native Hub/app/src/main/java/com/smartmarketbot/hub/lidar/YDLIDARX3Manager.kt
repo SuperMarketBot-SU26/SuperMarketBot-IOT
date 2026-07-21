@@ -1,5 +1,6 @@
 package com.smartmarketbot.hub.lidar
 
+import android.hardware.usb.UsbDeviceConnection
 import android.util.Log
 import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -25,8 +26,8 @@ import kotlin.math.sqrt
  * - Baudrate: 115200
  */
 class YDLIDARX3Manager(
-    private val onScanReady: (List<LidarScanPoint>) -> Unit,
-    private val onError: (String) -> Unit
+    var onScanReady: ((List<LidarScanPoint>) -> Unit)? = null,
+    var onError: ((String) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "YDLIDAR_X3"
@@ -88,15 +89,17 @@ class YDLIDARX3Manager(
     /**
      * Connect to YDLIDAR X3 via USB serial port
      */
-    fun connect(port: UsbSerialPort): Boolean {
+    fun connect(port: UsbSerialPort, connection: UsbDeviceConnection? = null): Boolean {
         return try {
             serialPort = port
-            port.open(port.driver.connect(port.device, BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE))
+            if (connection != null) {
+                port.open(connection)
+            }
             port.setDTR(true)
             port.setParameters(BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
 
             // Send start scan command
-            val startCmd = byteArrayOf(HEADER_BYTE_1, CMD_SCAN)
+            val startCmd = byteArrayOf(HEADER_BYTE_1, CMD_SCAN.toByte())
             port.write(startCmd, 1000)
 
             isRunning = true
@@ -106,7 +109,7 @@ class YDLIDARX3Manager(
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect YDLIDAR X3: ${e.message}")
-            onError("Connection failed: ${e.message}")
+            onError?.invoke("Connection failed: ${e.message}")
             false
         }
     }
@@ -116,7 +119,7 @@ class YDLIDARX3Manager(
      */
     fun startScan(): Boolean {
         return try {
-            val cmd = byteArrayOf(HEADER_BYTE_1, CMD_SCAN)
+            val cmd = byteArrayOf(HEADER_BYTE_1, CMD_SCAN.toByte())
             serialPort?.write(cmd, 1000)
             Log.i(TAG, "Start scan command sent")
             true
@@ -131,7 +134,7 @@ class YDLIDARX3Manager(
      */
     fun stopScan(): Boolean {
         return try {
-            val cmd = byteArrayOf(HEADER_BYTE_1, CMD_STOP)
+            val cmd = byteArrayOf(HEADER_BYTE_1, CMD_STOP.toByte())
             serialPort?.write(cmd, 1000)
             Log.i(TAG, "Stop scan command sent")
             true
@@ -158,7 +161,7 @@ class YDLIDARX3Manager(
                 } catch (e: Exception) {
                     if (isRunning) {
                         Log.e(TAG, "Read error: ${e.message}")
-                        onError("Read error: ${e.message}")
+                        onError?.invoke("Read error: ${e.message}")
                     }
                     break
                 }
@@ -279,7 +282,7 @@ class YDLIDARX3Manager(
                 scanQueue.offer(scan)
                 lastScanTimestamp = now
                 scanCount++
-                onScanReady(points)
+                onScanReady?.invoke(points)
             }
 
         } catch (e: Exception) {

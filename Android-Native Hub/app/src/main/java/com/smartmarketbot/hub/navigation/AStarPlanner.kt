@@ -370,7 +370,7 @@ class AStarPlanner(
             val ratio = i.toFloat() / steps
             val x = from.x + dx * ratio
             val y = from.y + dy * ratio
-            if (slamEngine.isOccupied(x, y, 0.5f)) {
+            if (slamEngine?.isOccupied(x, y, 0.5f) == true) {
                 return false
             }
         }

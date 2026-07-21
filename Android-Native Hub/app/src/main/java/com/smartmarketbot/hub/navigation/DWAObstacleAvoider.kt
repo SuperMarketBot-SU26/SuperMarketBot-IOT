@@ -254,12 +254,13 @@ class DWAObstacleAvoider(
         var minDist = Float.MAX_VALUE
         
         for (i in 0 until numSamples) {
-            val angle = 2 * PI * i / numSamples
+            val angle = (2 * PI * i / numSamples).toFloat()
             val px = x + ROBOT_RADIUS * cos(angle)
             val py = y + ROBOT_RADIUS * sin(angle)
             
             // Check clearance in multiple directions
-            for (r in 0.1f..SAFE_DISTANCE step 0.05f) {
+            var r = 0.1f
+            while (r <= SAFE_DISTANCE) {
                 val checkX = x + r * cos(angle)
                 val checkY = y + r * sin(angle)
                 
@@ -267,6 +268,7 @@ class DWAObstacleAvoider(
                     minDist = minOf(minDist, r)
                     break
                 }
+                r += 0.05f
             }
         }
         
@@ -438,13 +440,15 @@ class DWAObstacleAvoider(
         val step = 0.05f
         val maxRange = 2.0f
 
-        for (r in step..maxRange step step) {
+        var r = step
+        while (r <= maxRange) {
             val checkX = x + r * cos(angle)
             val checkY = y + r * sin(angle)
 
             if (slamEngine.isOccupied(checkX, checkY, 0.6f)) {
                 return r
             }
+            r += step
         }
 
         return maxRange

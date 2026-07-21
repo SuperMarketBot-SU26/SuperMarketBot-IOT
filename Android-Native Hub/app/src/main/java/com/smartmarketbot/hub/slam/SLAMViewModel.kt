@@ -9,7 +9,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartmarketbot.hub.lidar.YDLIDARX3Manager
-import com.smartmarketbot.hub.usb.UsbSerialService
+import com.smartmarketbot.hub.UsbSerialService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch

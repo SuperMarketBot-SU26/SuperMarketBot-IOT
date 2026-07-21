@@ -20,6 +20,7 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <chrono>
 
 // ============================================================================
 // ROBOT PHYSICAL CONSTANTS
@@ -209,7 +210,12 @@ private:
     }
 
     static inline uint32_t millis() {
+#if defined(ESP_PLATFORM) || defined(ARDUINO)
         return (uint32_t)(esp_timer_get_time() / 1000);
+#else
+        auto now = std::chrono::steady_clock::now();
+        return (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+#endif
     }
 };
 
