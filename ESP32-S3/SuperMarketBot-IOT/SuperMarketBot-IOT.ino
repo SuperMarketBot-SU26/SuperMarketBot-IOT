@@ -506,10 +506,6 @@ void setup() {
   sensorsInit();
   sensorsLogBootSample();
   odomInit();
-  imuMpu6050Init();
-#if USE_YDLIDAR_X3
-  x3Init();
-#endif
 
 #if USE_LINE_SENSOR
   lineSensorInit();
@@ -518,14 +514,19 @@ void setup() {
   g_state.linePattern = (uint8_t)LINE_PAT_UNKNOWN;
 #endif
 
+  Serial.println(F("[Boot] Initializing IMU..."));
+  imuMpu6050Init();
+  Serial.println(F("[Boot] IMU initialization step passed."));
+
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
+  Serial.println(F("[Boot] Initializing RGB..."));
   statusRgbInit();
-#if SMB_ONBOARD_RGB && (SMB_NEOPIXEL_PIN == ENC_RR)
-  Serial.println(F("[LED] NeoPixel and ENC_RR same pin: RR encoder ISR disabled."));
-#endif
+  Serial.println(F("[Boot] RGB initialization step passed."));
 
   // ── WiFi + Web ───────────────────────────────────────────────────
+  Serial.println(F("[Boot] Initializing WebUI..."));
   webUIInit();
+  Serial.println(F("[Boot] WebUI initialization step passed."));
 
   // ── LiDAR Stream WebSocket (port 82 → Tablet Android) ────────────
   //    Chạy sau webUIInit() để WiFi SoftAP đã sẵn sàng.

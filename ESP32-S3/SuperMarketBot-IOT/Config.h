@@ -65,9 +65,9 @@
 //   Serial1 = LIDAR_X3_TX=15, LIDAR_X3_RX=16 (dùng cho X3)
 //   Serial2 = LIDAR_B_TX=1,  LIDAR_B_RX=2  (TF-Luna back)
 // Lưu ý: ENC_RL=16 đang dùng; nếu bật X3 phải tắt encoder RL hoặc chuyển ENC_RL sang GPIO khác.
-#define USE_YDLIDAR_X3          1   // 1 = Bật đọc YDLidar X3 trực tiếp trên ESP32-S3
-#define YDLIDAR_X3_TX           43  // ESP TX (GPIO 43) → Nối sang RX của YDLIDAR Hub
-#define YDLIDAR_X3_RX           44  // ESP RX (GPIO 44) ← Nối sang TX của YDLIDAR Hub
+#define USE_YDLIDAR_X3          0   // Đặt thành 0 để tắt tạm thời, tránh xung đột cổng nạp USB CDC (GPIO 19/20)
+#define YDLIDAR_X3_TX           43  // Sử dụng chân an toàn GPIO 43
+#define YDLIDAR_X3_RX           44  // Sử dụng chân an toàn GPIO 44
 #define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
 #define YDLIDAR_SCAN_BUFF_SIZE  1024  // Buffer bytes cho mỗi scan packet
@@ -135,7 +135,7 @@
 #endif
 
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
-#define USE_IMU_MPU6050  1
+#define USE_IMU_MPU6050  0    // Đặt thành 0 để bỏ qua hiệu chuẩn/khởi tạo cảm biến MPU6050 khi chưa cắm hoặc bị lỗi
 #define IMU_I2C_SDA      17    // Chân I2C SDA (Đã chuyển sang GPIO 17 an toàn, tránh 35/36 trùng PSRAM)
 #define IMU_I2C_SCL      18    // Chân I2C SCL (Đã chuyển sang GPIO 18 an toàn, tránh 35/36 trùng PSRAM)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
@@ -352,7 +352,7 @@
 #define STA_PASS               "hoithanghieu"
 #define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "asksnuggie"
-#define STA_SSID_3             "Tran Coffee 1"    // Dự phòng / quán cafe (ưu tiên 3)
+#define STA_SSID_3             "Tran coffee 1"    // Dự phòng / quán cafe (ưu tiên 3)
 #define STA_PASS_3             "xincamon@"
 #define STA_SSID_4             "0917"                 // Ưu tiên 4 — điền SSID + PASS bên dưới
 #define STA_PASS_4             "vinhhung.125"

@@ -52,10 +52,10 @@ enum LineDecoderState : uint8_t {
   LD_LOST_TIMEOUT   = 7     // quá timeout → dừng cứng, chờ user xử lý
 };
 
-/** Cấu hình PID line tracking — đã retune cho mix-steering (không full-lock). */
-constexpr float LINE_KP = 0.55f;        // P gain — thấp vì đã mix trực tiếp
-constexpr float LINE_KD = 0.18f;        // D gain — damping
-constexpr float LINE_MAX_TURN = 55.0f;  // turn tối đa (% so với baseSpd)
+/** Cấu hình PID line tracking — retune mượt mà (KP=1.15, KD=0.75) để dập tắt triệt để hiện tượng giật lắc. */
+constexpr float LINE_KP = 1.15f;        // P gain — giảm nhẹ từ 1.85 về 1.15 để hết giật lắc
+constexpr float LINE_KD = 0.75f;        // D gain — tăng mạnh lên 0.75 để dập tắt triệt để dao động
+constexpr float LINE_MAX_TURN = 75.0f;  // turn tối đa 75% — lái cực mượt
 constexpr float LINE_CRUISE_SPEED_PCT = 60.0f;   // base forward khi tracking (slider sẽ override)
 constexpr float LINE_APPROACH_SPEED_PCT = 28.0f; // chậm khi gần node
 constexpr float LINE_SEARCH_TURN_PCT = 45.0f;    // xoay khi search/recovery

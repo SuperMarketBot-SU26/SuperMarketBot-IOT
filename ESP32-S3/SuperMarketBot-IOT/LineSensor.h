@@ -99,6 +99,29 @@ inline void lineSensorInit() {
  *
  * @return pattern hiện tại (LinePattern enum)
  */
+// Ngưỡng siêu nhạy (Ultra-Sensitivity Mode): Chỉ cần giảm 15-20 đơn vị từ 4095 là báo Active (1) ngay!
+const uint16_t g_lineThresholds[8] = {
+  4080, // S0 (4095 -> 3932 < 4080 -> Active 1 ngay!)
+  4080, // S1 (4095 -> 4076 < 4080 -> Active 1 ngay!)
+  850,  // S2 (837 -> 827 < 850 -> Active 1 ngay!)
+  4080, // S3 (4095 -> 4043 < 4080 -> Active 1 ngay!)
+  4080, // S4 (4095 -> 567  < 4080 -> Active 1 ngay!)
+  4080, // S5 (4095 -> 4023 < 4080 -> Active 1 ngay!)
+  4080, // S6 (4095 -> 3929 < 4080 -> Active 1 ngay!)
+  4080  // S7 (4095 -> 3893 < 4080 -> Active 1 ngay!)
+};
+
+const uint16_t g_lineHysteresis[8] = {
+  10, // S0 (Độ trễ cực nhỏ 10 đơn vị để phản hồi siêu tốc)
+  10, // S1
+  5,  // S2
+  10, // S3
+  10, // S4
+  10, // S5
+  10, // S6
+  10  // S7
+};
+
 inline LinePattern lineSensorUpdate() {
 #if !USE_LINE_SENSOR
   return LINE_PAT_UNKNOWN;
@@ -130,31 +153,29 @@ inline LinePattern lineSensorUpdate() {
     if (raw > 4095) raw = 4095;
     g_lineState.raw[i] = (uint16_t)raw;
 
-    // Hysteresis per sensor
+    // Hysteresis per sensor using custom thresholds
+    uint16_t baseThresh = g_lineThresholds[i];
+    uint16_t hyst = g_lineHysteresis[i];
     int16_t t = prevThresh[i];
-    if (t == 0) t = LINE_DARK_THRESHOLD;  // init first read
+    if (t == 0) t = baseThresh;
+
     if (g_lineState.activeMask & (1 << i)) {
-      // đang active → threshold cao hơn (cần giảm nhiều mới OFF)
-      if (raw > t + LINE_HYSTERESIS) {
-        // OFF
-        t = LINE_DARK_THRESHOLD;
+      // Đang active (raw thấp) -> cần vượt quá threshold + hyst mới thành OFF (raw cao)
+      if (raw > baseThresh + hyst) {
+        t = baseThresh;
       }
     } else {
-      // đang OFF → threshold thấp hơn (cần giảm mới ON)
-      if (raw < LINE_DARK_THRESHOLD) {
-        t = LINE_DARK_THRESHOLD + LINE_HYSTERESIS;
+      // Đang OFF (raw cao) -> cần thấp hơn threshold - hyst mới thành ON (raw thấp)
+      if (raw < baseThresh - hyst) {
+        t = baseThresh + hyst;
       } else {
-        t = LINE_DARK_THRESHOLD;
+        t = baseThresh;
       }
     }
     prevThresh[i] = t;
 
-    bool active;
-    #if LINE_INVERTED
-      active = (raw > t);
-    #else
-      active = (raw < t);
-    #endif
+    // Active khi raw < t (Khi đè lên vạch / có phản xạ thì raw TỤT XUỐNG THẤP)
+    bool active = (raw < t);
 
     if (active) {
       mask |= (1 << i);
@@ -248,10 +269,10 @@ inline void lineSensorPublishState() {
   g_state.lineLastUpdateMs  = g_lineState.lastUpdateMs;
   for (int i = 0; i < 8; i++) g_state.lineRaw[i] = g_lineState.raw[i];
 
-  // Chỉ in log test mỗi 500ms KHI VÀ CHỈ KHI đang ở Chế độ Dò Line (MODE_LINE / Mode 3)
+  // In log test mỗi 1000ms để kiểm tra hoạt động của cảm biến
   static uint32_t s_lastLogMs = 0;
   uint32_t nowMs = millis();
-  if (g_state.mode == MODE_LINE && nowMs - s_lastLogMs >= 500) {
+  if (nowMs - s_lastLogMs >= 1000) {
     s_lastLogMs = nowMs;
     Serial.print(F("[LineTest] Bits: 0b"));
     for (int b = 7; b >= 0; b--) {
