@@ -69,13 +69,9 @@ inline void lineSensorInit() {
   for (int i = 0; i < 8; i++) {
     uint8_t p = pins[i];
     if (p < 0) continue;
-    // Tất cả GPIO đã chọn là ADC1 thường → pinMode(INPUT) là đủ.
-    // Tránh pinMode cho GPIO < 0 hoặc chân đặc biệt (BOOT 0, 35..37 input-only).
-    if (p >= 35 && p <= 37) {
-      pinMode(p, INPUT);  // input-only, không có pull-up nội → cần resistor ngoài
-    } else {
-      pinMode(p, INPUT);
-    }
+    // Reset GPIO pin to detach any default hardware functions (like JTAG on GPIO3)
+    gpio_reset_pin((gpio_num_t)p);
+    pinMode(p, INPUT);
   }
 
 
@@ -99,22 +95,24 @@ inline void lineSensorInit() {
  *
  * @return pattern hiện tại (LinePattern enum)
  */
-// Ngưỡng siêu nhạy (Ultra-Sensitivity Mode): Chỉ cần giảm 15-20 đơn vị từ 4095 là báo Active (1) ngay!
+// Ngưỡng bám vạch chuẩn 100% theo đo đạc thực tế của bạn:
+//   Nền Trắng & Đặt Tay -> Raw THẤP (< 3880) -> Bit 0 (Sàn trắng)
+// Ngưỡng bám vạch cài đặt theo yêu cầu của bạn: Raw > 4085 -> Bit 1 (Vạch Đen)
 const uint16_t g_lineThresholds[8] = {
-  4080, // S0 (4095 -> 3932 < 4080 -> Active 1 ngay!)
-  4080, // S1 (4095 -> 4076 < 4080 -> Active 1 ngay!)
-  850,  // S2 (837 -> 827 < 850 -> Active 1 ngay!)
-  4080, // S3 (4095 -> 4043 < 4080 -> Active 1 ngay!)
-  4080, // S4 (4095 -> 567  < 4080 -> Active 1 ngay!)
-  4080, // S5 (4095 -> 4023 < 4080 -> Active 1 ngay!)
-  4080, // S6 (4095 -> 3929 < 4080 -> Active 1 ngay!)
-  4080  // S7 (4095 -> 3893 < 4080 -> Active 1 ngay!)
+  4085, // S0 (Raw < 4085 -> 0 | Raw > 4085 -> 1)
+  4085, // S1
+  4085, // S2
+  4085, // S3
+  4085, // S4
+  4085, // S5
+  4085, // S6
+  4085  // S7
 };
 
 const uint16_t g_lineHysteresis[8] = {
-  10, // S0 (Độ trễ cực nhỏ 10 đơn vị để phản hồi siêu tốc)
+  10, // S0 (Hysteresis nhỏ 10 đơn vị)
   10, // S1
-  5,  // S2
+  10, // S2
   10, // S3
   10, // S4
   10, // S5
@@ -142,9 +140,9 @@ inline LinePattern lineSensorUpdate() {
     int raw;
     uint8_t pin = pins[i];
     if (pin < 0) {
-      raw = 4095;
+      raw = 0; // Unused pin defaults to 0 (White floor)
     } else if (pin == 39 || pin == 48 || pin == 0 || pin > 20) {
-      // Chân Digital (không thuộc ADC1/ADC2 của ESP32-S3): đọc digitalRead (HIGH=4095, LOW=0)
+      // Chân Digital (không thuộc ADC): đọc digitalRead (HIGH=4095, LOW=0)
       raw = digitalRead(pin) ? 4095 : 0;
     } else {
       raw = analogRead(pin);
@@ -153,29 +151,29 @@ inline LinePattern lineSensorUpdate() {
     if (raw > 4095) raw = 4095;
     g_lineState.raw[i] = (uint16_t)raw;
 
-    // Hysteresis per sensor using custom thresholds
+    // Hysteresis per sensor: NỀN TRẮNG = < 3880 (OFF) | VẠCH ĐEN = > 3880 (ON)
     uint16_t baseThresh = g_lineThresholds[i];
     uint16_t hyst = g_lineHysteresis[i];
     int16_t t = prevThresh[i];
     if (t == 0) t = baseThresh;
 
     if (g_lineState.activeMask & (1 << i)) {
-      // Đang active (raw thấp) -> cần vượt quá threshold + hyst mới thành OFF (raw cao)
-      if (raw > baseThresh + hyst) {
+      // Đang active (vạch đen, raw CAO) -> cần tụt xuống dưới threshold - hyst mới thành OFF (nền trắng)
+      if (raw < baseThresh - hyst) {
         t = baseThresh;
       }
     } else {
-      // Đang OFF (raw cao) -> cần thấp hơn threshold - hyst mới thành ON (raw thấp)
-      if (raw < baseThresh - hyst) {
-        t = baseThresh + hyst;
+      // Đang OFF (nền trắng, raw THẤP) -> cần vượt quá threshold + hyst mới thành ON (vạch đen)
+      if (raw > baseThresh + hyst) {
+        t = baseThresh - hyst;
       } else {
         t = baseThresh;
       }
     }
     prevThresh[i] = t;
 
-    // Active khi raw < t (Khi đè lên vạch / có phản xạ thì raw TỤT XUỐNG THẤP)
-    bool active = (raw < t);
+    // Vạch Đen: Khi đè lên vạch đen raw sẽ VỌT CAO (> t)
+    bool active = (raw > t);
 
     if (active) {
       mask |= (1 << i);

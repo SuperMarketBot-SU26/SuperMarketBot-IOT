@@ -185,12 +185,12 @@
 //   CHỌN 8 chân ADC1 còn rảnh, INPUT-ONLY-safe (tránh GPIO0 BOOT).
 #define LINE_PIN_S0   1     // ADC1_CH0
 #define LINE_PIN_S1   2     // ADC1_CH1
-#define LINE_PIN_S2   3     // ADC1_CH2  (ENC_FR define, đang rảnh do encoder TẮT)
-#define LINE_PIN_S3   10    // ADC1_CH9  (giải phóng từ US_ECHO_LF cũ)
-#define LINE_PIN_S4   11    // ADC1_CH10 (giải phóng từ US_ECHO_RL cũ)
-#define LINE_PIN_S5   12    // ADC1_CH11 (giải phóng từ US_ECHO_RF cũ)
-#define LINE_PIN_S6   13    // ADC1_CH12 (giải phóng từ US_ECHO_RR cũ)
-#define LINE_PIN_S7   14    // ADC1_CH13 (giải phóng từ US_TRIG cũ)
+#define LINE_PIN_S2   3     // ADC1_CH2  (Trở về trạng thái ban đầu)
+#define LINE_PIN_S3   10    // ADC1_CH9
+#define LINE_PIN_S4   11    // ADC1_CH10 (Trở về trạng thái ban đầu)
+#define LINE_PIN_S5   12    // ADC1_CH11
+#define LINE_PIN_S6   13    // ADC1_CH12
+#define LINE_PIN_S7   14    // ADC1_CH13
 
 
 /** ADC threshold để phân biệt line đen vs nền sáng.
