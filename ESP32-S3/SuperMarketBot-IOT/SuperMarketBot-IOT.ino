@@ -393,7 +393,14 @@ static void taskControl(void *pvParams) {
             botDrive((int16_t)steer, g_state.cmdY, g_state.baseSpeed);
           } else {
             s_have = false;
-            botDrive(g_state.cmdX, g_state.cmdY, g_state.baseSpeed);
+            // Nếu có xoay hướng (cmdX != 0), ưu tiên nâng công suất theo g_state.rotateBaseSpeed (slider Xoay Hướng)
+            uint16_t baseSpd = g_state.baseSpeed;
+            uint16_t activeSpeed = baseSpd;
+            if (g_state.cmdX != 0) {
+              uint16_t rotSpeed = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : baseSpd;
+              activeSpeed = (g_state.cmdY == 0) ? rotSpeed : ((rotSpeed > baseSpd) ? rotSpeed : baseSpd);
+            }
+            botDrive(g_state.cmdX, g_state.cmdY, activeSpeed);
           }
         }
         break;

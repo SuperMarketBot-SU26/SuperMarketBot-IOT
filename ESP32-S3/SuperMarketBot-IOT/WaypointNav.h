@@ -439,9 +439,14 @@ inline void wpNavTick() {
         }
         // KHÔNG update s_wpSpinDir nữa — khóa hoàn toàn cho đến khi alpha < 20°
 
-        // PWM tỉ lệ 200..250, mượt không vọt lố
-        uint16_t spinPwm = 200u + (uint16_t)(fabsf(alpha) * 13.0f);
-        if (spinPwm > 250u) spinPwm = 250u;
+        // Tích hợp lực xoay từ thanh Xoay Hướng (g_state.rotateBaseSpeed)
+        uint16_t rotBase = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : g_state.autoBaseSpeed;
+        if (rotBase == 0) rotBase = g_state.baseSpeed;
+        if (rotBase == 0) rotBase = wpPct2Pwm(40);
+
+        uint16_t spinPwm = (uint16_t)((uint32_t)rotBase * (180u + (uint16_t)(fabsf(alpha) * 15.0f)) / 255u);
+        if (spinPwm > PWM_MAX) spinPwm = PWM_MAX;
+        if (spinPwm < 160u) spinPwm = 160u;
 
         static uint32_t lastSpinLog = 0;
         if (now - lastSpinLog > 500u) {

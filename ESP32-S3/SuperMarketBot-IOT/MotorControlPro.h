@@ -195,15 +195,16 @@ inline void botDriveMecanumPro(
     float strafeCurve = strafeSign * (pow(abs(strafeF) / 100.0f, 1.5f)) * 100.0f;
     float turnCurve = turnSign * (pow(abs(turnF) / 100.0f, 1.5f)) * 100.0f;
     
-    // Scale by base speed
+    // Scale by base speed & rotate speed (Dùng rotateBaseSpeed riêng cho lực xoay góc)
+    uint16_t rotBase = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : base;
     int32_t fwdScaled = (int32_t)(fwdCurve * (int32_t)base / 100);
     int32_t strafeScaled = (int32_t)(strafeCurve * (int32_t)base / 100);
-    int32_t turnScaled = (int32_t)(turnCurve * (int32_t)base / 100);
+    int32_t turnScaled = (int32_t)(turnCurve * (int32_t)rotBase / 100);
     
     // Optimized mecanum gains
     constexpr int32_t STRAFE_GAIN = 140;  // Tăng nhẹ từ 135
     constexpr int32_t FWD_GAIN = 115;
-    constexpr int32_t TURN_GAIN = 115;
+    constexpr int32_t TURN_GAIN = 135;   // Tăng gain xoay góc giúp xoay bốc cho robot nặng
     
     // Calculate wheel speeds
     int32_t fl = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
@@ -211,10 +212,11 @@ inline void botDriveMecanumPro(
     int32_t fr = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
     int32_t rr = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
     
-    // Normalize to prevent saturation
+    // Normalize to prevent saturation (Giới hạn công suất theo max(base, rotBase))
+    int32_t maxAllowedSpd = max((int32_t)base, (int32_t)rotBase);
     int32_t maxSpd = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
-    if (maxSpd > (int32_t)base && maxSpd > 0) {
-        int32_t scale = (int32_t)base * 100 / maxSpd;
+    if (maxSpd > maxAllowedSpd && maxSpd > 0) {
+        int32_t scale = maxAllowedSpd * 100 / maxSpd;
         fl = fl * scale / 100;
         rl = rl * scale / 100;
         fr = fr * scale / 100;

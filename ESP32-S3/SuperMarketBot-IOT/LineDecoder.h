@@ -139,13 +139,16 @@ inline int16_t lineGetForwardPct() {
 /** Điều khiển xe theo turn + forward (tăng đà đủ torque để chạy trên sàn nhà có ma sát). */
 inline void lineBotDrive(int16_t turn, int16_t fwdPct) {
   uint16_t baseSpd = g_state.baseSpeed;
-  if (baseSpd == 0) baseSpd = PWM_MAX; // Dùng 100% PWM_MAX làm base để không bị thóp công suất
+  if (baseSpd == 0) baseSpd = PWM_MAX;
   
-  // Tăng fwdPct tuyến tính (tối thiểu 75%) để vượt qua lực ma sát ma sát bánh xe trên sàn
+  // Tích hợp thanh Xoay Hướng (rotateBaseSpeed) cho chế độ Dò Line
+  uint16_t rotSpd = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : baseSpd;
+  uint16_t activeSpd = (turn != 0) ? ((rotSpd > baseSpd) ? rotSpd : baseSpd) : baseSpd;
+
   int16_t boostedFwd = fwdPct;
-  if (boostedFwd > 0 && boostedFwd < 75) boostedFwd = 75; // Đảm bảo lực kéo tối thiểu trên sàn
+  if (fwdPct > 0 && fwdPct < 40) boostedFwd = 40;
   
-  botDrive(turn, boostedFwd, baseSpd);
+  botDrive(turn, boostedFwd, activeSpd);
 }
 
 /** Reset OA context khi vào/chuyển chế độ. */
