@@ -77,6 +77,20 @@ inline void locResetPose() {
 }
 
 /**
+ * Override g_pose bằng tọa độ SLAM từ WebManager (PC chạy Scan Matching + Occupancy Grid).
+ * Được gọi khi WebManager gửi lệnh WS { t: "slam_pose", x, y, h }.
+ * WaypointNav.h đọc g_pose trực tiếp → tự động dùng SLAM pose chính xác hơn.
+ */
+inline void locSetSlamPose(float x, float y, float headingRad) {
+  g_pose.x          = x;
+  g_pose.y          = y;
+  // Giữ heading trong [0, 2π)
+  while (headingRad < 0.f)              headingRad += 2.f * (float)M_PI;
+  while (headingRad >= 2.f * (float)M_PI) headingRad -= 2.f * (float)M_PI;
+  g_pose.headingRad = headingRad;
+}
+
+/**
  * Tích phân pose từ lệnh PWM cuối. Gọi mỗi ODOM_PERIOD_MS (100ms) từ taskControl.
  * - vL = leftPct  × LOC_PWM_TO_MPS  (m/s)
  * - vR = rightPct × LOC_PWM_TO_MPS

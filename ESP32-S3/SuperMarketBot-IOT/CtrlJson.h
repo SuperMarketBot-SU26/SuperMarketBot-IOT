@@ -127,6 +127,13 @@ inline void robotApplyControlJson(JsonDocument &doc) {
   } else if (strcmp(t, "odomReset") == 0) {
     extern void odomResetDistance();
     odomResetDistance();
+  } else if (strcmp(t, "slam_pose") == 0) {
+    // Nhận tọa độ SLAM hiệu chỉnh từ WebManager (PC chạy Scan-to-Scan Matching)
+    // Format: { t: "slam_pose", x: float_m, y: float_m, h: float_rad }
+    float sx = doc["x"] | 0.f;
+    float sy = doc["y"] | 0.f;
+    float sh = doc["h"] | 0.f;
+    locSetSlamPose(sx, sy, sh);
   } else if (strcmp(t, "test_motor") == 0) {
     const char *payloadStr = doc["payload"] | "";
     int slot = -1;
