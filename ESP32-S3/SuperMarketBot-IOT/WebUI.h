@@ -1435,13 +1435,28 @@ inline void webUIBroadcast() {
     for (uint16_t i = 0; i < g_x3Scan.count; i++) {
       const LidarPoint &pt = g_x3Scan.points[i];
       if (pt.distanceMm == 0) continue;
-      float deg = pt.angleRad * 180.0f / (float)M_PI;
-      pos += snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "%s[%.1f,%u]", (first ? "" : ","), deg, pt.distanceMm);
+      int deg = (int)(pt.angleRad * 57.29578f + 0.5f);
+      if (deg >= 360) deg -= 360;
+      if (deg < 0) deg += 360;
+      pos += snprintf(scanBuf + pos, sizeof(scanBuf) - pos,
+                      "%s[%d,%u]", (first ? "" : ","), deg, pt.distanceMm);
       first = false;
-      if (pos >= (int)sizeof(scanBuf) - 128) break;
+      if (pos >= 3600) break; // Độ phân giải tối đa (300+ điểm mây)
     }
     snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "]}");
     g_wsServer.broadcastTXT(scanBuf);
+  }
+
+  // Gửi tin log trực tiếp sang ô Nhật ký LiDAR (SLAM Monitor) trên WebUI
+  static uint32_t s_lastLidarLogMs = 0;
+  uint32_t nowLidarMs = millis();
+  if (nowLidarMs - s_lastLidarLogMs >= 1200u) {
+    s_lastLidarLogMs = nowLidarMs;
+    char logJson[256];
+    snprintf(logJson, sizeof(logJson),
+      "{\"type\":\"lidar_log\",\"t\":\"lidar_log\",\"message\":\"[LiDAR X3] Quét 360° Live | Điểm mây: %u pts | Tần số: 10 Hz\",\"msg\":\"[LiDAR X3] Quét 360° Live | Điểm mây: %u pts\"}",
+      g_x3Scan.count, g_x3Scan.count);
+    g_wsServer.broadcastTXT(logJson);
   }
 #endif
 }

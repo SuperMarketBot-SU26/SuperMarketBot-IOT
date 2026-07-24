@@ -65,9 +65,10 @@
 //   Serial1 = LIDAR_X3_TX=15, LIDAR_X3_RX=16 (dùng cho X3)
 //   Serial2 = LIDAR_B_TX=1,  LIDAR_B_RX=2  (TF-Luna back)
 // Lưu ý: ENC_RL=16 đang dùng; nếu bật X3 phải tắt encoder RL hoặc chuyển ENC_RL sang GPIO khác.
-#define USE_YDLIDAR_X3          0   // Đặt thành 0 để tắt tạm thời, tránh xung đột cổng nạp USB CDC (GPIO 19/20)
-#define YDLIDAR_X3_TX           43  // Sử dụng chân an toàn GPIO 43
-#define YDLIDAR_X3_RX           44  // Sử dụng chân an toàn GPIO 44
+#define USE_YDLIDAR_X3          1   // Bật YDLIDAR X3 (UART TX=1, RX=2, M_CTR=48)
+#define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> Cắm vào chân RX của YDLIDAR (tránh 43/44 bị trùng Serial console)
+#define YDLIDAR_X3_RX           2   // ESP32 RX (GPIO 2) -> Cắm vào chân TX của YDLIDAR
+#define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
 #define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
 #define YDLIDAR_SCAN_BUFF_SIZE  1024  // Buffer bytes cho mỗi scan packet
@@ -135,9 +136,9 @@
 #endif
 
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
-#define USE_IMU_MPU6050  0    // Đặt thành 0 để bỏ qua hiệu chuẩn/khởi tạo cảm biến MPU6050 khi chưa cắm hoặc bị lỗi
-#define IMU_I2C_SDA      17    // Chân I2C SDA (Đã chuyển sang GPIO 17 an toàn, tránh 35/36 trùng PSRAM)
-#define IMU_I2C_SCL      18    // Chân I2C SCL (Đã chuyển sang GPIO 18 an toàn, tránh 35/36 trùng PSRAM)
+#define USE_IMU_MPU6050  1    // Bật cảm biến góc nghiêng IMU MPU6050 (I2C SDA=17, SCL=18)
+#define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17)
+#define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
 /* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
@@ -176,7 +177,7 @@
  *    - Trên line đen (phản xạ yếu):   ADC ≈ 300-800
  *    - Threshold khuyến nghị: 1500 (giữa 2 vùng, có hysteresis ±200).
  */
-#define USE_LINE_SENSOR        1
+#define USE_LINE_SENSOR        0    // Tạm thời tắt dò line theo yêu cầu để hiển thị toàn bộ log mượt mà
 #define LINE_SENSOR_COUNT     8
 // Sơ đồ 8 chân ADC1 còn rảnh:
 //   ĐÃ DÙNG: motor (4-9,21,40,45,46,41,42,47), YDLIDAR (43,44),
@@ -366,8 +367,8 @@
 #define WEB_PORT        80
 #define WEB_SSL_PORT    443   /* HTTPS — camera tablet (getUserMedia) */
 #define WS_PORT         81
-/** Chu kỳ broadcast WebSocket (ms). ≥500 = mượt trên điện thoại qua AP. */
-#define WEB_WS_PERIOD_MS        500u
+/** Chu kỳ broadcast WebSocket (ms). Đã đẩy lên 30ms (~33 FPS MAX PERFORMANCE) để mây điểm LiDAR live siêu mượt ở mức tối đa ESP32! */
+#define WEB_WS_PERIOD_MS        30u
 /** 0 = tắt HTTPS khi chỉ cần lái robot (tiết kiệm RAM/CPU). 1 = bật /vision camera. */
 #define VISION_HTTPS_ENABLE     0
 /** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */

@@ -514,6 +514,12 @@ void setup() {
   g_state.linePattern = (uint8_t)LINE_PAT_UNKNOWN;
 #endif
 
+#if USE_YDLIDAR_X3
+  Serial.println(F("[Boot] Initializing YDLIDAR X3..."));
+  x3Init();
+  Serial.println(F("[Boot] YDLIDAR X3 initialization step passed."));
+#endif
+
   Serial.println(F("[Boot] Initializing IMU..."));
   imuMpu6050Init();
   Serial.println(F("[Boot] IMU initialization step passed."));

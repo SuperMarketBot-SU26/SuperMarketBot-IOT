@@ -53,6 +53,12 @@ extern X3Scan g_x3Scan;
  * X3 default protocol: 0xA5 0x60 (start scan) hoặc SCAN cmd tùy firmware version.
  */
 inline void x3Init() {
+#ifdef YDLIDAR_X3_M_CTR
+  if (YDLIDAR_X3_M_CTR >= 0) {
+    pinMode(YDLIDAR_X3_M_CTR, OUTPUT);
+    digitalWrite(YDLIDAR_X3_M_CTR, HIGH); // Bật động cơ quay LiDAR (M_CTR = HIGH)
+  }
+#endif
   Serial1.begin(YDLIDAR_X3_BAUD, SERIAL_8N1, YDLIDAR_X3_RX, YDLIDAR_X3_TX);
   g_x3Scan.count = 0;
   g_x3Scan.scanSeq = 0;
@@ -112,17 +118,30 @@ inline void x3Poll() {
     float diffAngle = endAngle - startAngle;
     if (diffAngle < 0) diffAngle += 360.0f;
 
-    if (s_buf[2] == 0x01) { // Zero packet = start of a new 360° scan
-      g_x3Scan.scanSeq++;
-      g_x3Scan.lastScanMs = millis();
-      g_x3Scan.scanReady = true;
+    // Kiếm tra gói Zero Packet (Bit 0 của CT = 1 -> Bắt đầu vòng quay 360° mới)
+    static LidarPoint s_accumPoints[X3_MAX_POINTS];
+    static uint16_t   s_accumCount = 0;
 
-      static uint32_t lastLogMs = 0;
-      if (millis() - lastLogMs > 1000) {
-        lastLogMs = millis();
-        Serial.printf("[YDLIDAR X3] 360° Scan #%u Active | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
+    bool isZeroPacket = (s_buf[2] & 0x01) != 0;
+    if (isZeroPacket || s_accumCount >= 360) {
+      if (s_accumCount > 50) { // Đã có đủ dữ liệu 1 vòng quay
+        // Copy Double-Buffer sang mảng hiển thị công khai (KHÔNG BAO GIỜ BỊ RESET VỀ 0 ĐỨNG HÌNH!)
+        memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
+        g_x3Scan.count = s_accumCount;
+        g_x3Scan.scanSeq++;
+        g_x3Scan.lastScanMs = millis();
+        g_x3Scan.scanReady = true;
+
+        // Serial log đã được đẩy riêng sang ô Nhật ký LiDAR (SLAM Monitor) trên WebUI
+        /*
+        static uint32_t lastLogMs = 0;
+        if (millis() - lastLogMs > 1500) {
+          lastLogMs = millis();
+          Serial.printf("[YDLIDAR X3] 360° Scan #%u Live | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
+        }
+        */
       }
-      g_x3Scan.count = 0; // Reset for new rotation
+      s_accumCount = 0; // Reset bộ đệm tích lũy cho vòng quay tiếp theo
     }
 
     if (sampleCount > 0 && sampleCount < 100) {
@@ -134,16 +153,22 @@ inline void x3Poll() {
         if (angleDeg >= 360.0f) angleDeg -= 360.0f;
         float angleRad = angleDeg * (float)M_PI / 180.0f;
 
-        if (g_x3Scan.count < X3_MAX_POINTS) {
-          g_x3Scan.points[g_x3Scan.count].angleRad = angleRad;
-          g_x3Scan.points[g_x3Scan.count].distanceMm = distMm;
-          g_x3Scan.points[g_x3Scan.count].quality = (rawDist > 0) ? 200 : 0;
-          g_x3Scan.count++;
+        if (s_accumCount < X3_MAX_POINTS) {
+          s_accumPoints[s_accumCount].angleRad = angleRad;
+          s_accumPoints[s_accumCount].distanceMm = distMm;
+          s_accumPoints[s_accumCount].quality = (rawDist > 0) ? 200 : 0;
+          s_accumCount++;
         }
       }
     }
 
-    s_bufLen = 0;
+    // Trượt phần bộ nhớ dư còn lại trong buffer lên đầu (KHÔNG xóa s_bufLen về 0 để tránh vỡ sync UART)
+    if (s_bufLen >= packageLen) {
+      memmove(s_buf, s_buf + packageLen, s_bufLen - packageLen);
+      s_bufLen -= packageLen;
+    } else {
+      s_bufLen = 0;
+    }
   }
 }
 

@@ -345,7 +345,7 @@ inline void lineDecoderUpdate(float dtS) {
     }
   }
 
-  /* ── Telemetry debug mỗi 300ms ─────────────────────────────────── */
+  /* ── Telemetry debug mỗi 300ms (đã tắt theo yêu cầu) ──────────────
   static uint32_t s_logMs = 0;
   uint32_t nowMs = millis();
   if (nowMs - s_logMs >= 300u) {
@@ -362,6 +362,7 @@ inline void lineDecoderUpdate(float dtS) {
     }
     Serial.printf(" fwd=%d%% front=%dcm\n", (int)fwd, (int)obsFrontCm());
   }
+  */
 #endif
 }
 

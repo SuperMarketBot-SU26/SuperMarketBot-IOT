@@ -267,7 +267,8 @@ inline void lineSensorPublishState() {
   g_state.lineLastUpdateMs  = g_lineState.lastUpdateMs;
   for (int i = 0; i < 8; i++) g_state.lineRaw[i] = g_lineState.raw[i];
 
-  // In log test mỗi 1000ms để kiểm tra hoạt động của cảm biến
+  // In log test (đã tắt theo yêu cầu người dùng)
+  /*
   static uint32_t s_lastLogMs = 0;
   uint32_t nowMs = millis();
   if (nowMs - s_lastLogMs >= 1000) {
@@ -281,6 +282,7 @@ inline void lineSensorPublishState() {
                   g_lineState.raw[0], g_lineState.raw[1], g_lineState.raw[2], g_lineState.raw[3],
                   g_lineState.raw[4], g_lineState.raw[5], g_lineState.raw[6], g_lineState.raw[7]);
   }
+  */
 #endif
 }
 
