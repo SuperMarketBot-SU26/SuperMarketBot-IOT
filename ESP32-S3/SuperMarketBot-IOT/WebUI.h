@@ -1464,8 +1464,9 @@ inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
   g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
   g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", PWM_MAX * 60 / 100);
+  g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", PWM_MAX * 50 / 100);
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 40 / 100);
-  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 10 / 100);
+  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 30 / 100);
   g_lineSpeedPct = g_prefs.getUChar("lineSpeedPct", 60);
   if (g_lineSpeedPct < 15) g_lineSpeedPct = 15;
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;

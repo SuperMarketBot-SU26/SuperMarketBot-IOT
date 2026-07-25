@@ -136,6 +136,35 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       g_state.swerveBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
     }
 
+  } else if (strcmp(cmd, "set_speed_waypoint") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ WAYPOINT (SET_SPEED_WAYPOINT) từ Backend! Tốc độ: %d%%\n", v);
+    if (v >= 15 && v <= 100) {
+      g_state.waypointBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * (uint32_t)v / 100u);
+    } else if (v >= 0 && v < 15) {
+      // clamp về 15% tối thiểu cho motor torque
+      g_state.waypointBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * 15u / 100u);
+    }
+
+  } else if (strcmp(cmd, "set_speed_line") == 0) {
+    int v = -1;
+    if (doc["payload"].is<int>()) {
+      v = doc["payload"].as<int>();
+    } else if (doc["payload"].is<const char*>()) {
+      v = atoi(doc["payload"].as<const char*>());
+    }
+    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ DÒ LINE (SET_SPEED_LINE) từ Backend! Tốc độ: %d%%\n", v);
+    if (v >= 15 && v <= 100) {
+      g_lineSpeedPct = (uint8_t)v;
+    } else if (v >= 0 && v < 15) {
+      g_lineSpeedPct = 15;
+    }
+
   } else if (strcmp(cmd, "set_speed_rotate") == 0) {
     int v = -1;
     if (doc["payload"].is<int>()) {

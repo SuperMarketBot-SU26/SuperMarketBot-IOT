@@ -68,6 +68,15 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_prefs.begin(NVS_NAMESPACE, false);
     g_prefs.putUInt("autoBaseSpeed", g_state.autoBaseSpeed);
     g_prefs.end();
+  } else if (strcmp(t, "spdWaypoint") == 0) {
+    uint16_t pct = doc["v"].as<uint16_t>();
+    if (pct > 100) pct = 100;
+    if (pct < 15) pct = 15;  // tối thiểu 15% cho motor torque
+    g_state.waypointBaseSpeed = (uint16_t)((uint32_t)pct * PWM_MAX / 100);
+    g_prefs.begin(NVS_NAMESPACE, false);
+    g_prefs.putUInt("waypointSpeed", g_state.waypointBaseSpeed);
+    g_prefs.end();
+    Serial.printf("[WP-SPD] Slider -> %u%%\n", (unsigned)pct);
   } else if (strcmp(t, "spdSwerve") == 0) {
     uint16_t pct = doc["v"].as<uint16_t>();
     if (pct > 100) pct = 100;

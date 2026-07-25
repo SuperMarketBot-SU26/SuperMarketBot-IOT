@@ -26,6 +26,7 @@
 #include "Sensors.h"
 #include "Odometry.h"
 #include "PidController.h"
+#include "ImuFusion.h"          // EKF 1D heading fusion (gyro + wheel + SLAM)
 #include "WaypointNav.h"
 #include "StatusRGB.h"
 #include <esp_task_wdt.h>
@@ -86,6 +87,7 @@ RobotState g_state = {
   .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
+  .waypointBaseSpeed = 0,
   .swerveBaseSpeed = 0,
   .rotateBaseSpeed = 0,
   .imuYawScale = 1.0f,
@@ -319,25 +321,68 @@ static void taskControl(void *pvParams) {
     }
 #endif
 
-    /* ── 1) IMU → heading ─────────────────────────────────────────── */
+    /* ── 1) IMU → EKF heading fusion ──────────────────────────────────
+     *  Chuỗi xử lý:
+     *    1) Đọc gyro Z từ MPU6050 (đã trừ bias thô + deadband)
+     *    2) Tính dt giữa 2 lần update
+     *    3) Chạy EKF: predict(gyroZ, dt) + updateWheel(gyroZ, dθ_wheel, dt)
+     *    4) heading fusioned → rate-limiter → g_pose.headingRad
+     */
 #if USE_IMU_MPU6050
     {
-      float imuHeading = g_pose.headingRad;
-      if (imuMpu6050Update(imuHeading)) {
-        // Heading rate limiter — chống spike từ IMU noise.
-        static float s_prevHeading = 0.f;
-        static bool  s_firstHeading = true;
-        if (!s_firstHeading) {
-          float dHeading = wpNormalizeAngle(imuHeading - s_prevHeading);
+      // Đọc gyro raw để đưa vào EKF. Dùng "no-op" buffer vì hàm cũ tích lũy vào buffer.
+      float imuHeadingBuf = g_pose.headingRad;
+      if (imuMpu6050Update(imuHeadingBuf)) {
+        // Tính lại vận tốc góc từ delta-heading / dt để EKF dùng (đơn giản, không cần gyro raw)
+        // Lưu ý: imuMpu6050Update đã làm gyroZ *= dt nội bộ rồi cộng dồn.
+        //  → ta tính lại dTheta = (heading_new - heading_old) / dt ở đây.
+        // Tuy nhiên cách này mất gyro trung gian. An toàn hơn: dùng heading đã IMU update làm
+        // ground-truth tạm thời, và truyền gyroZ dưới dạng (delta_heading / dt) − bias.
+        // Vì project không có encoder, wheel-derived dθ từ PWM sẽ làm chức năng updateWheel.
+        // → Trong trường hợp này, dùng delta_heading/dt như "gyroZ ước lượng" cho predict,
+        //   và wheel dθ cho updateWheel. Đây là cách fusion cho hệ không có raw gyro stream.
+        static float s_prevImuHeading = 0.f;
+        static uint32_t s_prevImuMs = 0;
+        static bool s_firstImu = true;
+        const uint32_t nowMs = millis();
+
+        float dThetaImu = 0.f;
+        float dt = 0.1f;  // default fallback
+        if (!s_firstImu) {
+          dThetaImu = imuFusion::wrapPi(imuHeadingBuf - s_prevImuHeading);
+          dt = (nowMs - s_prevImuMs) * 0.001f;
+          if (dt <= 0.f) dt = 0.001f;
+        }
+        s_prevImuHeading = imuHeadingBuf;
+        s_prevImuMs      = nowMs;
+        s_firstImu       = false;
+
+        // gyroZ effective = (gyro - bias_estimate) + (delta_heading_imu / dt - 0)
+        // → Đơn giản hoá: dùng delta_heading/dt làm "gyroZ quan sát" cho EKF predict.
+        //    Bias EKF tự ước lượng được nhờ wheel update.
+        const float gyroZEffective = (dt > 0.f && dt < 1.f) ? (dThetaImu / dt) : 0.f;
+
+        int16_t leftPct = 0, rightPct = 0;
+        locGetDriveCmd(leftPct, rightPct);
+
+        // EKF step (predict + optional wheel update)
+        float fusedHeading = imuFusion::step(gyroZEffective, dt, (int)leftPct, (int)rightPct);
+
+        // Rate limiter (giữ logic an toàn cũ để chống spike)
+        static float s_prevFused = 0.f;
+        static bool  s_firstFused = true;
+        if (!s_firstFused) {
+          float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
           const float MAX_DHEADING = 2.5f * (float)SAFE_LOOP_MS * 0.001f;
           if (fabsf(dHeading) > MAX_DHEADING) {
-            float clamped = s_prevHeading + copysignf(MAX_DHEADING, dHeading);
-            imuHeading = wpNormalizeAngle(clamped);
+            float clamped = s_prevFused + copysignf(MAX_DHEADING, dHeading);
+            fusedHeading = wpNormalizeAngle(clamped);
           }
         }
-        s_firstHeading = false;
-        s_prevHeading  = imuHeading;
-        g_pose.headingRad = imuHeading;
+        s_firstFused = false;
+        s_prevFused  = fusedHeading;
+
+        g_pose.headingRad = fusedHeading;
       }
     }
 #endif
@@ -530,6 +575,12 @@ void setup() {
   Serial.println(F("[Boot] Initializing IMU..."));
   imuMpu6050Init();
   Serial.println(F("[Boot] IMU initialization step passed."));
+
+#if IMU_FUSION_ENABLE
+  // Khởi tạo EKF sau khi IMU đã calibrate xong
+  imuFusion::init();
+  Serial.println(F("[Boot] IMU EKF fusion initialized."));
+#endif
 
   // LED RGB nội bộ (DevKitC-1: GPIO 38) — sau odom
   Serial.println(F("[Boot] Initializing RGB..."));

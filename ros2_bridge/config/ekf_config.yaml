@@ -1,0 +1,118 @@
+# =====================================================================
+#  ekf_config.yaml — robot_localization EKF cho SmartMarketBot
+# =====================================================================
+# Mục tiêu:
+#   - Fusion 3 nguồn: /odom (wheel), /imu/data (heading), /amcl_pose (SLAM)
+#   - Publish /odometry/filtered → slam_toolbox dùng làm odom chuẩn
+#   - Ổn định heading (không drift), tăng độ chính xác translation
+#
+# Khớp với:
+#   - Bridge esp32_ros2_bridge.py publish /odom + /imu/data + /amcl_pose
+#   - SLAM Toolbox mapper_params_online_async.yaml (Tầng 2 đã làm)
+# =====================================================================
+
+# ---------- Frames ----------
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+map_frame: map
+
+# ---------- Frequency ----------
+frequency: 30.0   # EKF chạy ở 30 Hz (publish pose mượt cho slam_toolbox)
+sensor_timeout: 0.1
+two_d_mode: true  # Robot ground-only, bỏ z, roll, pitch
+publish_tf: true  # Publish odom → base_link
+
+# ---------- Transform desinations ----------
+# base_link là frame đích của robot
+print_diagnostics: true
+debug: false
+
+# ---------- Process noise (motion_model) ----------
+# Vì robot đi chậm trong siêu thị (~0.4 m/s, ~0.5 rad/s),
+# noise nhỏ để không over-trust motion, vừa đủ để bám measurement.
+process_noise_covariance: [
+  0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # x
+  0.0,   0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # y
+  0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # z (two_d_mode → bỏ)
+  0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # roll (bỏ)
+  0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # pitch (bỏ)
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # yaw (cho phép EKF tự do update từ IMU)
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # vx
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # vy
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    # vz
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,   0.0,    # vroll
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,    # vpitch
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,   0.0,   0.0,    # vyaw
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,    # ax
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,    # ay
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01     # az
+]
+
+# ---------- Initial covariance ----------
+# Khởi đầu: không chắc chắn nhiều (EKF sẽ hội tụ sau ~5s)
+initial_estimate_covariance: [
+  1.0,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   1.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1e6,   0.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0,   0.0,
+  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   1.0
+]
+
+# ============================================================
+#  odom0: /odom từ ESP32 (wheel + PWM dead-reckoning)
+# ============================================================
+odom0: /odom
+odom0_config: [
+  true,  true,  false,   # x, y, z
+  false, false, true,    # roll, pitch, yaw
+  false, false, false,   # vx, vy, vz
+  false, false, false,   # vroll, vpitch, vyaw
+  false, false, false    # ax, ay, az
+]
+odom0_differential: false  # Pose (không phải velocity) → cho phép SLAM pose tương tác
+odom0_relative: false
+
+# ============================================================
+#  odom1: /imu/data (heading từ IMU, EKF-fused trên ESP32)
+# ============================================================
+odom1: /imu/data
+odom1_config: [
+  false, false, false,   # x, y, z
+  false, false, true,    # roll, pitch, yaw (chỉ yaw)
+  false, false, false,   # vx, vy, vz
+  false, false, true,    # vroll, vpitch, vyaw
+  false, false, false    # ax, ay, az
+]
+odom1_differential: true   # IMU cung cấp angular velocity → differential mode
+odom1_relative: true
+odom1_queue_size: 10
+
+# ============================================================
+#  pose0: /amcl_pose từ SLAM Toolbox (absolute pose trong map frame)
+# ============================================================
+# Lưu ý: robot_localization dùng /<world_frame>/<source> để biết pose ở world.
+# SLAM Toolbox publish /amcl_pose hoặc /<topic_name>/pose — cần remap nếu khác.
+# Mặc định SLAM pose topic là /slam_toolbox/localization_pose hoặc /pose — chỉnh tùy dự án.
+pose0: /amcl_pose
+pose0_config: [
+  true,  true,  false,
+  false, false, true,
+  false, false, false,
+  false, false, false,
+  false, false, false
+]
+pose0_differential: false
+pose0_relative: false
+pose0_queue_size: 10
+pose0_rejection_threshold: 2.0   # Reject nếu Mahalanobis > 2 sigma (chống SLAM jump)

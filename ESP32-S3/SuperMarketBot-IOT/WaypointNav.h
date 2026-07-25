@@ -500,7 +500,8 @@ inline void wpNavTick() {
     steer = (int16_t)constrain(yawOut, -100, 100);
     strafeCmd = 0;
 
-    uint16_t cruiseSpd = g_state.autoBaseSpeed;
+    uint16_t cruiseSpd = g_state.waypointBaseSpeed;   // Ưu tiên slider Waypoint riêng
+    if (cruiseSpd == 0) cruiseSpd = g_state.autoBaseSpeed;  // Fallback về auto
     if (cruiseSpd == 0) cruiseSpd = g_state.baseSpeed;
     if (cruiseSpd == 0) cruiseSpd = wpPct2Pwm(WP_CRUISE_SPEED_PCT);
 

@@ -1,0 +1,10 @@
+websocket-client>=1.6.0
+rclpy
+
+# ROS 2 packages cần cài thêm (sudo apt install):
+#   ros-$ROS_DISTRO-robot-localization   # EKF fusion (odom + IMU + SLAM)
+#   ros-$ROS_DISTRO-slam-toolbox        # Bản đồ + localization (đã có)
+#   ros-$ROS_DISTRO-rosbridge-server    # WebSocket server (đã có)
+# Ví dụ trên Ubuntu 22.04 + ROS 2 Humble:
+#   sudo apt install ros-humble-robot-localization ros-humble-slam-toolbox ros-humble-rosbridge-server
+# Sau đó build workspace (nếu cần):  colcon build --packages-select robot_localization

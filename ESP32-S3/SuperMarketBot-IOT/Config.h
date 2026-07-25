@@ -439,6 +439,7 @@ struct RobotState {
   volatile int16_t cmdStrafe;  // -100..100 (trượt ngang, Mecanum)
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
+  volatile uint16_t waypointBaseSpeed; // 0..PWM_MAX — tốc độ riêng cho Waypoint Nav (slider web)
   volatile uint16_t swerveBaseSpeed; // 0..PWM_MAX — tốc độ riêng khi dạt tránh/lùi/xoay (slider web)
   volatile uint16_t rotateBaseSpeed; // 0..PWM_MAX — tốc độ xoay hướng (slider web)
   volatile float imuYawScale;        // Hệ số nhân bù góc IMU (mặc định 1.0f)

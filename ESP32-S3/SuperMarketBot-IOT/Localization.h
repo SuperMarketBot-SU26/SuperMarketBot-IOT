@@ -29,6 +29,13 @@
 #include "Config.h"
 #include <math.h>
 
+// Forward declaration cho ImuFusion EKF để tránh vòng include.
+//   ImuFusion.h include "Localization.h" (cần g_pose + LOC_PWM_TO_MPS + WHEEL_BASE_M).
+//   Localization.h chỉ cần gọi imuFusion::applySlamPose → forward-declare là đủ.
+namespace imuFusion {
+  inline void applySlamPose(float headingAbsRad);  // defined in ImuFusion.h
+}
+
 #ifndef WHEEL_BASE_M
 #define WHEEL_BASE_M    0.365f  // khoảng cách tâm 2 bên bánh (m) — dùng cho dTheta khi lách
 #endif
@@ -71,6 +78,15 @@ inline void locSetDriveCmd(int16_t leftPct, int16_t rightPct) {
 
 inline void locSetEncoderless(bool enabled) { s_locEnabled = enabled; }
 
+/**
+ * Đọc lệnh drive cuối cùng đã ghi vào localization (PWM % trái/phải).
+ * Dùng cho ImuFusion EKF updateWheel().
+ */
+inline void locGetDriveCmd(int16_t &leftPct, int16_t &rightPct) {
+  leftPct  = s_locDriveCmd.leftPct;
+  rightPct = s_locDriveCmd.rightPct;
+}
+
 inline void locResetPose() {
   g_pose = {0.f, 0.f, 0.f};
   s_locDriveCmd = {0, 0, 0};
@@ -88,6 +104,9 @@ inline void locSetSlamPose(float x, float y, float headingRad) {
   while (headingRad < 0.f)              headingRad += 2.f * (float)M_PI;
   while (headingRad >= 2.f * (float)M_PI) headingRad -= 2.f * (float)M_PI;
   g_pose.headingRad = headingRad;
+
+  // Cập nhật EKF để reset bias & covariance khi SLAM cung cấp pose tuyệt đối
+  imuFusion::applySlamPose(headingRad);
 }
 
 /**
