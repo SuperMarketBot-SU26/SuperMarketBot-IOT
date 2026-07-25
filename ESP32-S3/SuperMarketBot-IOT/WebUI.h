@@ -32,6 +32,22 @@ extern uint8_t g_lineSpeedPct;
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);
 
+/**
+ * Broadcast 1 message JSON scan tới TẤT CẢ WS clients (WebManager dashboard).
+ * Cùng payload với MQTT_TOPIC_SCAN — WebManager có thể nhận từ 1 trong 2 nguồn.
+ */
+static inline void webUiBroadcastScan(const char* type, float pct, float dist, uint32_t durMs, uint8_t fsm) {
+  JsonDocument doc;
+  doc["t"]     = type;     // "scan_progress" hoặc "scan_complete"
+  doc["pct"]   = pct;
+  doc["dist"]  = dist;
+  doc["durMs"] = durMs;
+  doc["fsm"]   = fsm;
+  char buf[256];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  g_wsServer.broadcastTXT(buf, n);
+}
+
 static const char HTML_PAGE[] PROGMEM = R"rawhtml(
 <!DOCTYPE html>
 <html lang="vi">
@@ -478,7 +494,7 @@ details pre{
               </div>
               <span class="spd-block__badge" id="spdVal">60%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="60"
+            <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="50"
               oninput="sendSpeed(this.value)" aria-label="Tốc độ lái tay phần trăm"/>
             <div class="spd-block__ticks"><span>0%</span><span>50%</span><span>100%</span></div>
           </div>
@@ -526,7 +542,7 @@ details pre{
               </div>
               <span class="spd-block__badge" id="spdLineVal">60%</span>
             </div>
-            <input type="range" class="spd-range spd-range--line" id="spdLineSlider" min="15" max="100" value="60"
+            <input type="range" class="spd-range spd-range--line" id="spdLineSlider" min="15" max="100" value="30"
               oninput="sendSpeedLine(this.value)" aria-label="Tốc độ dò line phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
           </div>
@@ -1462,12 +1478,13 @@ inline void webUIBroadcast() {
 }
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
-  g_state.baseSpeed = g_prefs.getUInt("baseSpeed", PWM_MAX * 60 / 100);
-  g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", PWM_MAX * 60 / 100);
-  g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", PWM_MAX * 50 / 100);
-  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", PWM_MAX * 40 / 100);
-  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", PWM_MAX * 30 / 100);
-  g_lineSpeedPct = g_prefs.getUChar("lineSpeedPct", 60);
+  // Default speeds theo yêu cầu user: di chuyển = 30%, xoay/né vật = 70%
+  g_state.baseSpeed       = g_prefs.getUInt("baseSpeed",      PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT   / 100);
+  g_state.autoBaseSpeed   = g_prefs.getUInt("autoBaseSpeed",  PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT   / 100);
+  g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT  / 100);
+  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed",    PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100);
+  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed",    PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT    / 100);
+  g_lineSpeedPct = g_prefs.getUChar("lineSpeedPct", ROBOT_DEFAULT_CRUISE_PCT);   // line follow = 30%
   if (g_lineSpeedPct < 15) g_lineSpeedPct = 15;
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
   sensorLayoutLoad(g_prefs);

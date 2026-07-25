@@ -129,6 +129,42 @@ static inline float wpAngleDiff(float target, float current) {
   return wpNormalizeAngle(target - current);
 }
 
+/**
+ * Snap-to-90°: nếu target heading chênh quá ± tolerance (g_wpSnap90TolRad) so với
+ * một góc chuẩn {0, 90, 180, 270}, ép về góc chuẩn gần nhất. Tác dụng: siêu thị
+ * có layout dạng lưới vuông góc (kệ hàng xếp song song), robot di chuyển theo
+ * các trục 0°/90°/180°/270° chứ không theo atan2 nguyên bản (có thể 87°, 91°...
+ * → drift khi đi đoạn dài).
+ *
+ * Runtime override: WebManager gửi WS {t: 'snap90', deg: N} → set g_wpSnap90TolRad.
+ * Set = 0 để tắt snap.
+ *
+ * @param headingRad  Target heading (rad)
+ * @return "snapped" heading nếu chênh trong tolerance; ngược lại trả nguyên heading.
+ */
+#ifndef WP_SNAP_TO_90_DEFAULT_TOL_DEG
+#define WP_SNAP_TO_90_DEFAULT_TOL_DEG 15.0f
+#endif
+static float g_wpSnap90TolRad = (float)WP_SNAP_TO_90_DEFAULT_TOL_DEG * (float)M_PI / 180.0f;
+
+static inline float wpSnapTo90(float headingRad) {
+#if WP_SNAP_TO_90_ENABLE
+  // 4 cardinal directions: 0, π/2, π, -π/2
+  const float cards[4] = {
+    0.f,
+    (float)M_PI * 0.5f,
+    (float)M_PI,
+    -(float)M_PI * 0.5f
+  };
+  for (uint8_t i = 0; i < 4; i++) {
+    if (fabsf(wpNormalizeAngle(headingRad - cards[i])) <= g_wpSnap90TolRad) {
+      return cards[i];
+    }
+  }
+#endif
+  return headingRad;
+}
+
 /** Đặt trạng thái FSM và cập nhật g_wpStatus */
 static inline void wpSetState(WpFsmState st, uint32_t now, const char *statusStr) {
   s_wpFsm = st;
@@ -208,12 +244,13 @@ inline void wpNavStart() {
   if (s_wpCount > 0) {
     float dx = s_wpRoute[0].x - g_pose.x;
     float dy = s_wpRoute[0].y - g_pose.y;
-    s_wpSegmentHeading = atan2f(dy, dx);
+    s_wpSegmentHeading = wpSnapTo90(atan2f(dy, dx));
   }
-  
+
   strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
-  Serial.printf("[WP] Start → WP[0] (%.3f, %.3f) | Pose aligned to map!\n",
-                s_wpRoute[0].x, s_wpRoute[0].y);
+  Serial.printf("[WP] Start → WP[0] (%.3f, %.3f) | Pose aligned to map! segHead=%.2f rad (%.1f°)\n",
+                s_wpRoute[0].x, s_wpRoute[0].y, s_wpSegmentHeading,
+                s_wpSegmentHeading * 180.0f / (float)M_PI);
 }
 
 inline void wpNavStop() {
@@ -283,10 +320,11 @@ inline void wpNavTick() {
         if (s_wpIndex < s_wpCount) {
           float dx2 = s_wpRoute[s_wpIndex].x - g_pose.x;
           float dy2 = s_wpRoute[s_wpIndex].y - g_pose.y;
-          s_wpSegmentHeading = atan2f(dy2, dx2);  // Tính lại hướng đích
+          s_wpSegmentHeading = wpSnapTo90(atan2f(dy2, dx2));  // Tính lại hướng đích, snap về 0/90/180/270
         }
         strncpy(g_wpStatus, "navigating", sizeof(g_wpStatus) - 1);
-        Serial.printf("[WP] OA done. Re-align to segHead=%.2f rad. settle 450ms.\n", s_wpSegmentHeading);
+        Serial.printf("[WP] OA done. Re-align to segHead=%.2f rad (%.1f°). settle 450ms.\n",
+                      s_wpSegmentHeading, s_wpSegmentHeading * 180.0f / (float)M_PI);
       } else if (r == OA_RES_BLOCKED) {
         wpSetState(WP_OBSTACLE_HOLD, now, "blocked");
         s_wpObstHoldStart = now;
@@ -442,7 +480,7 @@ inline void wpNavTick() {
         // Tích hợp lực xoay từ thanh Xoay Hướng (g_state.rotateBaseSpeed)
         uint16_t rotBase = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : g_state.autoBaseSpeed;
         if (rotBase == 0) rotBase = g_state.baseSpeed;
-        if (rotBase == 0) rotBase = wpPct2Pwm(40);
+        if (rotBase == 0) rotBase = wpPct2Pwm(ROBOT_DEFAULT_ALIGN_PCT);   // Default 70% nếu tất cả slider = 0
 
         uint16_t spinPwm = (uint16_t)((uint32_t)rotBase * (180u + (uint16_t)(fabsf(alpha) * 15.0f)) / 255u);
         if (spinPwm > PWM_MAX) spinPwm = PWM_MAX;

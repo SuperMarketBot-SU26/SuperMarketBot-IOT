@@ -24,6 +24,13 @@ extern RobotState g_state;
 extern SemaphoreHandle_t g_stateMutex;
 extern Preferences g_prefs;
 
+// Forward declarations cho AutoExplore (định nghĩa trong AutoExplore.h)
+namespace autoExplore {
+  inline void start();
+  inline void stop();
+  inline bool isActive();
+}
+
 /** Dừng motor + về lái tay (gọi khi boot / E-Stop / đổi mode Manual). */
 inline void robotForceManualStop() {
   g_state.mode = MODE_MANUAL;
@@ -114,7 +121,14 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     if (m > MODE_LINE) m = MODE_MANUAL;
     if (m == MODE_MANUAL) {
       robotForceManualStop();
+      autoExplore::stop();   // dừng AutoExplore nếu đang chạy
     } else {
+      // Đảm bảo stop AutoExplore nếu đang chạy trước khi đổi mode khác
+      if (m == MODE_AUTO_EXPLORE) {
+        autoExplore::start();   // bắt đầu session mới
+      } else {
+        autoExplore::stop();    // dừng nếu đang chạy
+      }
       g_state.mode = (RobotMode)m;
       g_state.cmdX = 0;
       g_state.cmdY = 0;
@@ -143,6 +157,24 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     float sy = doc["y"] | 0.f;
     float sh = doc["h"] | 0.f;
     locSetSlamPose(sx, sy, sh);
+  } else if (strcmp(t, "mode_auto_explore") == 0) {
+    Serial.println(F("[WS-Mode] Bắt đầu MODE_AUTO_EXPLORE (Tự đi quét Map)"));
+    robotForceManualStop();
+    g_state.mode = MODE_AUTO_EXPLORE;
+    autoExplore::start();
+  } else if (strcmp(t, "scan_stop") == 0) {
+    Serial.println(F("[WS-Mode] Dừng MODE_AUTO_EXPLORE"));
+    autoExplore::stop();
+    robotForceManualStop();
+    g_state.mode = MODE_MANUAL;
+  } else if (strcmp(t, "snap90") == 0) {
+    int deg = doc["deg"] | 15;
+    if (deg < 0) deg = 0;
+    if (deg > 45) deg = 45;
+    // Chuyển deg → rad rồi override define runtime (không save NVS - chỉ runtime)
+    extern float g_wpSnap90TolRad;   // defined in WaypointNav.h
+    g_wpSnap90TolRad = (float)deg * (float)M_PI / 180.0f;
+    Serial.printf("[WS-Snap90] Đã set tolerance = %d° (%.3f rad)\n", deg, g_wpSnap90TolRad);
   } else if (strcmp(t, "test_motor") == 0) {
     const char *payloadStr = doc["payload"] | "";
     int slot = -1;

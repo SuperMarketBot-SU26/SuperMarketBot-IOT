@@ -292,14 +292,35 @@
 #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
 #define ROBOT_HEAVY_LOAD        1
 #if ROBOT_HEAVY_LOAD
-#define AUTO_CRUISE_SPEED_PCT   50
+#define AUTO_CRUISE_SPEED_PCT   30     // Default di chuyển thẳng/lùi = 30% (đã set theo yêu cầu)
 #define AUTO_MIN_PWM_FRAC       22
 #else
-#define AUTO_CRUISE_SPEED_PCT   40
+#define AUTO_CRUISE_SPEED_PCT   30     // Default di chuyển thẳng/lùi = 30%
 #define AUTO_MIN_PWM_FRAC       12
 #endif
 /** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */
 #define AUTO_LIDAR_BLOCK_USE_REAR 0
+
+/* ---------- Default speeds theo yêu cầu user (30% / 70%) ----------- */
+#ifndef ROBOT_DEFAULT_CRUISE_PCT
+#define ROBOT_DEFAULT_CRUISE_PCT     30    // Di chuyển bình thường (30%)
+#endif
+#ifndef ROBOT_DEFAULT_OA_ESCAPE_PCT
+#define ROBOT_DEFAULT_OA_ESCAPE_PCT   70    // Né vật, xoay, align (70%)
+#endif
+#ifndef ROBOT_DEFAULT_BACKUP_PCT
+#define ROBOT_DEFAULT_BACKUP_PCT      70    // Backup/lùi (70%)
+#endif
+#ifndef ROBOT_DEFAULT_ALIGN_PCT
+#define ROBOT_DEFAULT_ALIGN_PCT       70    // Xoay align heading (70%)
+#endif
+/** Snap-to-90: khi đến waypoint, nếu bearing-target chênh < ngưỡng, ép về 0/90/180/270 gần nhất */
+#ifndef WP_SNAP_TO_90_ENABLE
+#define WP_SNAP_TO_90_ENABLE    1
+#endif
+#ifndef WP_SNAP_TO_90_TOLERANCE_DEG
+#define WP_SNAP_TO_90_TOLERANCE_DEG  15.0f   // ±15° chênh lệch → snap
+#endif
 
 /** Legacy / khi USE_HC_SR04_HARDWARE=1 thêm bẻ cạnh; LiDAR-only chỉ dùng AUTO_LIDAR_* ở FSM chính */
 #define AUTO_US_SLOW_CM      85   // (SR04) trước gần hơn → giảm ga tiến
@@ -414,10 +435,15 @@
 
 enum RobotMode : uint8_t {
   MODE_MANUAL   = 0,    // Lái tay
-  MODE_AUTO     = 1,    // Tự hành né vật cản (reactive FSM)
+  MODE_AUTO_EXPLORE = 1,// Tự đi quét Map (Frontier exploration + LIDAR + US fusion)
+                          //   Lưu ý: alias cho MODE_AUTO cũ (reactive né vật) — đổi tên
+                          //   để khớp với WebManager "Tự đi quét Map" và mode mới auto-save.
   MODE_WAYPOINT = 2,    // Tự hành bám waypoint (Pure Pursuit, Phase 3)
   MODE_LINE     = 3     // Tự hành theo line (TCRT5000) — Phase 9
 };
+
+// Backward-compat alias: code cũ tham chiếu MODE_AUTO → vẫn hoạt động
+#define MODE_AUTO MODE_AUTO_EXPLORE
 
 // (enum WheelMode đã bỏ — hệ thống chỉ dùng differential drive (bánh thường))
 

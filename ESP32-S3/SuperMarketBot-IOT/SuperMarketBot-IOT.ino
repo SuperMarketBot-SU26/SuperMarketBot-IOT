@@ -27,6 +27,7 @@
 #include "Odometry.h"
 #include "PidController.h"
 #include "ImuFusion.h"          // EKF 1D heading fusion (gyro + wheel + SLAM)
+#include "AutoExplore.h"        // Mode Tự đi quét Map (frontier exploration)
 #include "WaypointNav.h"
 #include "StatusRGB.h"
 #include <esp_task_wdt.h>
@@ -451,8 +452,8 @@ static void taskControl(void *pvParams) {
         break;
       }
 
-      case MODE_AUTO: {
-        autoNavigateAvoidance();
+      case MODE_AUTO_EXPLORE: {
+        autoExplore::tick();
         break;
       }
 

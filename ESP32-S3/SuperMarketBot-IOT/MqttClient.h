@@ -49,6 +49,7 @@
 #define MQTT_TOPIC_STATUS     "smartmarketbot/robot/" MQTT_CLIENT_ID "/status"
 #define MQTT_TOPIC_COMMAND    "smartmarketbot/robot/" MQTT_CLIENT_ID "/command"
 #define MQTT_TOPIC_LOG        "smartmarketbot/robot/" MQTT_CLIENT_ID "/log"
+#define MQTT_TOPIC_SCAN       "smartmarketbot/robot/" MQTT_CLIENT_ID "/scan"   // scan_progress + scan_complete
 
 /* ==================== BIẾN NỘI BỘ ================================== */
 #if MQTT_USE_TLS
@@ -57,6 +58,16 @@ static WiFiClientSecure g_wifiClient;
 static WiFiClient       g_wifiClient;
 #endif
 extern SemaphoreHandle_t g_mqttMutex;
+
+// Forward declarations cho AutoExplore
+namespace autoExplore {
+  inline void start();
+  inline void stop();
+  inline bool isActive();
+}
+
+// Forward declare từ WebUI.h — broadcast WS cho WebManager
+static inline void webUiBroadcastScan(const char* type, float pct, float dist, uint32_t durMs, uint8_t fsm);
 static PubSubClient     g_mqttClient(g_wifiClient);
 static uint32_t         g_mqttLastReconnectMs = 0;
 static uint32_t         g_mqttLastTelemetryMs = 0;
@@ -66,6 +77,87 @@ bool                    g_mqttEnabled = false; ///< true khi STA đã lên. Đư
 /** Core 1 set flag này để Core 0 publish status message */
 volatile bool           g_mqttStatusPending = false;
 volatile char           g_mqttPendingStatus[32] = {0};
+
+/** Last scan progress (Core 1 ghi, Core 0 publish chủ động) */
+volatile float          g_scanLastPct = 0.0f;
+volatile float          g_scanLastDist = 0.0f;
+volatile uint32_t       g_scanLastDurMs = 0;
+volatile uint8_t        g_scanLastState = 0xFF;
+volatile bool           g_scanPendingComplete = false;
+volatile uint32_t       g_scanCompleteSessionId = 0;
+volatile float          g_scanCompletePct = 0.0f;
+volatile float          g_scanCompleteDist = 0.0f;
+volatile uint32_t       g_scanCompleteDurMs = 0;
+
+/**
+ * AutoExplore.h gọi hàm này mỗi 5s. Chỉ cập nhật biến global — Core 0 (mqttLoop)
+ * sẽ đọc và publish lên MQTT_TOPIC_SCAN (thread-safe).
+ *
+ * @param pct     % coverage (0..100)
+ * @param dist    Tổng quãng đường đã đi (m)
+ * @param durMs   Thời gian đã quét (ms)
+ * @param state   FSM state (0=CRUISE, 1=SPIN_DETECT, 2=AVOID_US, 3=DONE)
+ */
+inline void autoExplorePublishProgress(float pct, float dist, uint32_t durMs, uint8_t state) {
+  g_scanLastPct = pct;
+  g_scanLastDist = dist;
+  g_scanLastDurMs = durMs;
+  g_scanLastState = state;
+
+  // Nếu DONE → set pendingComplete để Core 0 publish scan_complete
+  if (state == 3) {
+    // Lấy sessionId từ AutoExplore state
+    // (state này read-only, an toàn vì Core 1 không sửa sau khi set DONE)
+    g_scanPendingComplete = true;
+  }
+}
+
+/* ==================== PUBLISH SCAN PROGRESS ============================= */
+static void mqttPublishScanProgress() {
+  if (!g_mqttClient.connected()) return;
+
+  StaticJsonDocument<256> doc;
+  doc["t"]          = "scan_progress";
+  doc["pct"]        = g_scanLastPct;
+  doc["dist"]       = g_scanLastDist;
+  doc["durMs"]      = g_scanLastDurMs;
+  doc["fsm"]        = g_scanLastState;
+  doc["timestamp"]  = (uint32_t)(millis() / 1000UL);
+
+  char buf[256];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
+}
+
+static void mqttPublishScanComplete() {
+  if (!g_mqttClient.connected()) return;
+
+  StaticJsonDocument<256> doc;
+  doc["t"]          = "scan_complete";
+  doc["sessionId"]  = (uint32_t)g_scanCompleteSessionId;
+  doc["pct"]        = g_scanCompletePct;
+  doc["dist"]       = g_scanCompleteDist;
+  doc["durMs"]      = g_scanCompleteDurMs;
+  doc["status"]     = "success";
+  doc["timestamp"]  = (uint32_t)(millis() / 1000UL);
+
+  char buf[256];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
+
+  g_scanPendingComplete = false;
+}
+
+/** Last scan progress (Core 1 ghi, Core 0 publish chủ động) */
+volatile float          g_scanLastPct = 0.0f;
+volatile float          g_scanLastDist = 0.0f;
+volatile uint32_t       g_scanLastDurMs = 0;
+volatile uint8_t        g_scanLastState = 0xFF;
+volatile bool           g_scanPendingComplete = false;
+volatile uint32_t       g_scanCompleteSessionId = 0;
+volatile float          g_scanCompletePct = 0.0f;
+volatile float          g_scanCompleteDist = 0.0f;
+volatile uint32_t       g_scanCompleteDurMs = 0;
 
 /* ==================== CALLBACK — nhận lệnh từ Backend ============== */
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -225,6 +317,18 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       Serial.println(F("[MQTT ERROR] Lỗi parse hoặc start lộ trình Waypoints!"));
     }
 
+  } else if (strcmp(cmd, "mode_auto_explore") == 0) {
+    Serial.println(F(">>> LỆNH: BẮT ĐẦU TỰ ĐI QUÉT MAP (MODE_AUTO_EXPLORE) từ Backend!"));
+    robotForceManualStop();   // chuyển về manual trước
+    g_state.mode = MODE_AUTO_EXPLORE;
+    autoExplore::start();
+
+  } else if (strcmp(cmd, "scan_stop") == 0) {
+    Serial.println(F(">>> LỆNH: DỪNG QUÉT MAP (SCAN_STOP) từ Backend!"));
+    autoExplore::stop();
+    g_state.mode = MODE_MANUAL;
+    robotForceManualStop();
+
   } else {
     Serial.printf("[MQTT WARNING] Lệnh không xác định: %s\n", cmd);
   }
@@ -287,7 +391,7 @@ static void mqttCheckAutoDock(int batPct) {
 
   /* Pin yếu → hủy route hiện tại và yêu cầu backend điều hướng về trạm sạc */
   if (batPct < (int)DOCK_LOW_BAT_PCT && !s_dockRequested
-      && (g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO)) {
+      && (g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO_EXPLORE)) {
     s_dockRequested = true;
     wpNavCancel();  // Hủy route đang chạy
     strncpy((char *)g_mqttPendingStatus, "low_battery",
@@ -327,7 +431,8 @@ static void mqttPublishTelemetry() {
   doc["Status"]        = "online";
   doc["CurrentNodeId"] = (const char *)nullptr;
   doc["Mode"]          = (g_state.mode == MODE_WAYPOINT) ? "waypoint"
-                       : (g_state.mode == MODE_AUTO)     ? "auto" : "manual";
+                       : (g_state.mode == MODE_AUTO_EXPLORE) ? "auto_explore"
+                       : (g_state.mode == MODE_LINE) ? "line" : "manual";
   doc["IsOnline"]      = true;
   doc["XCoord"]        = g_pose.x;
   doc["YCoord"]        = g_pose.y;
@@ -392,6 +497,23 @@ static void mqttLoop() {
     if (g_mqttClient.connected()) {
       g_mqttClient.loop();
       mqttPublishTelemetry();
+
+      // Publish scan events (nếu AutoExplore đang chạy)
+      if (g_scanLastState != 0xFF) {
+        mqttPublishScanProgress();
+        // Đồng thời broadcast qua WebSocket để WebManager nhận trực tiếp
+        webUiBroadcastScan("scan_progress", g_scanLastPct, g_scanLastDist, g_scanLastDurMs, g_scanLastState);
+      }
+      if (g_scanPendingComplete) {
+        // Snapshot giá trị rồi reset flag
+        g_scanCompleteSessionId = (uint32_t)(micros() & 0xFFFFFFFF);
+        g_scanCompletePct = g_scanLastPct;
+        g_scanCompleteDist = g_scanLastDist;
+        g_scanCompleteDurMs = g_scanLastDurMs;
+        mqttPublishScanComplete();
+        webUiBroadcastScan("scan_complete", g_scanCompletePct, g_scanCompleteDist, g_scanCompleteDurMs, g_scanLastState);
+        g_scanLastState = 0xFF;   // reset để không gửi progress nữa
+      }
     }
     xSemaphoreGive(g_mqttMutex);
   }
