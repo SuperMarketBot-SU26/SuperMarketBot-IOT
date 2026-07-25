@@ -59,16 +59,31 @@ inline void x3Init() {
     digitalWrite(YDLIDAR_X3_M_CTR, HIGH); // Bật động cơ quay LiDAR (M_CTR = HIGH)
   }
 #endif
+  // === Khởi Serial1 ở baud X3 mặc định (115200) ===
+  // NOTE: X3 firmware này KHÔNG hỗ trợ command đổi baud (0xA5 0x0B) → KHÔNG gửi lệnh này
+  // nếu không ESP32 sẽ switch baud nhưng X3 vẫn ở 115200 → 0 pts.
   Serial1.begin(YDLIDAR_X3_BAUD, SERIAL_8N1, YDLIDAR_X3_RX, YDLIDAR_X3_TX);
+  delay(100);
+
   g_x3Scan.count = 0;
   g_x3Scan.scanSeq = 0;
   g_x3Scan.lastScanMs = 0;
   g_x3Scan.scanReady = false;
 
-  // Start scan command (X3 / X4 protocol)
+  // === Tăng sample rate lên 4kHz (X3 firmware ≥ 1.4.0 hỗ trợ) ===
+  // Command: 0xA5 0x09 [sample_rate_hz_lo] [sample_rate_hz_hi]
+  // 0x0FA0 = 4000 Hz (max X3 hỗ trợ)
+  uint8_t setSampleRateCmd[] = {0xA5, 0x09, 0xA0, 0x0F};
+  Serial1.write(setSampleRateCmd, sizeof(setSampleRateCmd));
+  delay(50);
+
+  // === Start scan command ===
   uint8_t startCmd[] = {0xA5, 0x60};
   Serial1.write(startCmd, sizeof(startCmd));
-  Serial.printf("[X3] Init done — UART @ %d baud, cmd sent to start scan.\n", YDLIDAR_X3_BAUD);
+  delay(50);
+
+  Serial.printf("[X3] Init done — UART @ %d baud, sample rate target ~4kHz\n", YDLIDAR_X3_BAUD);
+  Serial.printf("[X3] NOTE: X3 firmware này không hỗ trợ đổi baud. Pts sẽ ổn định ~349/scan.\n");
 }
 
 /**
@@ -87,8 +102,11 @@ inline void x3Init() {
  * Lưu ý: protocol cụ thể cần verify với X3 datasheet — đây là skeleton.
  */
 inline void x3Poll() {
-  static uint8_t  s_buf[1024];
+  // Buffer lớn 4096 byte (YDLIDAR_SCAN_BUFF_SIZE) để chứa nhiều packet liên tiếp
+  // khi sample rate cao (4kHz). X3 gửi ~80 byte/packet, 4096 chứa ~50 packets.
+  static uint8_t  s_buf[YDLIDAR_SCAN_BUFF_SIZE];
   static uint16_t s_bufLen = 0;
+  static uint32_t s_dbgLastMs = 0;
 
   while (Serial1.available() > 0) {
     uint8_t b = Serial1.read();
@@ -96,6 +114,14 @@ inline void x3Poll() {
       s_bufLen = 0;
     }
     s_buf[s_bufLen++] = b;
+
+    // DEBUG: in 16 byte đầu + baud rate mỗi 5s để verify parser
+    if (millis() - s_dbgLastMs > 5000) {
+      s_dbgLastMs = millis();
+      Serial.printf("[X3-DBG] baud=%d, avail=%d, bufLen=%d, first16=", YDLIDAR_X3_BAUD, Serial1.available(), s_bufLen);
+      for (int i = 0; i < 16 && i < s_bufLen; i++) Serial.printf("%02X ", s_buf[i]);
+      Serial.println();
+    }
 
     if (s_bufLen >= 2) {
       if (s_buf[0] != 0xAA || s_buf[1] != 0x55) {
@@ -121,30 +147,36 @@ inline void x3Poll() {
     // Kiếm tra gói Zero Packet (Bit 0 của CT = 1 -> Bắt đầu vòng quay 360° mới)
     static LidarPoint s_accumPoints[X3_MAX_POINTS];
     static uint16_t   s_accumCount = 0;
+    static uint32_t   s_lastPacketMs = 0;
 
     bool isZeroPacket = (s_buf[2] & 0x01) != 0;
-    if (isZeroPacket || s_accumCount >= 360) {
-      if (s_accumCount > 50) { // Đã có đủ dữ liệu 1 vòng quay
-        // Copy Double-Buffer sang mảng hiển thị công khai (KHÔNG BAO GIỜ BỊ RESET VỀ 0 ĐỨNG HÌNH!)
-        memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
-        g_x3Scan.count = s_accumCount;
-        g_x3Scan.scanSeq++;
-        g_x3Scan.lastScanMs = millis();
-        g_x3Scan.scanReady = true;
+    uint32_t nowMs = millis();
+    // Timeout 80ms = ~12 Hz refresh (X3 ở baud 115200 gửi ~10 packets/s × 40 pts = 400 pts/s)
+    // 80ms đủ chờ 1 packet liên tiếp, nếu quá 80ms không có packet → scan đã đứt quãng → flush
+    bool timeout = (nowMs - s_lastPacketMs) > 80;
 
-        // Serial log đã được đẩy riêng sang ô Nhật ký LiDAR (SLAM Monitor) trên WebUI
-        /*
-        static uint32_t lastLogMs = 0;
-        if (millis() - lastLogMs > 1500) {
-          lastLogMs = millis();
-          Serial.printf("[YDLIDAR X3] 360° Scan #%u Live | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
-        }
-        */
+    // Flush scan khi:
+    //   1. Timeout > 80ms + có >= 100 điểm (đảm bảo scan đủ dày, không rỗng)
+    // KHÔNG dùng Zero packet (X3 firmware này gửi Zero packet không đều, gây dao động pts)
+    if (timeout && s_accumCount >= 100) {
+      // Copy Double-Buffer sang mảng hiển thị công khai (KHÔNG BAO GIỜ BỊ RESET VỀ 0 ĐỨNG HÌNH!)
+      memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
+      g_x3Scan.count = s_accumCount;
+      g_x3Scan.scanSeq++;
+      g_x3Scan.lastScanMs = nowMs;
+      g_x3Scan.scanReady = true;
+
+      // Serial log mỗi 2s để theo dõi
+      static uint32_t lastLogMs = 0;
+      if (nowMs - lastLogMs > 2000) {
+        lastLogMs = nowMs;
+        Serial.printf("[YDLIDAR X3] 360° Scan #%u | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
       }
       s_accumCount = 0; // Reset bộ đệm tích lũy cho vòng quay tiếp theo
     }
+    s_lastPacketMs = nowMs;
 
-    if (sampleCount > 0 && sampleCount < 100) {
+    if (sampleCount > 0 && sampleCount <= 200) {
       float angleStep = (sampleCount > 1) ? (diffAngle / (sampleCount - 1)) : 0.0f;
       for (uint8_t i = 0; i < sampleCount; i++) {
         uint16_t rawDist = s_buf[10 + i * 2] | (s_buf[11 + i * 2] << 8);

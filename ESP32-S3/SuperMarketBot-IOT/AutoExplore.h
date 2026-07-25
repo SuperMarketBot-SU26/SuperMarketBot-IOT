@@ -39,6 +39,7 @@
 #include "ObstacleSensors.h"
 #include "YdlidarX3.h"
 #include "PidController.h"
+#include "WaypointNav.h"  // for wpNormalizeAngle()
 
 #ifndef AUTO_EXPLORE_TARGET_COVERAGE_PCT
 #define AUTO_EXPLORE_TARGET_COVERAGE_PCT  95.0f
@@ -91,6 +92,7 @@ struct State {
 
   // FSM transition timers
   uint32_t   stateEnterMs;
+  uint32_t   lastCoverageMs;       // lần cuối estimate coverage (để throttle)
   float      spinStartHeading;
   float      spinTargetHeading;
   bool       hasSpinTarget;

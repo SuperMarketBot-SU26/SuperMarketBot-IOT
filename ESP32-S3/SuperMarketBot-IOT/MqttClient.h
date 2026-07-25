@@ -98,6 +98,7 @@ volatile uint32_t       g_scanCompleteDurMs = 0;
  * @param durMs   Thời gian đã quét (ms)
  * @param state   FSM state (0=CRUISE, 1=SPIN_DETECT, 2=AVOID_US, 3=DONE)
  */
+namespace autoExplore {
 inline void autoExplorePublishProgress(float pct, float dist, uint32_t durMs, uint8_t state) {
   g_scanLastPct = pct;
   g_scanLastDist = dist;
@@ -111,6 +112,7 @@ inline void autoExplorePublishProgress(float pct, float dist, uint32_t durMs, ui
     g_scanPendingComplete = true;
   }
 }
+} // namespace autoExplore
 
 /* ==================== PUBLISH SCAN PROGRESS ============================= */
 static void mqttPublishScanProgress() {
@@ -147,17 +149,6 @@ static void mqttPublishScanComplete() {
 
   g_scanPendingComplete = false;
 }
-
-/** Last scan progress (Core 1 ghi, Core 0 publish chủ động) */
-volatile float          g_scanLastPct = 0.0f;
-volatile float          g_scanLastDist = 0.0f;
-volatile uint32_t       g_scanLastDurMs = 0;
-volatile uint8_t        g_scanLastState = 0xFF;
-volatile bool           g_scanPendingComplete = false;
-volatile uint32_t       g_scanCompleteSessionId = 0;
-volatile float          g_scanCompletePct = 0.0f;
-volatile float          g_scanCompleteDist = 0.0f;
-volatile uint32_t       g_scanCompleteDurMs = 0;
 
 /* ==================== CALLBACK — nhận lệnh từ Backend ============== */
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {

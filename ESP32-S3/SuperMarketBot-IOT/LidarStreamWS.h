@@ -141,12 +141,15 @@ inline void lidarStreamLoop() {
    * ──────────────────────────────────────────────────────────────── */
 #if USE_YDLIDAR_X3
   // Stream mây điểm quét 360° siêu tốc (Fast Integer Formatting, 0ms lag)
-  static char scanBuf[8192];
+  // Buffer lớn 32KB để chứa ~2000 pts (mỗi pt ~15 bytes JSON: "[123.4,5678],")
+  static char scanBuf[32768];
   int pos = snprintf(scanBuf, sizeof(scanBuf), "{\"t\":\"scan\",\"type\":\"scan\",\"pts\":[");
   bool first = true;
   for (uint16_t i = 0; i < g_x3Scan.count; i++) {
     const LidarPoint &pt = g_x3Scan.points[i];
     if (pt.distanceMm == 0) continue;
+    // Filter điểm quá xa (nhiễu) - YDLIDAR X3 max = 8m, but 4m thực tế là đủ
+    if (pt.distanceMm > 6000) continue;
     // Chuyển góc sang 1 chữ số thập phân bằng số nguyên (Nhanh gấp 10 lần float string)
     int degTenths = (int)(pt.angleRad * 572.957795f);
     if (degTenths >= 3600) degTenths -= 3600;

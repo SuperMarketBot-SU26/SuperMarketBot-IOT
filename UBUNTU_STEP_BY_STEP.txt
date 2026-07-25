@@ -1,0 +1,129 @@
+# ============================================================
+# HƯỚNG DẪN TỪNG BƯỚC CHO UBUNTU 22.04
+# ============================================================
+# Copy từng nhóm lệnh vào Terminal Ubuntu, paste và chạy.
+# Mở Terminal: Ctrl+Alt+T
+# ============================================================
+
+# ============================================================
+# BƯỚC 1: CÀI CÁC PACKAGE ROS2
+# ============================================================
+# Mở Terminal, chạy:
+
+sudo apt update
+sudo apt install -y \
+    ros-humble-ros-base \
+    ros-humble-rmw-microxrcedds \
+    ros-humble-rosbridge-server \
+    ros-humble-slam-toolbox \
+    ros-humble-navigation2 \
+    ros-humble-nav2-bringup \
+    ros-humble-teleop-twist-keyboard \
+    ros-humble-teleop-twist-joy \
+    ros-humble-tf2-tools \
+    ros-humble-tf2-geometry-msgs \
+    python3-colcon-common-extensions
+
+# Đợi cài xong (~5-10 phút tùy mạng)
+
+# ============================================================
+# BƯỚC 2: BUILD MICRO-ROS-AGENT
+# ============================================================
+
+mkdir -p ~/microros_ws/src
+cd ~/microros_ws/src
+git clone -b humble https://github.com/micro-ROS/micro-ROS-Agent.git
+cd ~/microros_ws
+source /opt/ros/humble/setup.bash
+sudo rosdep init
+rosdep update
+rosdep install --from-paths src --ignore-src -y --rosdistro humble
+colcon build --symlink-install --packages-select micro_ros_agent
+
+# Đợi build xong (~2-3 phút)
+
+# ============================================================
+# BƯỚC 3: SETUP AUTO-SOURCE ROS2
+# ============================================================
+
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+echo "source ~/microros_ws/install/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+
+# ============================================================
+# BƯỚC 4: LẤY IP UBUNTU
+# ============================================================
+
+ip addr show | grep "inet " | grep -v 127.0.0.1
+
+# Sẽ thấy dòng kiểu: inet 192.168.1.100/24
+# GHI LẠI IP NÀY — sẽ cần cho ESP32
+
+# ============================================================
+# BƯỚC 5: TEST MICRO-ROS-AGENT
+# ============================================================
+# Mở Terminal MỚI (Ctrl+Shift+T):
+
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+
+# Kỳ vọng output:
+# [1234567890.000] info     | UDPv4 Agent listening on port 8888
+# (đợi ESP32 connect)
+
+# ============================================================
+# BƯỚC 6: MỞ SLAM TOOLBOX (Terminal khác)
+# ============================================================
+
+ros2 launch slam_toolbox online_async_launch.py
+
+# Kỳ vọng: map = 0, các topic started
+
+# ============================================================
+# BƯỚC 7: MỞ ROSBRIDGE (Terminal khác)
+# ============================================================
+
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+
+# Kỳ vọng: WebSocket server on port 9090
+
+# ============================================================
+# BƯỚC 8: MỞ RVIZ2 (Terminal khác)
+# ============================================================
+
+ros2 run rviz2 rviz2
+
+# Trong RViz2:
+# - Fixed Frame: odom
+# - Add → By Topic → /scan → LaserScan
+# - Add → By Topic → /map → Map
+# - Add → By Topic → /tf → TF
+
+# ============================================================
+# BƯỚC 9: LÁI ROBOT BẰNG TELEOP (Terminal khác)
+# ============================================================
+
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+
+# Click vào terminal teleop, dùng:
+#   i = tiến
+#   , = lùi
+#   j = xoay trái
+#   l = xoay phải
+#   k = dừng
+#   q = thoát
+
+# Trong RViz2 sẽ thấy map build dần khi robot di chuyển
+# ============================================================
+
+# ============================================================
+# CHECKLIST - GHI LẠI TRẠNG THÁI
+# ============================================================
+# □ Cài ROS2 packages xong
+# □ Build micro-ros-agent xong
+# □ IP Ubuntu: _____________
+# □ micro-ros-agent chạy (port 8888, có log "listening")
+# □ slam_toolbox chạy
+# □ rosbridge chạy (port 9090)
+# □ RViz2 mở được
+# □ ESP32 connect được agent (sẽ thấy log "New client connected")
+# ============================================================

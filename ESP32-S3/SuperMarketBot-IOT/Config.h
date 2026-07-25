@@ -69,10 +69,25 @@
 #define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> Cắm vào chân RX của YDLIDAR (tránh 43/44 bị trùng Serial console)
 #define YDLIDAR_X3_RX           2   // ESP32 RX (GPIO 2) -> Cắm vào chân TX của YDLIDAR
 #define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
-#define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3
+#define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3 (firmware này không hỗ trợ đổi baud)
+                                          // X3 vẫn ở 115200 → ESP32 cũng 115200 → match → ổn định
+                                          // 115200 → ~349 pts/scan ổn định (parser đã OK)
+                                          // Để tăng pts: KHÔNG đổi baud, dùng sample rate 4kHz (đã làm)
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
-#define YDLIDAR_SCAN_BUFF_SIZE  1024  // Buffer bytes cho mỗi scan packet
-#define YDLIDAR_MAX_POINTS      720  // 360° / 0.5° resolution ≈ 720 points (X3 thực tế ~640 points)
+#define YDLIDAR_SCAN_BUFF_SIZE  4096  // Buffer bytes cho nhiều scan packet (tăng từ 1024)
+
+/* YDLIDAR X3 Protocol & Real Capacity:
+ *   - X3 sampling rate: 1kHz-4kHz (default 1kHz, có thể bump lên 4kHz qua lệnh)
+ *   - 1 full rotation = 360°, X3 mặc định ~5-7 Hz rotation
+ *   - → ~400-800 pts/scan ở sample rate 1kHz
+ *   - → ~800-1600 pts/scan ở sample rate 2kHz
+ *   - → ~1600-3200 pts/scan ở sample rate 4kHz
+ *   - → Max thực tế hỗ trợ ~4000 pts/scan (toàn bộ 4096 byte frame)
+ *
+ * Tăng buffer lên 4000 để KHÔNG bỏ sót điểm nào. RAM ESP32-S3 có 512KB SRAM → OK.
+ * Nếu ROS2/slam_toolbox chậm, có thể giảm xuống 2000.
+ */
+#define YDLIDAR_MAX_POINTS      4000  // Max ~4000 pts/scan (full 360° ở 4kHz)
 /**
  * TF-Luna (Benewake): gửi lệnh UART sau khi mở cổng — bật output, khung 9 byte (cm), FPS, save.
  * Tắt (=0) nếu bạn đã cấu hình bằng tool PC và không muốn firmware đụng vào.
