@@ -1,6 +1,6 @@
 // ===========================================================
 // MicroRos.h — ESP32-S3 = micro-ROS node
-// Publish: /scan (LiDAR), /odom (wheel encoder), /imu (MPU6050)
+// Publish: /scan (LiDAR), /odom (wheel encoder), /imu/data (MPU6050)
 // Subscribe: /cmd_vel (motor speed command)
 //
 // Yêu cầu Arduino IDE:
@@ -9,7 +9,7 @@
 //       • micro_ros_arduino (https://github.com/micro-ROS/micro_ros_arduino)
 //   - Hoặc PlatformIO: lib_deps = micro_ros_arduino
 //
-// Compatible với ROS2 Humble (rmw_microxrcedds)
+// Compatible với ROS2 Lyrical (Ubuntu 26.04) và Humble (Ubuntu 22.04).
 // ===========================================================
 
 #ifndef MICROROS_H
@@ -232,7 +232,7 @@ inline bool init() {
     rclc_publisher_init_default(
         &g_imu_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-        "/imu"
+        "/imu/data"
     );
     rclc_publisher_init_default(
         &g_tf_pub, &g_node,
@@ -266,7 +266,7 @@ inline bool init() {
     g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
 
     g_initialized = true;
-    Serial.printf("[micro-ROS] ✅ Node ready, publishing:/scan /odom /imu, subscribing /cmd_vel (agent %s:%d)\n",
+    Serial.printf("[micro-ROS] ✅ Node ready, publishing:/scan /odom /imu/data, subscribing /cmd_vel (agent %s:%d)\n",
                   g_agent_ip.c_str(), g_agent_port);
     return true;
 }
@@ -297,7 +297,7 @@ inline void tick() {
         rcl_publish(&g_odom_pub, &g_odom_msg, NULL);
     }
 
-    // 4. Publish /imu @ 50 Hz
+    // 4. Publish /imu/data @ 50 Hz
     if (now - g_last_imu_ms >= 20) {
         g_last_imu_ms = now;
         fill_imu_msg();
