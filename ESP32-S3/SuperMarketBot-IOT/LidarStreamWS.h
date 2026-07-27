@@ -40,8 +40,8 @@
   #define WS_LIDAR_PORT 82
 #endif
 
-// Gửi frame mỗi 50ms (20 Hz) — siêu mượt, 0ms lag, tiết kiệm CPU
-#define LIDAR_STREAM_INTERVAL_MS 50u
+// Gửi frame mỗi 100ms (10 Hz) — siêu mượt, 0ms lag, tiết kiệm CPU & Wi-Fi
+#define LIDAR_STREAM_INTERVAL_MS 100u
 
 // Số điểm LiDAR mô phỏng mỗi vòng (TF-Luna chỉ có 2 trục F/B)
 // Ở Phase 1: chỉ xuất 2 điểm thật (0° và 180°) kèm khoảng cách
@@ -131,26 +131,20 @@ inline void lidarStreamLoop() {
   float oy = g_pose.y;
   float oh = g_pose.headingRad;
 
-  /* ── Đóng gói JSON compact ──────────────────────────────────────
-   *
-   * Phase 1: Chỉ có 2 điểm (trước 0° và sau 180°).
-   * Phase 2: Khi gắn RPLIDAR/YDLidar (360 điểm), thay mảng pts[]
-   *          bằng vòng for đọc dữ liệu từ LiDAR quay tại đây.
-   *
-   * Dùng thủ công sprintf thay vì ArduinoJson để cực nhanh và tiết kiệm RAM.
-   * ──────────────────────────────────────────────────────────────── */
+  /* ── Đóng gói JSON compact ────────────────────────────────────── */
 #if USE_YDLIDAR_X3
-  // Stream mây điểm quét 360° siêu tốc (Fast Integer Formatting, 0ms lag)
-  // Buffer lớn 32KB để chứa ~2000 pts (mỗi pt ~15 bytes JSON: "[123.4,5678],")
-  static char scanBuf[32768];
+  // Stream mây điểm quét 360° siêu tốc (~400 điểm mượt, 0ms lag, gói nhẹ ~3.5KB)
+  static char scanBuf[8192];
   int pos = snprintf(scanBuf, sizeof(scanBuf), "{\"t\":\"scan\",\"type\":\"scan\",\"pts\":[");
   bool first = true;
-  for (uint16_t i = 0; i < g_x3Scan.count; i++) {
+
+  // Downsample mây điểm xuống ~400 điểm chất lượng cao để tránh lag mạng & lag trình duyệt
+  uint16_t step = (g_x3Scan.count > 400) ? (g_x3Scan.count / 400) : 1;
+  for (uint16_t i = 0; i < g_x3Scan.count; i += step) {
     const LidarPoint &pt = g_x3Scan.points[i];
     if (pt.distanceMm == 0) continue;
-    // Filter điểm quá xa (nhiễu) - YDLIDAR X3 max = 8m, but 4m thực tế là đủ
     if (pt.distanceMm > 6000) continue;
-    // Chuyển góc sang 1 chữ số thập phân bằng số nguyên (Nhanh gấp 10 lần float string)
+
     int degTenths = (int)(pt.angleRad * 572.957795f);
     if (degTenths >= 3600) degTenths -= 3600;
     if (degTenths < 0) degTenths += 3600;
@@ -161,7 +155,7 @@ inline void lidarStreamLoop() {
     pos += snprintf(scanBuf + pos, sizeof(scanBuf) - pos,
                     "%s[%d.%d,%u]", (first ? "" : ","), degWhole, degFrac, pt.distanceMm);
     first = false;
-    if (pos >= (int)sizeof(scanBuf) - 128) break; // Tránh tràn buffer
+    if (pos >= (int)sizeof(scanBuf) - 128) break;
   }
   snprintf(scanBuf + pos, sizeof(scanBuf) - pos, "],\"ox\":%.3f,\"oy\":%.3f,\"oh\":%.4f,\"ts\":%lu}", ox, oy, oh, (unsigned long)now);
   g_wsLidarServer.broadcastTXT(scanBuf);

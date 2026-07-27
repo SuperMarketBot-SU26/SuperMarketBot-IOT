@@ -98,25 +98,12 @@
 
 /* -------------------- SIÊU ÂM (4x HC-SR04 — 4 góc xe) ---------------- */
 // VCC 5V, GND; Trig 3,3V OK; Echo 5V → chia áp 3,3V (1k+2k) vào GPIO
-// Mặc định: Echo 10=Trái trước, 11=Trái sau, 12=Phải trước, 13=Phải sau + Trig 14 chung.
-/* -------------------- HC-SR04 SONAR (4 corners) --------------------
- *
- *  Move từ GPIO10..14 (ADC1) sang GPIO16,35..38 để nhường ADC1 cho TCRT5000.
- *  - US_TRIG: GPIO16 (rảnh - define ENC_RL nhưng encoder đang TẮT)
- *  - US_ECHO_LF: GPIO35 (input-only, không có pull-up nội → cần resistor 10K lên 3V3)
- *  - US_ECHO_RL: GPIO36 (input-only)
- *  - US_ECHO_RF: GPIO37 (input-only)
- *  - US_ECHO_RR: GPIO38 (RGB LED đã tắt)
- *
- *  ★ LƯU Ý: GPIO35-37 input-only → KHÔNG có pull-up nội.
- *  Kết nối HC-SR04 ECHO cần resistor pull-up 10KΩ lên 3V3 cho mỗi chân.
- *  Hoặc nếu module HC-SR04 đã có pull-up trên board (thường có sẵn 10K) → OK.
- */
-#define US_TRIG         16
-#define US_ECHO_LF      35
-#define US_ECHO_RL      36
-#define US_ECHO_RF      37
-#define US_ECHO_RR      38
+// Sơ đồ chuẩn: Trig 14 chung; Echo 10=Trái trước (LF), 11=Trái sau (RL), 12=Phải trước (RF), 13=Phải sau (RR).
+#define US_TRIG         14
+#define US_ECHO_LF      10
+#define US_ECHO_RL      11
+#define US_ECHO_RF      12
+#define US_ECHO_RR      13
 #define US_ECHO_F       US_ECHO_LF
 #define US_ECHO_B       US_ECHO_RL
 #define US_ECHO_L       US_ECHO_RF
@@ -156,14 +143,16 @@
 #define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
-/* -------------------- ENCODER (cảm biến gạt/MH, DO nối ESP) ------- */
-#define USE_ENCODER_HARDWARE  0 // 1 = Bật đọc encoder bánh xe; 0 = Tắt (khi tháo rời phần cứng tránh nhiễu chân floating)
-// DO → GPIO + interrupt; 3,3/5V theo lô module (thường 3,3V OK)
-// GPIO3 (ENC_FR): trên S3 là MTCK/JTAG — trong Arduino chọn USB JTAG disabled / peripheral JTAG off nếu encoder không đếm xung.
-#define ENC_FL        39    // Trước trái
-#define ENC_RL        16    // Sau trái
-#define ENC_FR        3     // Trước phải (JTAG, chỉ dùng input)
-#define ENC_RR        48    // Sau phải (DevKitC-1: LED RGB = 38, không dùng 38 cho enc)
+/* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
+#define USE_ENCODER_HARDWARE  0 // 1 = Bật đọc encoder 2 bánh; 0 = Tắt
+// Chân D0 cắm vào GPIO + ngắt ngoài; VCC = 3.3V, GND chung ESP32. Chân A0 KHÔNG NỐI (BỎ TRỐNG).
+#define ENC_L         35    // Encoder Bên Trái (GPIO 35)
+#define ENC_R         36    // Encoder Bên Phải (GPIO 36)
+
+#define ENC_FL        ENC_L // Bánh trước trái dùng chung xung bên Trái
+#define ENC_RL        ENC_L // Bánh sau trái dùng chung xung bên Trái
+#define ENC_FR        ENC_R // Bánh trước phải dùng chung xung bên Phải
+#define ENC_RR        ENC_R // Bánh sau phải dùng chung xung bên Phải
 
 // Số xung trên 1 vòng bánh xe (tuỳ đĩa encoder - thường 20 khe chữ U)
 #define ENC_PPR       20.0f
@@ -403,8 +392,8 @@
 #define WEB_PORT        80
 #define WEB_SSL_PORT    443   /* HTTPS — camera tablet (getUserMedia) */
 #define WS_PORT         81
-/** Chu kỳ broadcast WebSocket (ms). Đã đẩy lên 30ms (~33 FPS MAX PERFORMANCE) để mây điểm LiDAR live siêu mượt ở mức tối đa ESP32! */
-#define WEB_WS_PERIOD_MS        30u
+/** Chu kỳ broadcast WebSocket (ms). Đặt 100ms (10 Hz) để giao diện mượt mà 100% không giật lag và không làm nghẽn Wi-Fi ESP32! */
+#define WEB_WS_PERIOD_MS        100u
 /** 0 = tắt HTTPS khi chỉ cần lái robot (tiết kiệm RAM/CPU). 1 = bật /vision camera. */
 #define VISION_HTTPS_ENABLE     0
 /** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */

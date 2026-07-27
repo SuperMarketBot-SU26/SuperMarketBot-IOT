@@ -549,14 +549,12 @@ details pre{
         </div>
       </div>
 
-      <div class="card" style="display:none">
-        <h2>Bánh xe (RPM)</h2>
-        <p class="hint" style="margin-top:-4px;margin-bottom:8px;font-size:.68rem"><b>OFF</b> khi vài giây gần đây <b>chưa có xung</b> encoder — lăn nhẹ bánh để kiểm.</p>
+      <div class="card">
+        <h2>Tốc độ Encoder (GPIO 35 & 36)</h2>
+        <p class="hint" style="margin-top:-4px;margin-bottom:8px;font-size:.68rem"><b>OFF</b> khi vài giây gần đây <b>chưa có xung</b> encoder — lăn nhẹ bánh để kiểm tra.</p>
         <div class="rpm-grid">
-          <div class="rpm-item sensor-off" id="rpmLF"><div class="rpm-val" id="rFL">OFF</div><div class="rpm-lbl">T.Trai</div></div>
-          <div class="rpm-item sensor-off" id="rpmRF"><div class="rpm-val" id="rFR">OFF</div><div class="rpm-lbl">T.Phai</div></div>
-          <div class="rpm-item sensor-off" id="rpmLR"><div class="rpm-val" id="rRL">OFF</div><div class="rpm-lbl">S.Trai</div></div>
-          <div class="rpm-item sensor-off" id="rpmRR"><div class="rpm-val" id="rRR">OFF</div><div class="rpm-lbl">S.Phai</div></div>
+          <div class="rpm-item sensor-off" id="rpmLF"><div class="rpm-val" id="rFL">OFF</div><div class="rpm-lbl">Trái (GPIO 35)</div></div>
+          <div class="rpm-item sensor-off" id="rpmRF"><div class="rpm-val" id="rFR">OFF</div><div class="rpm-lbl">Phải (GPIO 36)</div></div>
         </div>
       </div>
 
