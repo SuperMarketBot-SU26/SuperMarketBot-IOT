@@ -376,8 +376,8 @@
  *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
 #define STA_SSID               "FPTH_Student"     // Ưu tiên 1 - WiFi trường FPT
 #define STA_PASS               "hoithanghieu"
-#define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
-#define STA_PASS_2             "asksnuggie"
+#define STA_SSID_2             "Khkh"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
+#define STA_PASS_2             "khoa101042"
 #define STA_SSID_3             "Tran coffee 1"    // Dự phòng / quán cafe (ưu tiên 3)
 #define STA_PASS_3             "xincamon@"
 #define STA_SSID_4             "0917"                 // Ưu tiên 4 — điền SSID + PASS bên dưới
