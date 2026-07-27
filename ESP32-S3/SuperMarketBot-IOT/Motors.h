@@ -87,7 +87,7 @@ inline void motorDrive(MotorId id, int32_t speed) {
   }
 
   if (speed > 0) {
-    constexpr int32_t MIN_MOTOR_PWM = 170;
+    constexpr int32_t MIN_MOTOR_PWM = 130;
     if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
     speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
   }
@@ -98,7 +98,7 @@ inline void motorDrive(MotorId id, int32_t speed) {
  * Tính PWM input để sau khi áp deadband compensation trong motorDrive() cho ra PWM thực tế = targetOutRaw.
  */
 inline int32_t motorBypassDeadband(int32_t targetOutRaw) {
-  constexpr int32_t MIN_MOTOR_PWM = 170;
+  constexpr int32_t MIN_MOTOR_PWM = 130;
   if (targetOutRaw <= 0) return 0;
   if (targetOutRaw >= PWM_MAX) return PWM_MAX;
   return (targetOutRaw * PWM_MAX) / (PWM_MAX - MIN_MOTOR_PWM);
@@ -126,7 +126,7 @@ inline void motorDriveImmediate(MotorId id, int32_t speed) {
   }
 
   if (speed > 0) {
-    constexpr int32_t MIN_MOTOR_PWM = 170;
+    constexpr int32_t MIN_MOTOR_PWM = 130;
     if (speed > (int32_t)PWM_MAX) speed = (int32_t)PWM_MAX;
     speed = MIN_MOTOR_PWM + (speed * (PWM_MAX - MIN_MOTOR_PWM)) / PWM_MAX;
   }
