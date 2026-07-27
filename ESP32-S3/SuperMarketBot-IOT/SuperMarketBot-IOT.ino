@@ -27,6 +27,7 @@
 #include "Sensors.h"
 #include "Odometry.h"
 #include "PidController.h"
+#include "Localization.h"   // [Bước 5 - 2026-07-27] include trước CtrlJson.h để thấy locSetSlamPose()
 #include "ImuFusion.h"          // EKF 1D heading fusion (gyro + wheel + SLAM)
 #include "AutoExplore.h"        // Mode Tự đi quét Map (frontier exploration)
 #include "WaypointNav.h"
