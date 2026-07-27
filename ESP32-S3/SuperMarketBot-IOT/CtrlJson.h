@@ -8,6 +8,7 @@
 // Motors.h bị loại khỏi đây vì kéo theo MotorLayout.h → WebSocketsServer → WiFi
 // botStop() được extern định nghĩa trong Motors.h (đã include ở .ino)
 extern void botStop();
+#include "Localization.h"     // [Bước 5 - 2026-07-27] locSetSlamPose() cần thiết cho handler 'slam_pose'
 #include "WaypointNav.h"
 #include "LineDecoder.h"   // cần extern g_lineSpeedPct (slider mode LINE)
 #include <ArduinoJson.h>
