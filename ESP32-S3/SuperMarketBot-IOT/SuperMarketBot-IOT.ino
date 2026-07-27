@@ -42,6 +42,7 @@
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
+#include "MicroRos.h"        // ← micro-ROS WiFi UDP — bridges to ROS2 agent
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
@@ -471,6 +472,9 @@ static void taskControl(void *pvParams) {
 #endif
     }
 
+    // ── micro-ROS spin (handles /cmd_vel callback + publishes /scan,/odom,/imu) ──
+    microRos::tick();
+
     vTaskDelayUntil(&xLastWake, xPeriod);
   }
 }
@@ -632,6 +636,13 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf(F("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n"),
                   WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, (int)MQTT_BROKER_PORT);
+    // ── micro-ROS init (after WiFi STA is up) ────────────────────────
+    Serial.println(F("[Boot] Initializing micro-ROS..."));
+    if (microRos::init()) {
+      Serial.println(F("[Boot] micro-ROS initialized SUCCESS."));
+    } else {
+      Serial.println(F("[Boot] micro-ROS FAILED — will retry in taskControl."));
+    }
   } else {
     Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
   }

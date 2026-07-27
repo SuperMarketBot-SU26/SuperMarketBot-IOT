@@ -38,7 +38,7 @@
 // ============================================================
 // Đặt IP Ubuntu chạy micro-ros-agent
 // Tìm bằng: ip addr show  → inet 192.168.x.x
-#define MICRO_ROS_AGENT_IP    "192.168.154.120"
+#define MICRO_ROS_AGENT_IP    "192.168.137.253"
 #define MICRO_ROS_AGENT_PORT  8888
 
 // WiFi credentials (set trong Config.h hoặc hardcode)
