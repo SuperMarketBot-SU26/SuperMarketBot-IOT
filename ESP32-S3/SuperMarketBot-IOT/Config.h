@@ -144,7 +144,7 @@
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
 /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
-#define USE_ENCODER_HARDWARE  0 // 1 = Bật đọc encoder 2 bánh; 0 = Tắt
+#define USE_ENCODER_HARDWARE  1 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
 // Chân D0 cắm vào GPIO + ngắt ngoài; VCC = 3.3V, GND chung ESP32. Chân A0 KHÔNG NỐI (BỎ TRỐNG).
 #define ENC_L         35    // Encoder Bên Trái (GPIO 35)
 #define ENC_R         36    // Encoder Bên Phải (GPIO 36)

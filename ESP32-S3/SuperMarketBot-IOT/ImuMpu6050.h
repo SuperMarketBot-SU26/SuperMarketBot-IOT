@@ -118,15 +118,15 @@ inline bool imuMpu6050Update(float &headingRad) {
 
   int16_t rawZ = 0;
   if (!mpu6050Read16(MPU6050_GYRO_ZOUT_H, rawZ)) {
-    // Nếu lỗi I2C, KHÔNG cập nhật s_lastImuTimeMs. 
+    // Nếu lỗi I2C, KHÔNG cập nhật s_lastImuTimeMs.
     // Vòng lặp sau dt sẽ tăng lên tự động bù đắp đúng khoảng thời gian bị mất!
-    return false; 
+    return false;
   }
   s_lastImuTimeMs = now; // Chỉ cập nhật mốc thời gian khi đọc thành công
 
   // Tính tốc độ góc Z (deg/s): Chia độ nhạy 131 LSB/(deg/s)
   float gyroZ = (float)(rawZ - s_gyroBiasZ) / 131.0f;
-  
+
   // Chuyển sang rad/s
   float gyroZRad = gyroZ * (float)M_PI / 180.0f;
 
@@ -147,6 +147,31 @@ inline bool imuMpu6050Update(float &headingRad) {
   while (headingRad < 0.f) headingRad += 2.f * (float)M_PI;
   while (headingRad >= 2.f * (float)M_PI) headingRad -= 2.f * (float)M_PI;
 
+  return true;
+}
+
+/**
+ * Đọc gyroZ thô (rad/s) KHÔNG deadband, KHÔNG tích lũy — dùng cho EKF predict.
+ *
+ * Trước đây taskControl phải tự tính `gyroZEffective = delta_heading/dt` để đưa vào
+ * imuFusion::step() → sai số lớn khi dt nhỏ (task bị delay). API này cho phép EKF
+ * nhận trực tiếp gyro thô từ MPU6050 + bias đã calibrate.
+ *
+ * @param gyroZRadOut  Vận tốc góc trục Z (rad/s, đã trừ bias thô + IMU_YAW_INVERTED)
+ * @return true nếu đọc thành công; false nếu lỗi I2C.
+ */
+inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
+  if (!g_imuEnabled) return false;
+
+  int16_t rawZ = 0;
+  if (!mpu6050Read16(MPU6050_GYRO_ZOUT_H, rawZ)) return false;
+
+  // Đã trừ bias (calibrated lúc init) + đổi deg/s → rad/s + IMU_YAW_INVERTED.
+  const float gyroZ = (float)(rawZ - s_gyroBiasZ) / 131.0f;
+  gyroZRadOut = gyroZ * (float)M_PI / 180.0f;
+#if IMU_YAW_INVERTED
+  gyroZRadOut = -gyroZRadOut;
+#endif
   return true;
 }
 

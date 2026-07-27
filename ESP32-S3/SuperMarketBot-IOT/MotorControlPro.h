@@ -280,6 +280,94 @@ inline void botStopSmooth() {
     botStop();
 }
 
+/**
+ * Smooth drive cho WHEEL_NORMAL (bánh thường, differential drive).
+ *
+ * Đây là entry-point DUY NHẤT mà Mode 1 (AUTO_EXPLORE) và Mode 2 (WAYPOINT)
+ * phải gọi để di chuyển — đảm bảo MƯỢT giống Mode MANUAL:
+ *   1) Joystick filter (low-pass α=0.7)
+ *   2) Cubic curve (mượn cảm giác tay lái)
+ *   3) Deadband easing (khử giật khi tốc độ thấp)
+ *   4) Accel limiter (PWM ramp 80/tick)
+ *   5) Mecanum drive formula VỚI STRAFE=0 (4WD vi sai thuần)
+ *
+ * Khác với botDriveMecanumPro() ở chỗ: bỏ qua logic strafe (đã set = 0 sẵn),
+ * và gọi motorApplyLayout() (không smooth) cho motorApplyLayoutSmooth để tránh
+ * double smooth với motorDrive() ramp bên trong.
+ *
+ * @param turn  -100..100 (âm = xoay trái/CCW, dương = xoay phải/CW)
+ * @param fwd   -100..100 (âm = lùi, dương = tiến)
+ * @param base  0..PWM_MAX tốc độ nền tối đa
+ */
+inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool smooth = true) {
+    if (base > PWM_MAX) base = PWM_MAX;
+
+    // 1) Wheel mode WHEEL_NORMAL → ép strafe = 0 (không dùng mecanum).
+    if (g_state.wheelMode == WHEEL_NORMAL) {
+        turn = turn;
+        fwd  = fwd;
+    }
+
+    // 2) Apply joystick filter (low-pass α=0.7) — chống jitter.
+    static int16_t prevFwd = 0, prevTurn = 0;
+    const int16_t fwdF   = joystickFilter(fwd,  prevFwd);
+    const int16_t turnF  = joystickFilter(turn, prevTurn);
+
+    // 3) Cubic mapping (mượn cảm giác tay lái).
+    float fwdSign   = (fwdF  >= 0) ? 1.0f : -1.0f;
+    float turnSign  = (turnF >= 0) ? 1.0f : -1.0f;
+    float fwdCurve  = fwdSign  * (pow(abs(fwdF)  / 100.0f, 1.5f)) * 100.0f;
+    float turnCurve = turnSign * (pow(abs(turnF) / 100.0f, 1.5f)) * 100.0f;
+
+    // 4) Rotate base riêng (cho xoay góc bốc).
+    uint16_t rotBase = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : base;
+    int32_t fwdScaled  = (int32_t)(fwdCurve  * (int32_t)base   / 100);
+    int32_t turnScaled = (int32_t)(turnCurve * (int32_t)rotBase / 100);
+
+    // 5) Differential drive (không strafe):
+    //    left  = fwd + turn
+    //    right = fwd - turn
+    //    fl=rl=left, fr=rr=right
+    constexpr int32_t FWD_GAIN  = 115;
+    constexpr int32_t TURN_GAIN = 135;
+    int32_t leftS  = (fwdScaled  * FWD_GAIN  + turnScaled * TURN_GAIN) / 100;
+    int32_t rightS = (fwdScaled  * FWD_GAIN  - turnScaled * TURN_GAIN) / 100;
+    int32_t fl = leftS, rl = leftS;
+    int32_t fr = rightS, rr = rightS;
+
+    // 6) Normalize để không saturate motor.
+    int32_t maxAllowedSpd = max((int32_t)base, (int32_t)rotBase);
+    int32_t maxSpd = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
+    if (maxSpd > maxAllowedSpd && maxSpd > 0) {
+        int32_t scale = maxAllowedSpd * 100 / maxSpd;
+        fl = fl * scale / 100;
+        rl = rl * scale / 100;
+        fr = fr * scale / 100;
+        rr = rr * scale / 100;
+        leftS  = leftS  * scale / 100;
+        rightS = rightS * scale / 100;
+    }
+
+    // 7) Báo Localization (dù % so với base).
+    if (base > 0) {
+        locSetDriveCmd((int16_t)((leftS  * 100) / (int32_t)base),
+                       (int16_t)((rightS * 100) / (int32_t)base));
+    } else {
+        locSetDriveCmd(0, 0);
+    }
+
+    // 8) Apply to motors (smooth or immediate).
+    if (smooth) {
+        motorDriveSmooth(MID_FL, fl);
+        motorDriveSmooth(MID_RL, rl);
+        motorDriveSmooth(MID_FR, fr);
+        motorDriveSmooth(MID_RR, rr);
+    } else {
+        const int32_t sp[4] = {fl, rl, fr, rr};
+        motorApplyLayout(sp);
+    }
+}
+
 /** Reset all smooth state */
 inline void motorSmoothReset() {
     for (int i = 0; i < 4; i++) {

@@ -129,6 +129,13 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     uint8_t m = doc["m"].as<uint8_t>();
     Serial.printf("[WS-Mode] Yeu cau chuyen sang Mode: %d\n", m);
     if (m > MODE_LINE) m = MODE_MANUAL;
+
+    // [Bước 4 - 2026-07-27] EStop guard: không cho vào Auto/Waypoint khi EStop active.
+    if (g_state.estop && m != MODE_MANUAL) {
+      Serial.println(F("[WS-Mode] EStop ACTIVE — bỏ qua lệnh, yêu cầu release EStop trước."));
+      return;
+    }
+
     if (m == MODE_MANUAL) {
       robotForceManualStop();
       autoExplore::stop();   // dừng AutoExplore nếu đang chạy
@@ -145,11 +152,15 @@ inline void robotApplyControlJson(JsonDocument &doc) {
       g_state.cmdStrafe = 0;
       botStop();
       if (m == MODE_WAYPOINT) {
+        // [Bước 4 - 2026-07-27] Bỏ fake waypoint (1,0):
+        // Không tự ý chạy khi route rỗng — yêu cầu load route từ BE / WebManager.
         if (s_wpCount == 0) {
-          Waypoint pts[1] = {{1.0f, 0.0f, 1}};
-          wpNavSetRoute(pts, 1);
+          Serial.println(F("[WS-Mode] MODE_WAYPOINT yêu cầu nhưng route rỗng — đợi lệnh 'navigate' từ BE."));
+          g_state.mode = MODE_MANUAL;  // fallback manual, không tự chạy
+          // TODO: publish MQTT request_route → BE trả route
+        } else {
+          wpNavStart();
         }
-        wpNavStart();
       }
     }
   } else if (strcmp(t, "estop") == 0) {

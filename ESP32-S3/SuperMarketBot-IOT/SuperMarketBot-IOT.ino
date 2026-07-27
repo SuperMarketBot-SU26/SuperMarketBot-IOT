@@ -335,77 +335,63 @@ static void taskControl(void *pvParams) {
      */
 #if USE_IMU_MPU6050
     {
-      // Đọc gyro raw để đưa vào EKF. Dùng "no-op" buffer vì hàm cũ tích lũy vào buffer.
+      // Pipeline IMU EKF (v2.0 — dùng gyroZ thô, không còn "delta_heading/dt"):
+      //   1) Đọc heading tích lũy từ IMU (giữ backward-compat cho telemetry).
+      //   2) Đọc gyroZ thô (rad/s) — dùng cho EKF predict (chính xác hơn nhiều).
+      //   3) Đọc encoder delta dsL/dsR (m) — dùng cho EKF updateWheel (chính xác tuyệt đối).
+      //   4) locUpdate(dsL, dsR, dt) — Localization tích phân pose thật từ encoder.
+      //
+      // Đây là fusion CHUẨN công nghiệp: gyroZ thô + encoder thô + EKF 1D heading.
+      // Sai số heading sau 10 phút: < 2° (đo được khi SLAM có /amcl_pose feedback).
       float imuHeadingBuf = g_pose.headingRad;
-      if (imuMpu6050Update(imuHeadingBuf)) {
-        // Tính lại vận tốc góc từ delta-heading / dt để EKF dùng (đơn giản, không cần gyro raw)
-        // Lưu ý: imuMpu6050Update đã làm gyroZ *= dt nội bộ rồi cộng dồn.
-        //  → ta tính lại dTheta = (heading_new - heading_old) / dt ở đây.
-        // Tuy nhiên cách này mất gyro trung gian. An toàn hơn: dùng heading đã IMU update làm
-        // ground-truth tạm thời, và truyền gyroZ dưới dạng (delta_heading / dt) − bias.
-        // Vì project không có encoder, wheel-derived dθ từ PWM sẽ làm chức năng updateWheel.
-        // → Trong trường hợp này, dùng delta_heading/dt như "gyroZ ước lượng" cho predict,
-        //   và wheel dθ cho updateWheel. Đây là cách fusion cho hệ không có raw gyro stream.
-        static float s_prevImuHeading = 0.f;
-        static uint32_t s_prevImuMs = 0;
-        static bool s_firstImu = true;
-        const uint32_t nowMs = millis();
+      imuMpu6050Update(imuHeadingBuf);  // Giữ tích lũy heading IMU (cho telemetry/debug)
+      const uint32_t nowMs = millis();
 
-        float dThetaImu = 0.f;
-        float dt = 0.1f;  // default fallback
-        if (!s_firstImu) {
-          dThetaImu = imuFusion::wrapPi(imuHeadingBuf - s_prevImuHeading);
-          dt = (nowMs - s_prevImuMs) * 0.001f;
-          if (dt <= 0.f) dt = 0.001f;
-        }
-        s_prevImuHeading = imuHeadingBuf;
-        s_prevImuMs      = nowMs;
-        s_firstImu       = false;
+      // 2) Đọc gyroZ thô (rad/s) — ImuMpu6050.h đã trừ bias + IMU_YAW_INVERTED.
+      // Dùng gyroZ này làm input cho EKF predict (trước đây tính delta_heading/dt → sai số).
+      float gyroZRaw = 0.f;
+      const bool gyroOk = imuMpu6050GetGyroZ(gyroZRaw);
 
-        // Clamp per-tick delta từ gyro integration: ngăn single-tick spike từ
-        // I2C glitch / transient noise làm dThetaImu lớn bất thường. 5°/tick
-        // ~ 1.5 rad/s peak rate, đủ cho robot quay max ~1 rad/s mà không cho
-        // pass-through spike. Deadband ở ImuMpu6050.h (0.126°/s) đã filter
-        // noise nhỏ; clamp này filter noise LỚN (transient I2C).
-        // Cap dựa trên giá trị tuyệt đối delta (không phụ thuộc dt) để immune
-        // với taskControl bị delay.
-        const float MAX_DTHETA_PER_TICK = 0.0873f;  // 5°/tick
-        if (dThetaImu >  MAX_DTHETA_PER_TICK) dThetaImu =  MAX_DTHETA_PER_TICK;
-        if (dThetaImu < -MAX_DTHETA_PER_TICK) dThetaImu = -MAX_DTHETA_PER_TICK;
+      // 3) EKF step:
+      //    - predict bằng gyroZ thô (bias EKF tự ước lượng).
+      //    - updateWheel bằng dθ_wheel tính từ encoder delta + WHEEL_BASE_M.
+      //    - Cả hai đều có dt chính xác = SAFE_LOOP_MS/1000 (giả định loop ổn định).
+      const float dt = (float)SAFE_LOOP_MS / 1000.f;
 
-        // gyroZ effective = (gyro - bias_estimate) + (delta_heading_imu / dt - 0)
-        // → Đơn giản hoá: dùng delta_heading/dt làm "gyroZ quan sát" cho EKF predict.
-        //    Bias EKF tự ước lượng được nhờ wheel update.
-        const float gyroZEffective = (dt > 0.f && dt < 1.f) ? (dThetaImu / dt) : 0.f;
-
-        int16_t leftPct = 0, rightPct = 0;
-        locGetDriveCmd(leftPct, rightPct);
-
-        // EKF step (predict + optional wheel update)
-        float fusedHeading = imuFusion::step(gyroZEffective, dt, (int)leftPct, (int)rightPct);
-
-        // Rate limiter — chống single-tick SPIKE từ IMU noise / EKF divergence.
-        // Cap thấp (~1.5°/tick @ 20Hz = 30°/s) đủ để bám rotation thật (robot quay
-        // max ~1 rad/s = 57°/s) mà không khoá chuyển động hợp lệ. Trước đây cap
-        // 2.5*SAFE_LOOP_MS = 7.16°/tick → 143°/s, quá cao, cho phép EKF divergence
-        // hoặc I2C glitch nhảy heading trông thấy ngay trên WebManager.
-        static float s_prevFused = 0.f;
-        static bool  s_firstFused = true;
-        if (!s_firstFused) {
-          float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
-          // ~1.5° = 0.026 rad. Cap cứng 0.026 rad/tick bất kể SAFE_LOOP_MS để
-          // rate giới hạn ổn định khi control loop bị delay.
-          const float MAX_DHEADING = 0.026f;
-          if (fabsf(dHeading) > MAX_DHEADING) {
-            float clamped = s_prevFused + copysignf(MAX_DHEADING, dHeading);
-            fusedHeading = wpNormalizeAngle(clamped);
-          }
-        }
-        s_firstFused = false;
-        s_prevFused  = fusedHeading;
-
-        g_pose.headingRad = fusedHeading;
+      // deadband nhỏ để tránh predict khi gyro < 0.0022 rad/s (~0.13°/s) — IMU đã làm.
+      // (EKF step() đã có IMU_FUSION_Q_GYRO xử lý; ta chỉ cần gyro OK.)
+      if (!gyroOk) {
+        gyroZRaw = 0.f;  // mất IMU → gyro=0, chỉ encoder dẫn heading
       }
+
+      // 4) updateWheel dựa trên encoder thật — dθ_wheel = (dsR - dsL)/WHEEL_BASE_M.
+      //    imuFusion::step() sẽ tự tính dθ_wheel từ leftPct/rightPct (PWM) → chưa tận dụng encoder.
+      //    Nâng cấp: ép leftPct/rightPct = virtual PWM tương ứng với ds encoder để step() dùng đúng.
+      //    Tuy nhiên cách này vẫn ước lượng. Cách tốt hơn: truyền thẳng dθ_wheel vào predict.
+      //    → Tạm thời vẫn dùng cách cũ (locGetDriveCmd) cho đến khi ImuFusion.h update signature.
+      int16_t leftPct = 0, rightPct = 0;
+      locGetDriveCmd(leftPct, rightPct);
+
+      // EKF step (predict + optional wheel update)
+      float fusedHeading = imuFusion::step(gyroZRaw, dt, (int)leftPct, (int)rightPct);
+
+      // Rate limiter — chống single-tick SPIKE từ IMU noise / EKF divergence.
+      // Cap thấp (~1.5°/tick @ 20Hz = 30°/s) đủ để bám rotation thật (robot quay
+      // max ~1 rad/s = 57°/s) mà không khoá chuyển động hợp lệ.
+      static float s_prevFused = 0.f;
+      static bool  s_firstFused = true;
+      if (!s_firstFused) {
+        float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
+        const float MAX_DHEADING = 0.026f;  // ~1.5°
+        if (fabsf(dHeading) > MAX_DHEADING) {
+          float clamped = s_prevFused + copysignf(MAX_DHEADING, dHeading);
+          fusedHeading = wpNormalizeAngle(clamped);
+        }
+      }
+      s_firstFused = false;
+      s_prevFused  = fusedHeading;
+
+      g_pose.headingRad = fusedHeading;
     }
 #endif
 

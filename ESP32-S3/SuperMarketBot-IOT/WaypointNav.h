@@ -587,8 +587,9 @@ inline void wpNavTick() {
     s_wpLastSteer = steerBlended;
     s_wpLastStrafe = strafeBlended;
 
-    // Tiến thẳng và bẻ lái IMU giữ đầu thẳng (bánh thường: bỏ strafe)
-    botDrive(steerBlended, 100, (uint16_t)runPwm);
+    // Tiến thẳng và bẻ lái IMU giữ đầu thẳng — qua botDriveSmoothNormal
+    // (MƯỢT giống manual: cubic curve + deadband easing + accel ramp).
+    botDriveSmoothNormal(steerBlended, 100, (uint16_t)runPwm);
     break;
   }
 

@@ -90,6 +90,8 @@ class ESP32Ros2Bridge(Node):
         # State cho IMU integration (tính angular_velocity từ delta heading)
         self._last_imu_heading = None
         self._last_imu_stamp_ns = None
+        # Rate-limit cho /amcl_pose → WS (10Hz max)
+        self._last_slam_pose_ns = None
 
         self.ws_main = None
         self.ws_lidar = None
@@ -399,9 +401,15 @@ class ESP32Ros2Bridge(Node):
             self.ws_main.send(json.dumps(payload))
 
     def slam_pose_callback(self, msg: PoseWithCovarianceStamped):
+        # Rate-limit: SLAM Toolbox publish /amcl_pose ~5-10Hz, nhưng ESP32 chỉ cần 10Hz.
+        now_ns = self.get_clock().now().nanoseconds
+        if self._last_slam_pose_ns and (now_ns - self._last_slam_pose_ns) < 100_000_000:  # 100ms
+            return
+        self._last_slam_pose_ns = now_ns
+
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
-        
+
         q_z = msg.pose.pose.orientation.z
         q_w = msg.pose.pose.orientation.w
         heading_rad = 2.0 * math.atan2(q_z, q_w)

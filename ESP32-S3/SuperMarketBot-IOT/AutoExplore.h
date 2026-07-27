@@ -311,8 +311,8 @@ inline void tick() {
 
       // 3) Bám tường: nếu quá gần → rẽ phải nhẹ, nếu quá xa → rẽ trái nhẹ
       float wallErr = (float)rightMm - (float)AUTO_EXPLORE_MIN_WALL_DIST_MM;
-      // wallErr > 0: quá xa (rẽ trái)
-      // wallErr < 0: quá gần (rẽ phải)
+      // wallErr > 0: quá xa (rẽ trái → steer âm với wall ở bên phải)
+      // wallErr < 0: quá gần (rẽ phải → steer dương)
       float steer = -wallErr / 100.0f;        // scale: 100mm = 1.0 steer
       steer = constrain(steer, -40.0f, 40.0f);
 
@@ -320,7 +320,8 @@ inline void tick() {
       if (spd == 0) spd = g_state.autoBaseSpeed;
       if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 60 / 100);
 
-      botDrive((int16_t)steer, 100, spd);
+      // Đi thẳng + bẻ lái MƯỢT (giống manual) — qua botDriveSmoothNormal.
+      botDriveSmoothNormal((int16_t)steer, 100, spd);
       break;
     }
 
@@ -366,7 +367,7 @@ inline void tick() {
     }
 
     case ST_AVOID_US: {
-      // Lùi thẳng giữ heading 500ms, sau đó SPIN_DETECT
+      // Lùi thẳng giữ heading 500ms (MƯỢT), sau đó SPIN_DETECT
       static float s_backHeading = 0.f;
       static bool  s_backHave = false;
       if (!s_backHave) {
@@ -379,7 +380,9 @@ inline void tick() {
       steer = constrain(steer, -70.0f, 70.0f);
       uint16_t spd = g_state.swerveBaseSpeed;
       if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 40 / 100);
-      botDrive((int16_t)steer, -100, spd);
+
+      // Lùi mượt — giữ heading, không giật.
+      botDriveSmoothNormal((int16_t)steer, -100, spd);
 
       if (now - s.stateEnterMs >= 600) {
         s_backHave = false;

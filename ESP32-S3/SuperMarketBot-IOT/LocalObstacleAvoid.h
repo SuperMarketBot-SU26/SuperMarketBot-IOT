@@ -560,12 +560,12 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
 #endif
   
   if (strafe != 0) {
-    // Bánh thường: bỏ qua strafe (không có khả năng trượt ngang)
-    botDrive(steer, 100, (uint16_t)run);
+    // Bánh thường: bỏ qua strafe (không có khả năng trượt ngang) — vẫn dùng smooth drive.
+    botDriveSmoothNormal(steer, 100, (uint16_t)run);
   } else {
-    botDrive(steer, 100, (uint16_t)run);
+    botDriveSmoothNormal(steer, 100, (uint16_t)run);
   }
-  
+
   return true;
 }
 
