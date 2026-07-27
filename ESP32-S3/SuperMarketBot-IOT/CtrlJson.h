@@ -53,6 +53,16 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_state.cmdX = (int16_t)constrain((int)doc["x"].as<int>(), -100, 100);
     g_state.cmdY = (int16_t)constrain((int)doc["y"].as<int>(), -100, 100);
     g_state.cmdStrafe = (int16_t)constrain((int)doc["s"].as<int>(), -100, 100);
+    // Đánh dấu "joystick còn tươi VÀ đang nhấn" — cmd_vel_callback
+    // (MicroRos.h) dùng giá trị này để gate /cmd_vel từ ROS2. Cập nhật
+    // CÙNG critical section với cmdX/Y/Strafe để Core 1 đọc timestamp
+    // nhất quán với giá trị cmdX/Y/Strafe.
+    // Chỉ đánh dấu "đang nhấn" khi ít nhất một trục khác 0 — WebUI
+    // publish joy ở ~10Hz kể cả khi không nhấn; nếu cứ refresh thì gate
+    // ROS2 Nav2 vĩnh viễn đóng.
+    if (g_state.cmdX != 0 || g_state.cmdY != 0 || g_state.cmdStrafe != 0) {
+      g_state.joyLastMs = millis();
+    }
     if (g_stateMutex != NULL) xSemaphoreGive(g_stateMutex);
 
     // In log debug mỗi 500ms khi lái
