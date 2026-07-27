@@ -321,7 +321,8 @@ inline void tick() {
 
       uint16_t spd = g_state.waypointBaseSpeed;
       if (spd == 0) spd = g_state.autoBaseSpeed;
-      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 60 / 100);
+      if (spd == 0) spd = g_state.baseSpeed;
+      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
 
       // Đi thẳng + bẻ lái MƯỢT (giống manual) — qua botDriveSmoothNormal.
       botDriveSmoothNormal((int16_t)steer, 100, spd);
@@ -329,11 +330,13 @@ inline void tick() {
     }
 
     case ST_SPIN_DETECT: {
+      uint16_t spd = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : g_state.baseSpeed;
+      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
+
       // Xoay 360° thu thập LIDAR, tìm hướng trống xa nhất
-      // Chia thành 2 phase: thu thập (xoay 1 vòng) + quay về target
       if (!s.hasSpinTarget) {
         // Phase 1: xoay liên tục, đợi đủ 1 vòng LIDAR (~500ms)
-        botRotateCW(40);
+        botDriveSmoothNormal(40, 0, spd);
         if (now - s.stateEnterMs >= 700) {
           float hDeg; uint16_t maxMm;
           findOpenHeading(hDeg, maxMm);
@@ -356,7 +359,7 @@ inline void tick() {
           Serial.println(F("[AUTO-EXPLORE] → CRUISE (đã xoay đến hướng trống)"));
         } else {
           int sign = (dh > 0) ? 1 : -1;
-          botRotateCW((uint16_t)(sign * 50));
+          botDriveSmoothNormal((int16_t)(sign * 50), 0, spd);
         }
         // Timeout phase 2: 5s
         if (now - s.stateEnterMs >= 5000) {
