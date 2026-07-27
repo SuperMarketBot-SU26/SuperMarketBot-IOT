@@ -130,6 +130,14 @@ static void cmd_vel_callback(const void *msgin) {
                                 (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
         if (pwm < ROS2_PWM_MIN) pwm = ROS2_PWM_MIN;
         if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
+        // Debug log — verify mapping mỗi 200ms trong lúc xoay.
+        static uint32_t s_lastRotLog = 0;
+        if (millis() - s_lastRotLog > 200u) {
+          s_lastRotLog = millis();
+          int32_t outPwm = 130 + (pwm * (1023 - 130)) / 1023;
+          Serial.printf("[cmd_vel] ROTATE ang=%.3f → in_pwm=%ld → out_pwm=%ld/1023\n",
+                        ang, (long)pwm, (long)outPwm);
+        }
         if (ang > 0) ::botRotateCW((uint16_t)pwm);
         else         ::botRotateCCW((uint16_t)pwm);
     } else if (fabs(lin) > 0.05f) {
@@ -178,6 +186,16 @@ static void cmd_vel_callback(const void *msgin) {
         if (lin < 0) {
             leftPwm  = -leftPwm;
             rightPwm = -rightPwm;
+        }
+
+        // Debug log — verify mapping mỗi 200ms trong lúc tiến.
+        static uint32_t s_lastFwdLog = 0;
+        if (millis() - s_lastFwdLog > 200u) {
+          s_lastFwdLog = millis();
+          int32_t outL = (leftPwm > 0)  ? (130 + (leftPwm  * 893) / 1023) : 0;
+          int32_t outR = (rightPwm > 0) ? (130 + (rightPwm * 893) / 1023) : 0;
+          Serial.printf("[cmd_vel] FWD lin=%.3f ang=%.3f → L_in=%ld R_in=%ld → L_out=%ld R_out=%ld/1023\n",
+                        lin, ang, (long)leftPwm, (long)rightPwm, (long)outL, (long)outR);
         }
 
         // Báo Localization để EKF wheel update dùng cho heading fusion.
