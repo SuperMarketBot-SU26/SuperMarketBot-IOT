@@ -40,7 +40,7 @@
 // ============================================================
 // Đặt IP Ubuntu chạy micro-ros-agent
 // Tìm bằng: ip addr show  → inet 192.168.x.x
-#define MICRO_ROS_AGENT_IP    "192.168.137.69"
+#define MICRO_ROS_AGENT_IP    "192.168.1.241"
 #define MICRO_ROS_AGENT_PORT  8888
 
 // WiFi credentials (set trong Config.h hoặc hardcode)
@@ -99,6 +99,15 @@ static void cmd_vel_callback(const void *msgin) {
     float lin = msg->linear.x;   // m/s forward
     float ang = msg->angular.z;  // rad/s rotation
 
+    // Hoisted constants — shared between rotation branch and forward branch so
+    // both blocks see the same ROS2_PWM_MIN/ROS2_PWM_MAX/ang/lin scaling.
+    constexpr float ROS2_ANG_MIN_RADPS = 0.05f;
+    constexpr float ROS2_ANG_MAX_RADPS = 1.00f;
+    constexpr float ROS2_LIN_MIN_MPS   = 0.05f;
+    constexpr float ROS2_LIN_MAX_MPS   = 0.26f;  // match Nav2 max_vel_x
+    constexpr int32_t ROS2_PWM_MIN     = 400;
+    constexpr int32_t ROS2_PWM_MAX     = (int32_t)PWM_MAX;
+
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
     // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
     // WebUI 'joy' update g_state.joyLastMs mỗi lần nhận (xem CtrlJson.h).
@@ -118,12 +127,8 @@ static void cmd_vel_callback(const void *msgin) {
         // đa 200, sau MIN_MOTOR_PWM mapping chỉ ~337/1023 — quá yếu để xoay
         // robot trên mặt đất (bánh quay trên không nhưng stall khi có tải).
         //
-        // Mapping mới: 0.05 rad/s → ROS2_PWM_MIN, 1.0 rad/s → PWM_MAX.
+        // Mapping: 0.05 rad/s → ROS2_PWM_MIN, 1.0 rad/s → PWM_MAX.
         // ROS2_PWM_MIN = 400 đủ torque khởi động xoay trên mặt đất.
-        constexpr float ROS2_ANG_MIN_RADPS = 0.05f;
-        constexpr float ROS2_ANG_MAX_RADPS = 1.00f;
-        constexpr int32_t ROS2_PWM_MIN = 400;
-        constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
         const float angMag = fabsf(ang);
         int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN_RADPS) /
                                  (ROS2_ANG_MAX_RADPS - ROS2_ANG_MIN_RADPS)) *
@@ -148,10 +153,8 @@ static void cmd_vel_callback(const void *msgin) {
         // yCurve=16 → PWM=29. Sau MIN_MOTOR_PWM mapping chỉ ~194/1023, không
         // đủ torque để vượt ma sát tĩnh.
         //
-        // Mapping mới: 0.05 m/s → ROS2_PWM_MIN, 0.26 m/s (Nav2 max_vel_x) →
-        // PWM_MAX. Tuyến tính, đơn giản, dễ kiểm.
-        constexpr float ROS2_LIN_MIN_MPS = 0.05f;
-        constexpr float ROS2_LIN_MAX_MPS = 0.26f;  // match Nav2 max_vel_x
+        // Mapping: 0.05 m/s → ROS2_PWM_MIN, 0.26 m/s (Nav2 max_vel_x) → PWM_MAX.
+        // Tuyến tính, đơn giản, dễ kiểm.
         const float linMag = fabsf(lin);
         int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN_MPS) /
                                     (ROS2_LIN_MAX_MPS - ROS2_LIN_MIN_MPS)) *
@@ -237,10 +240,13 @@ static void fill_scan_msg() {
     // Zero all
     for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
-    // Fill từ g_x3Scan (góc theo rad, distance theo mm)
-    extern X3Scan g_x3Scan;
-    for (uint16_t i = 0; i < g_x3Scan.count; i++) {
-        const LidarPoint &p = g_x3Scan.points[i];
+    // Fill từ ::g_x3Scan (góc theo rad, distance theo mm).
+    // Định nghĩa ở global namespace (YdlidarX3.h). Dùng `::` để tránh bị
+    // nhầm với microRos::g_x3Scan (nếu có). YdlidarX3.h đã được include
+    // trước MicroRos.h trong .ino nên ::g_x3Scan đã có ở scope này.
+    const X3Scan &scan = ::g_x3Scan;
+    for (uint16_t i = 0; i < scan.count; i++) {
+        const LidarPoint &p = scan.points[i];
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;  // filter out-of-range
         if (p.quality < 10) continue;
 
@@ -257,7 +263,9 @@ static void fill_scan_msg() {
 // FILL Odometry message từ g_pose (encoder + IMU)
 // ============================================================
 static void fill_odom_msg() {
-    extern Pose2D g_pose;
+    // ::g_pose ở global namespace (Localization.h). Đã được include trước.
+    // Dùng reference để tránh re-declare.
+    const Pose2D &pose = ::g_pose;
     static float prev_x = 0, prev_y = 0;
     static uint32_t prev_ms = 0;
 
@@ -266,12 +274,12 @@ static void fill_odom_msg() {
     g_odom_msg.header.stamp.sec = millis() / 1000;
     g_odom_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
 
-    g_odom_msg.pose.pose.position.x = g_pose.x;
-    g_odom_msg.pose.pose.position.y = g_pose.y;
+    g_odom_msg.pose.pose.position.x = pose.x;
+    g_odom_msg.pose.pose.position.y = pose.y;
     g_odom_msg.pose.pose.position.z = 0.0f;
 
     // Quaternion từ heading (yaw)
-    float h = g_pose.headingRad * 0.5f;
+    float h = pose.headingRad * 0.5f;
     g_odom_msg.pose.pose.orientation.x = 0.0f;
     g_odom_msg.pose.pose.orientation.y = 0.0f;
     g_odom_msg.pose.pose.orientation.z = sinf(h);
@@ -299,8 +307,8 @@ static void fill_odom_msg() {
 // orientation → EKF robot_localization fusion sai khi chạy ROS2 EKF.
 // ============================================================
 static void fill_imu_msg() {
-    extern Pose2D g_pose;
-    const float h = g_pose.headingRad * 0.5f;
+    const Pose2D &pose = ::g_pose;
+    const float h = pose.headingRad * 0.5f;
     g_imu_msg.orientation.x = 0.0f;
     g_imu_msg.orientation.y = 0.0f;
     g_imu_msg.orientation.z = sinf(h);
@@ -343,6 +351,12 @@ inline bool init() {
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
 
     // 4. Publishers
+    // QoS strategy: KEEP ESP32 DEFAULTS, fix mismatch on ROS2 side.
+    // micro_ros_arduino's default (RELIABLE) works reliably on ESP32; the
+    // BEST_EFFORT variant allocates memory and silently fails on heap-
+    // constrained ESP32 (seen: zero publishers for all topics).
+    // The slam_toolbox mismatch (subscriber wants BEST_EFFORT) is fixed by
+    // a relay node on the ROS2 side, not by changing the ESP32.
     rclc_publisher_init_default(
         &g_scan_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),

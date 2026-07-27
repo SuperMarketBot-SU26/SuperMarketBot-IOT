@@ -406,7 +406,7 @@
 /* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
 /** 0 = Dùng Rosbridge WebSocket.
  *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
-#define USE_MICRO_ROS           0
+#define USE_MICRO_ROS           1
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
