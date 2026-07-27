@@ -51,12 +51,14 @@ static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 static inline void IRAM_ATTR isr_enc_left() {
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksL++;
+  g_encPhyLastPulseMs[0] = (uint32_t)millis();  // mark "left encoder pulse seen at this ms" cho RobotTelemetry.jEnOn[]
   portEXIT_CRITICAL_ISR(&s_encMux);
 }
 
 static inline void IRAM_ATTR isr_enc_right() {
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksR++;
+  g_encPhyLastPulseMs[1] = (uint32_t)millis();  // mark "right encoder pulse seen at this ms"
   portEXIT_CRITICAL_ISR(&s_encMux);
 }
 

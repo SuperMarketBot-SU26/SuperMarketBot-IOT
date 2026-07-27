@@ -28,6 +28,7 @@ volatile uint32_t g_lunaRxBytes2 = 0;
 volatile uint32_t g_luna1LastOkMs = 0;
 volatile uint32_t g_luna2LastOkMs = 0;
 volatile uint32_t g_usPhyLastEchoMs[4] = {0, 0, 0, 0};
+volatile uint32_t g_encPhyLastPulseMs[4] = {0, 0, 0, 0};  // [Bước 7 - 2026-07-27] thêm definition (extern trong Config.h:555, dùng trong RobotTelemetry.h)
 int g_batPct = -1; // Biến toàn cục lưu phần trăm pin cho MQTT và AutoDock
 
 #if USE_HC_SR04_HARDWARE
