@@ -473,7 +473,9 @@ static void taskControl(void *pvParams) {
     }
 
     // ── micro-ROS spin (handles /cmd_vel callback + publishes /scan,/odom,/imu) ──
+#if USE_MICRO_ROS
     microRos::tick();
+#endif
 
     vTaskDelayUntil(&xLastWake, xPeriod);
   }
@@ -637,12 +639,14 @@ void setup() {
     Serial.printf(F("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n"),
                   WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, (int)MQTT_BROKER_PORT);
     // ── micro-ROS init (after WiFi STA is up) ────────────────────────
+#if USE_MICRO_ROS
     Serial.println(F("[Boot] Initializing micro-ROS..."));
     if (microRos::init()) {
       Serial.println(F("[Boot] micro-ROS initialized SUCCESS."));
     } else {
       Serial.println(F("[Boot] micro-ROS FAILED — will retry in taskControl."));
     }
+#endif
   } else {
     Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
   }

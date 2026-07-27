@@ -403,6 +403,11 @@
 /** 0 = Tắt hẳn kết nối MQTT (tránh treo khi chạy offline/local). 1 = Bật MQTT. */
 #define MQTT_ENABLE             1
 
+/* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
+/** 0 = Tắt micro-ROS (dùng khi chưa cài thư viện micro_ros_arduino trong Arduino IDE).
+ *  1 = Bật micro-ROS (gửi /scan, /odom, /imu trực tiếp lên ROS2 agent qua UDP). */
+#define USE_MICRO_ROS           0
+
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
  *  muốn theo dõi (khuyến nghị: điểm 12 V trước / sau pin, GND chung với ESP).

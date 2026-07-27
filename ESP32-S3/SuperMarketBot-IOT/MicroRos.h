@@ -15,8 +15,10 @@
 #ifndef MICROROS_H
 #define MICROROS_H
 
+#include "Config.h"
 #include <Arduino.h>
 
+#if USE_MICRO_ROS
 // micro-ROS Arduino
 #include <micro_ros_arduino.h>
 #include <rcl/rcl.h>
@@ -312,14 +314,16 @@ inline void tick() {
     }
 }
 
-// ============================================================
-// SET agent IP/port (override macro)
-// ============================================================
-inline void setAgent(const char* ip, int port) {
-    g_agent_ip = ip;
-    g_agent_port = port;
-}
+inline void tick() { spin(); }
 
 }  // namespace microRos
+#else
+namespace microRos {
+  inline bool init() { return false; }
+  inline void spin() {}
+  inline void tick() {}
+  inline void setAgent(const char* ip, int port) {}
+}
+#endif
 
 #endif  // MICROROS_H
