@@ -18,9 +18,9 @@
 #include "Config.h"
 #include <Arduino.h>
 
-#if USE_MICRO_ROS
-// micro-ROS Arduino
-#include <micro_ros_arduino.h>
+#if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
+// Bật micro-ROS: Hãy cài thư viện micro_ros_arduino vào Arduino IDE và bỏ comment 5 dòng dưới:
+ #include <micro_ros_arduino.h>
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
@@ -40,7 +40,7 @@
 // ============================================================
 // Đặt IP Ubuntu chạy micro-ros-agent
 // Tìm bằng: ip addr show  → inet 192.168.x.x
-#define MICRO_ROS_AGENT_IP    "192.168.137.253"
+#define MICRO_ROS_AGENT_IP    "192.168.137.69"
 #define MICRO_ROS_AGENT_PORT  8888
 
 // WiFi credentials (set trong Config.h hoặc hardcode)
@@ -87,28 +87,19 @@ static void cmd_vel_callback(const void *msgin) {
     float lin = msg->linear.x;   // m/s forward
     float ang = msg->angular.z;  // rad/s rotation
 
-    // Convert to PWM (existing motor driver)
-    extern void botDrive(int16_t steer, int16_t throttle, uint16_t basePwm);
-    extern void botRotateCW(uint16_t speed);
-    extern void botStop();
-
     if (fabs(ang) > 0.05f && fabs(lin) < 0.05f) {
         // Xoay tại chỗ
         int pwm = (int)(fabs(ang) * 150.0f);
         pwm = constrain(pwm, 30, 200);
-        if (ang > 0) botRotateCW(pwm);
-        else {
-            // Xoay ngược chiều
-            extern void botRotateCCW(uint16_t speed);
-            botRotateCCW(pwm);
-        }
+        if (ang > 0) ::botRotateCW(pwm);
+        else         ::botRotateCCW(pwm);
     } else if (fabs(lin) > 0.05f) {
-        // Đi thẳng (PID yaw giữ heading hiện tại)
+        // Đi thẳng
         int16_t throttle = (int16_t)(lin * 200.0f);
         throttle = constrain(throttle, -200, 200);
-        botDrive(0, throttle, 180);
+        ::botDrive(0, throttle, 180);
     } else {
-        botStop();
+        ::botStop();
     }
 }
 
@@ -158,7 +149,7 @@ static void fill_scan_msg() {
 // FILL Odometry message từ g_pose (encoder + IMU)
 // ============================================================
 static void fill_odom_msg() {
-    extern Pose g_pose;
+    extern Pose2D g_pose;
     static float prev_x = 0, prev_y = 0;
     static uint32_t prev_ms = 0;
 
@@ -178,8 +169,9 @@ static void fill_odom_msg() {
     g_odom_msg.pose.pose.orientation.z = sinf(h);
     g_odom_msg.pose.pose.orientation.w = cosf(h);
 
-    g_odom_msg.twist.twist.linear.x = g_pose.linearSpeed;
-    g_odom_msg.twist.twist.angular.z = g_pose.angularSpeed;
+    float linearMps = ((g_state.rpmFL + g_state.rpmFR) / 2.0f) * (WHEEL_CIRC_M / 60.0f);
+    g_odom_msg.twist.twist.linear.x = linearMps;
+    g_odom_msg.twist.twist.angular.z = 0.0f;
 
     // Covariance (rough estimates)
     for (int i = 0; i < 36; i++) g_odom_msg.pose.covariance[i] = 0.0f;
@@ -204,13 +196,11 @@ static void fill_imu_msg() {
 // ============================================================
 inline bool init() {
     // 1. Set WiFi transport (UDP)
-    IPAddress agent_ip;
-    agent_ip.fromString(g_agent_ip.c_str());
-    rmw_uros_set_custom_transport(
-        false,                            // Serial=false
-        (char*)"udp",                     // UDP transport
-        g_agent_port,
-        (char*)g_agent_ip.c_str()
+    set_microros_wifi_transports(
+        (char*)WiFi.SSID().c_str(),
+        (char*)WiFi.psk().c_str(),
+        (char*)g_agent_ip.c_str(),
+        (uint16_t)g_agent_port
     );
 
     // 2. Allocator + support
@@ -274,10 +264,10 @@ inline bool init() {
 }
 
 // ============================================================
-// TICK: gọi mỗi loop iteration
+// SPIN: gọi mỗi loop iteration
 // Spin executor + publish data
 // ============================================================
-inline void tick() {
+inline void spin() {
     if (!g_initialized) return;
 
     // 1. Spin executor (xử lý /cmd_vel callback)

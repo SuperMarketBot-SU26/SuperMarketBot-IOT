@@ -404,8 +404,8 @@
 #define MQTT_ENABLE             1
 
 /* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
-/** 0 = Tắt micro-ROS (dùng khi chưa cài thư viện micro_ros_arduino trong Arduino IDE).
- *  1 = Bật micro-ROS (gửi /scan, /odom, /imu trực tiếp lên ROS2 agent qua UDP). */
+/** 0 = Dùng Rosbridge WebSocket.
+ *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
 #define USE_MICRO_ROS           0
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------

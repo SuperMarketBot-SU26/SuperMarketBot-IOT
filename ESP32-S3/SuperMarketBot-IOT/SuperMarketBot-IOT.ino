@@ -42,7 +42,9 @@
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
+#if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
 #include "MicroRos.h"        // ← micro-ROS WiFi UDP — bridges to ROS2 agent
+#endif
 #include "esp_heap_caps.h"
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
