@@ -16,6 +16,7 @@
 #include "Localization.h"
 #include "PidController.h"
 #include "Motors.h"
+#include "MotorControlPro.h"  // [Bước 3 - 2026-07-27] botDriveSmoothNormal()
 #include <math.h>
 
 extern uint16_t autoSpeedPwm();

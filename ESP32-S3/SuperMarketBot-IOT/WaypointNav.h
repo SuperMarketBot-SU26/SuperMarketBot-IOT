@@ -32,6 +32,7 @@
 #include "ObstacleSensors.h"
 #include "PidController.h"
 #include "Motors.h"
+#include "MotorControlPro.h"  // [Bước 3 - 2026-07-27] botDriveSmoothNormal()
 #include <math.h>
 
 /* Forward declaration — tránh circular include với MqttClient.h */

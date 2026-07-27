@@ -44,7 +44,7 @@ float g_distFL = 0, g_distRL = 0, g_distFR = 0, g_distRR = 0;
 #if USE_ENCODER_HARDWARE
 static volatile int32_t s_encTicksL = 0;   // Encoder bên trái (cộng xung lên/xuống theo chiều quay)
 static volatile int32_t s_encTicksR = 0;   // Encoder bên phải
-static volatile uint32_t g_encPhyLastPulseMs[4] = {0, 0, 0, 0};
+// g_encPhyLastPulseMs[] đã được extern trong Config.h:555 — không khai báo lại ở đây.
 static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 
 // ISR — gọi trong ngắt ngoài, cần IRAM_ATTR + portENTER_CRITICAL_ISR.

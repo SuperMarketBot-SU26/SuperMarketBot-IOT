@@ -21,6 +21,9 @@
 
 enum MotorId : uint8_t { MID_FL = 0, MID_RL = 1, MID_FR = 2, MID_RR = 3 };
 
+// Forward declaration for MotorControlPro.h smooth drive function
+void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool smooth = true);
+
 struct MotorPins {
   uint8_t pwm, in1, in2;
 };

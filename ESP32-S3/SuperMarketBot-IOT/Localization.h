@@ -100,7 +100,12 @@ inline void locResetPose() {
  * v2.0 (2026-07-27):
  *   - Thêm rate-limit (chỉ apply mỗi ≥100ms) — tránh spam EKF khi SLAM publish 10Hz.
  *   - Debug log pose feedback khi delta lớn (>20cm hoặc >5°).
- */
+static inline float wrapPi(float a) {
+  while (a >  (float)M_PI) a -= 2.f * (float)M_PI;
+  while (a < -(float)M_PI) a += 2.f * (float)M_PI;
+  return a;
+}
+
 inline void locSetSlamPose(float x, float y, float headingRad) {
   // Rate-limit: chỉ apply tối đa 10Hz.
   static uint32_t s_lastSlamMs = 0;
@@ -114,7 +119,11 @@ inline void locSetSlamPose(float x, float y, float headingRad) {
     const float dx = x - g_pose.x;
     const float dy = y - g_pose.y;
     const float dist = sqrtf(dx*dx + dy*dy);
-    const float dh  = fabsf(wrapPi(headingRad - g_pose.headingRad));
+    // Tính delta heading về [-π, π] — không phụ thuộc ImuFusion.h (tránh circular include).
+    float dH = headingRad - g_pose.headingRad;
+    while (dH >  (float)M_PI) dH -= 2.f * (float)M_PI;
+    while (dH < -(float)M_PI) dH += 2.f * (float)M_PI;
+    const float dh = fabsf(dH);
     if (dist > 0.20f || dh > 0.087f) {  // >20cm hoặc >5°
       Serial.printf("[SLAM] Pose jump: Δpos=%.2fm Δh=%.1f° → (%.2f, %.2f, %.1f°)\n",
                     dist, dh * 180.f / (float)M_PI,

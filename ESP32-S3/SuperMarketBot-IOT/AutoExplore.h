@@ -36,6 +36,7 @@
 #include "Config.h"
 #include "Localization.h"
 #include "Motors.h"
+#include "MotorControlPro.h"  // [Bước 3 - 2026-07-27] botDriveSmoothNormal()
 #include "ObstacleSensors.h"
 #include "YdlidarX3.h"
 #include "PidController.h"

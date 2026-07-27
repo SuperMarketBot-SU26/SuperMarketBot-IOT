@@ -23,6 +23,7 @@
 
 #include "Config.h"
 #include "Motors.h"
+#include "MotorControlPro.h"
 #include "Sensors.h"
 #include "Odometry.h"
 #include "PidController.h"
