@@ -82,22 +82,112 @@ static uint32_t g_last_imu_ms = 0;
 // ============================================================
 // CALLBACK: nhận /cmd_vel từ ROS2 → điều khiển motor
 // ============================================================
+// Sửa: /cmd_vel từ ROS2 chỉ có hiệu lực khi WebUI KHÔNG đang gửi joystick.
+// Lý do: WebUI gửi `{t:"joy"}` thẳng vào g_state.cmdX/Y/Strafe (Core 0 WS),
+// controlTask (Core 1) đọc cmdX/Y đó mỗi 20ms để gọi botDrive. Đường
+// micro-ROS /cmd_vel (supervisor publish 1Hz) gọi botStop/botDrive ở context
+// khác, đè lên lệnh WebUI.
+// Hai đường không thể cùng chạy ổn định vì tần suất 20ms vs 5-10Hz:
+// - Nếu gate theo MODE_MANUAL: Nav2 vẫn không lái được vì ESP32 firmware
+//   g_state.mode không tự đổi khi ROS2 nav bắt đầu.
+// - Nếu gate theo "joy còn tươi" (≤300ms): tay lái giữ → gate đóng →
+//   WebUI thắng; tay nhả → gate mở → ROS2 Nav2 thắng tự động.
+// Threshold 300ms phù hợp với WebUI publish joystick ở ~10Hz (chu kỳ 100ms)
+// — dưới 3 lần drop liên tiếp thì coi như vẫn đang giữ.
 static void cmd_vel_callback(const void *msgin) {
     const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
     float lin = msg->linear.x;   // m/s forward
     float ang = msg->angular.z;  // rad/s rotation
 
+#if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
+    // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
+    // WebUI 'joy' update g_state.joyLastMs mỗi lần nhận (xem CtrlJson.h).
+    const uint32_t nowMs = millis();
+    const uint32_t joyAgeMs = (g_state.joyLastMs != 0)
+        ? (nowMs - g_state.joyLastMs)
+        : 0xFFFFFFFFu;
+    if (joyAgeMs < 300u) {
+        return;  // WebUI đang giữ joystick, để nó điều khiển
+    }
+#endif
+
     if (fabs(ang) > 0.05f && fabs(lin) < 0.05f) {
-        // Xoay tại chỗ
-        int pwm = (int)(fabs(ang) * 150.0f);
-        pwm = constrain(pwm, 30, 200);
-        if (ang > 0) ::botRotateCW(pwm);
-        else         ::botRotateCCW(pwm);
+        // ── Xoay tại chỗ ─────────────────────────────────────────────
+        // Map angular velocity (rad/s) → PWM trực tiếp, KHÔNG qua joystick
+        // curve. Trước đây `pwm = constrain(ang * 150, 30, 200)` → PWM tối
+        // đa 200, sau MIN_MOTOR_PWM mapping chỉ ~337/1023 — quá yếu để xoay
+        // robot trên mặt đất (bánh quay trên không nhưng stall khi có tải).
+        //
+        // Mapping mới: 0.05 rad/s → ROS2_PWM_MIN, 1.0 rad/s → PWM_MAX.
+        // ROS2_PWM_MIN = 400 đủ torque khởi động xoay trên mặt đất.
+        constexpr float ROS2_ANG_MIN_RADPS = 0.05f;
+        constexpr float ROS2_ANG_MAX_RADPS = 1.00f;
+        constexpr int32_t ROS2_PWM_MIN = 400;
+        constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
+        const float angMag = fabsf(ang);
+        int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN_RADPS) /
+                                 (ROS2_ANG_MAX_RADPS - ROS2_ANG_MIN_RADPS)) *
+                                (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
+        if (pwm < ROS2_PWM_MIN) pwm = ROS2_PWM_MIN;
+        if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
+        if (ang > 0) ::botRotateCW((uint16_t)pwm);
+        else         ::botRotateCCW((uint16_t)pwm);
     } else if (fabs(lin) > 0.05f) {
-        // Đi thẳng
-        int16_t throttle = (int16_t)(lin * 200.0f);
-        throttle = constrain(throttle, -200, 200);
-        ::botDrive(0, throttle, 180);
+        // ── Đi thẳng / rẽ trong khi tiến ──────────────────────────────
+        // Map linear velocity (m/s) → PWM thẳng, KHÔNG qua joystick curve.
+        // Trước đây `botDrive(0, throttle, 180)` với throttle=lin*200 đi qua
+        // quadratic curve: lin=0.20 (Nav2 desired_linear_vel) → throttle=40 →
+        // yCurve=16 → PWM=29. Sau MIN_MOTOR_PWM mapping chỉ ~194/1023, không
+        // đủ torque để vượt ma sát tĩnh.
+        //
+        // Mapping mới: 0.05 m/s → ROS2_PWM_MIN, 0.26 m/s (Nav2 max_vel_x) →
+        // PWM_MAX. Tuyến tính, đơn giản, dễ kiểm.
+        constexpr float ROS2_LIN_MIN_MPS = 0.05f;
+        constexpr float ROS2_LIN_MAX_MPS = 0.26f;  // match Nav2 max_vel_x
+        const float linMag = fabsf(lin);
+        int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN_MPS) /
+                                    (ROS2_LIN_MAX_MPS - ROS2_LIN_MIN_MPS)) *
+                                   (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
+        if (fwdPwm < ROS2_PWM_MIN) fwdPwm = ROS2_PWM_MIN;
+        if (fwdPwm > ROS2_PWM_MAX) fwdPwm = ROS2_PWM_MAX;
+
+        // Tính PWM riêng từng bên cho kết hợp lin + ang (differential drive).
+        // Tỉ lệ ang/lin → chênh PWM 2 bên. Với lin nhỏ nhất (0.05 m/s) và ang
+        // max (1 rad/s), chênh có thể vượt fwdPwm → cap về 0 cho bên lùi.
+        // Nav2 hầu như không gửi lin rất nhỏ + ang lớn cùng lúc (controller
+        // giảm lin khi xoay), nên đây là trường hợp hiếm.
+        int32_t rotPwm = (int32_t)(fabsf(ang) *
+                                   (ROS2_PWM_MAX / ROS2_ANG_MAX_RADPS) * 0.5f);
+        if (rotPwm > fwdPwm) rotPwm = fwdPwm;  // không để bên nào âm khi xoay trong khi tiến chậm
+        int32_t leftPwm, rightPwm;
+        if (ang >= 0) {
+            // Rẽ phải: bên trái nhanh hơn
+            leftPwm  = fwdPwm + rotPwm;
+            rightPwm = fwdPwm - rotPwm;
+        } else {
+            // Rẽ trái: bên phải nhanh hơn
+            leftPwm  = fwdPwm - rotPwm;
+            rightPwm = fwdPwm + rotPwm;
+        }
+        if (leftPwm  < 0) leftPwm  = 0;
+        if (rightPwm < 0) rightPwm = 0;
+        if (leftPwm  > ROS2_PWM_MAX) leftPwm  = ROS2_PWM_MAX;
+        if (rightPwm > ROS2_PWM_MAX) rightPwm = ROS2_PWM_MAX;
+
+        // Đảo chiều nếu lin âm (lùi)
+        if (lin < 0) {
+            leftPwm  = -leftPwm;
+            rightPwm = -rightPwm;
+        }
+
+        // Báo Localization để EKF wheel update dùng cho heading fusion.
+        // Trả về -100..+100 % so với PWM_MAX.
+        locSetDriveCmd(
+            (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
+            (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
+
+        const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
+        ::motorApplyLayout(sp);
     } else {
         ::botStop();
     }
@@ -181,14 +271,38 @@ static void fill_odom_msg() {
 }
 
 // ============================================================
-// FILL IMU message
+// FILL Imu message từ g_pose.headingRad (heading đã qua EKF fusion).
+// sensor_msgs/Imu yêu cầu orientation là quaternion. Heading chỉ có yaw
+// nên roll=pitch=0; quaternion = (0, 0, sin(h/2), cos(h/2)).
+// angular_velocity để 0 (firmware không publish gyro Z qua micro-ROS —
+// nếu cần, thêm subscription ở ImuMpu6050.h sau).
+// linear_acceleration để 0 (firmware không có accelerometer).
+// Trước đây fill_imu_msg chỉ set header → /imu/data publish toàn 0 về
+// orientation → EKF robot_localization fusion sai khi chạy ROS2 EKF.
 // ============================================================
 static void fill_imu_msg() {
+    extern Pose2D g_pose;
+    const float h = g_pose.headingRad * 0.5f;
+    g_imu_msg.orientation.x = 0.0f;
+    g_imu_msg.orientation.y = 0.0f;
+    g_imu_msg.orientation.z = sinf(h);
+    g_imu_msg.orientation.w = cosf(h);
+    g_imu_msg.angular_velocity.x = 0.0f;
+    g_imu_msg.angular_velocity.y = 0.0f;
+    g_imu_msg.angular_velocity.z = 0.0f;
+    g_imu_msg.linear_acceleration.x = 0.0f;
+    g_imu_msg.linear_acceleration.y = 0.0f;
+    g_imu_msg.linear_acceleration.z = 0.0f;
+    // Covariance 9x9 = zero (sensor không báo uncertainty).
+    for (int i = 0; i < 9; i++) {
+        g_imu_msg.orientation_covariance[i]          = 0.0f;
+        g_imu_msg.angular_velocity_covariance[i]     = 0.0f;
+        g_imu_msg.linear_acceleration_covariance[i]  = 0.0f;
+    }
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
+    g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
     g_imu_msg.header.stamp.sec = millis() / 1000;
     g_imu_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
-
-    // Empty - child can fill from ImuMpu6050.h
 }
 
 // ============================================================

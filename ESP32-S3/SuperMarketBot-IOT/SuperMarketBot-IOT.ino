@@ -89,6 +89,7 @@ RobotState g_state = {
   .rpmFL = 0, .rpmRL = 0, .rpmFR = 0, .rpmRR = 0,
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
   .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
+  .joyLastMs = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
   .waypointBaseSpeed = 0,
@@ -361,6 +362,17 @@ static void taskControl(void *pvParams) {
         s_prevImuMs      = nowMs;
         s_firstImu       = false;
 
+        // Clamp per-tick delta từ gyro integration: ngăn single-tick spike từ
+        // I2C glitch / transient noise làm dThetaImu lớn bất thường. 5°/tick
+        // ~ 1.5 rad/s peak rate, đủ cho robot quay max ~1 rad/s mà không cho
+        // pass-through spike. Deadband ở ImuMpu6050.h (0.126°/s) đã filter
+        // noise nhỏ; clamp này filter noise LỚN (transient I2C).
+        // Cap dựa trên giá trị tuyệt đối delta (không phụ thuộc dt) để immune
+        // với taskControl bị delay.
+        const float MAX_DTHETA_PER_TICK = 0.0873f;  // 5°/tick
+        if (dThetaImu >  MAX_DTHETA_PER_TICK) dThetaImu =  MAX_DTHETA_PER_TICK;
+        if (dThetaImu < -MAX_DTHETA_PER_TICK) dThetaImu = -MAX_DTHETA_PER_TICK;
+
         // gyroZ effective = (gyro - bias_estimate) + (delta_heading_imu / dt - 0)
         // → Đơn giản hoá: dùng delta_heading/dt làm "gyroZ quan sát" cho EKF predict.
         //    Bias EKF tự ước lượng được nhờ wheel update.
@@ -372,12 +384,18 @@ static void taskControl(void *pvParams) {
         // EKF step (predict + optional wheel update)
         float fusedHeading = imuFusion::step(gyroZEffective, dt, (int)leftPct, (int)rightPct);
 
-        // Rate limiter (giữ logic an toàn cũ để chống spike)
+        // Rate limiter — chống single-tick SPIKE từ IMU noise / EKF divergence.
+        // Cap thấp (~1.5°/tick @ 20Hz = 30°/s) đủ để bám rotation thật (robot quay
+        // max ~1 rad/s = 57°/s) mà không khoá chuyển động hợp lệ. Trước đây cap
+        // 2.5*SAFE_LOOP_MS = 7.16°/tick → 143°/s, quá cao, cho phép EKF divergence
+        // hoặc I2C glitch nhảy heading trông thấy ngay trên WebManager.
         static float s_prevFused = 0.f;
         static bool  s_firstFused = true;
         if (!s_firstFused) {
           float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
-          const float MAX_DHEADING = 2.5f * (float)SAFE_LOOP_MS * 0.001f;
+          // ~1.5° = 0.026 rad. Cap cứng 0.026 rad/tick bất kể SAFE_LOOP_MS để
+          // rate giới hạn ổn định khi control loop bị delay.
+          const float MAX_DHEADING = 0.026f;
           if (fabsf(dHeading) > MAX_DHEADING) {
             float clamped = s_prevFused + copysignf(MAX_DHEADING, dHeading);
             fusedHeading = wpNormalizeAngle(clamped);

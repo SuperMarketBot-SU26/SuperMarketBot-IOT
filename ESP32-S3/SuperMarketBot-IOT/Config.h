@@ -374,14 +374,14 @@
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
 /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
  *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
-#define STA_SSID               "FPTH_Student"     // Ưu tiên 1 - WiFi trường FPT
-#define STA_PASS               "hoithanghieu"
-#define STA_SSID_2             "Khkh"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
-#define STA_PASS_2             "khoa101042"
+#define STA_SSID               "2K2L"     // Ưu tiên 1 - WiFi trường FPT
+#define STA_PASS               "01010804"
+#define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
+#define STA_PASS_2             "asksnuggie"
 #define STA_SSID_3             "Tran coffee 1"    // Dự phòng / quán cafe (ưu tiên 3)
 #define STA_PASS_3             "xincamon@"
-#define STA_SSID_4             "0917"                 // Ưu tiên 4 — điền SSID + PASS bên dưới
-#define STA_PASS_4             "vinhhung.125"
+#define STA_SSID_4             "2K2L"                 // Ưu tiên 4 — điền SSID + PASS bên dưới
+#define STA_PASS_4             "01010804"
 #define STA_SSID_5             "FPTU_HallA"       // Ưu tiên 5 - WiFi Lab FPT
 #define STA_PASS_5             "12345678"
 #define STA_CONNECT_TIMEOUT_MS 10000u   // Timeout mỗi SSID (ms) — giảm xuống để thử nhanh hơn
@@ -472,6 +472,11 @@ struct RobotState {
   volatile int16_t cmdX;      // -100..100 (trái/phải)
   volatile int16_t cmdY;      // -100..100 (tiến/lùi)
   volatile int16_t cmdStrafe;  // -100..100 (trượt ngang, Mecanum)
+  /** Millis lần cuối nhận `{t:"joy"}` từ WebUI. cmd_vel_callback (MicroRos.h)
+   *  dùng giá trị này để gate /cmd_vel từ ROS2: nếu joystick còn tươi (≤300ms)
+   *  thì bỏ qua ROS2, để WebUI điều khiển. Ngược lại ROS2 Nav2 thắng tự động.
+   *  Cập nhật trong CtrlJson.h khi parse `t == "joy"`. */
+  volatile uint32_t joyLastMs;
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
   volatile uint16_t waypointBaseSpeed; // 0..PWM_MAX — tốc độ riêng cho Waypoint Nav (slider web)
