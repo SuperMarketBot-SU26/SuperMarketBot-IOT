@@ -8,6 +8,7 @@
 // Motors.h bị loại khỏi đây vì kéo theo MotorLayout.h → WebSocketsServer → WiFi
 // botStop() được extern định nghĩa trong Motors.h (đã include ở .ino)
 extern void botStop();
+#include "Localization.h"     // [Bước 6 - 2026-07-27] Bắt buộc include TRỰC TIẾP trong CtrlJson.h (không chỉ qua WaypointNav.h) để inline functions (locSetSlamPose, locResetPose) visible.
 #include "WaypointNav.h"
 #include "LineDecoder.h"   // cần extern g_lineSpeedPct (slider mode LINE)
 #include <ArduinoJson.h>

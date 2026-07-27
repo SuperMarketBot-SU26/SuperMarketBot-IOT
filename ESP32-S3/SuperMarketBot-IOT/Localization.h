@@ -100,12 +100,9 @@ inline void locResetPose() {
  * v2.0 (2026-07-27):
  *   - Thêm rate-limit (chỉ apply mỗi ≥100ms) — tránh spam EKF khi SLAM publish 10Hz.
  *   - Debug log pose feedback khi delta lớn (>20cm hoặc >5°).
-static inline float wrapPi(float a) {
-  while (a >  (float)M_PI) a -= 2.f * (float)M_PI;
-  while (a < -(float)M_PI) a += 2.f * (float)M_PI;
-  return a;
-}
-
+ *   - Bỏ dùng wrapPi() (trước đây từ ImuFusion.h) — inline normalize local để
+ *     tránh circular include với ImuFusion.h (compile error: 'wrapPi' was not declared).
+ */
 inline void locSetSlamPose(float x, float y, float headingRad) {
   // Rate-limit: chỉ apply tối đa 10Hz.
   static uint32_t s_lastSlamMs = 0;
