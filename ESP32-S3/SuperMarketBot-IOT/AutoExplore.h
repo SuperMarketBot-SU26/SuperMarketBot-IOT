@@ -273,11 +273,13 @@ inline void tick() {
   }
 
   /* --- Kiểm tra điều kiện kết thúc --- */
-  if (s.coveragePct >= AUTO_EXPLORE_TARGET_COVERAGE_PCT) {
+  // Chỉ cho phép hoàn thành do coverage sau ít nhất 30 giây chạy thực tế (tránh nảy 100% ở phòng hẹp ngay giây đầu)
+  if (durMs >= 30000u && s.coveragePct >= AUTO_EXPLORE_TARGET_COVERAGE_PCT) {
+    Serial.println(F("[AUTO-EXPLORE] ✅ Đã quét đạt target coverage — hoàn thành"));
     s.fsm = ST_DONE;
   }
   if (durMs >= AUTO_EXPLORE_MAX_DURATION_MS) {
-    Serial.println(F("[AUTO-EXPLORE] ⚠ Timeout 10 phút — dừng"));
+    Serial.println(F("[AUTO-EXPLORE] ⚠ Timeout max duration — dừng"));
     s.fsm = ST_DONE;
   }
 
