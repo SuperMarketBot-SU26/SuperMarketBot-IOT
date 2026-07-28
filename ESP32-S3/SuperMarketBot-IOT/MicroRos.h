@@ -37,15 +37,9 @@
 
 // ============================================================
 // CONFIG
+// Values sourced from Config.h (MICRO_ROS_AGENT_IP, MICRO_ROS_AGENT_PORT).
+// Tìm bằng: ip addr show  → inet 192.168.x.x trên máy Linux chạy micro-ros-agent
 // ============================================================
-// Đặt IP Ubuntu chạy micro-ros-agent
-// Tìm bằng: ip addr show  → inet 192.168.x.x
-#define MICRO_ROS_AGENT_IP    "192.168.1.241"
-#define MICRO_ROS_AGENT_PORT  8888
-
-// WiFi credentials (set trong Config.h hoặc hardcode)
-// #define WIFI_SSID "your_ssid"
-// #define WIFI_PASS "your_pass"
 
 namespace microRos {
 
