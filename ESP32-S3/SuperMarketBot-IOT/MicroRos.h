@@ -68,43 +68,10 @@ static tf2_msgs__msg__TFMessage     g_tf_msg;
 // State
 static bool   g_initialized = false;
 static String g_agent_ip = MICRO_ROS_AGENT_IP;
+static int    g_agent_port = MICRO_ROS_AGENT_PORT;
 static uint32_t g_last_scan_ms = 0;
 static uint32_t g_last_odom_ms = 0;
 static uint32_t g_last_imu_ms = 0;
-static uint32_t g_last_tf_ms = 0;
-
-// ============================================================
-// FILL TF Message (odom -> base_link) từ g_pose
-// ============================================================
-static void fill_tf_msg() {
-    const Pose2D &pose = ::g_pose;
-    static geometry_msgs__msg__TransformStamped tf_stamped;
-
-    if (g_tf_msg.transforms.size == 0) {
-        g_tf_msg.transforms.data = (geometry_msgs__msg__TransformStamped*)malloc(sizeof(geometry_msgs__msg__TransformStamped));
-        g_tf_msg.transforms.size = 1;
-        g_tf_msg.transforms.capacity = 1;
-
-        tf_stamped.header.frame_id.data = (char*)"odom";
-        tf_stamped.header.frame_id.size = 4;
-        tf_stamped.child_frame_id.data = (char*)"base_link";
-        tf_stamped.child_frame_id.size = 9;
-    }
-
-    tf_stamped.header.stamp.sec = millis() / 1000;
-    tf_stamped.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
-    tf_stamped.transform.translation.x = pose.x;
-    tf_stamped.transform.translation.y = pose.y;
-    tf_stamped.transform.translation.z = 0.0f;
-
-    float h = pose.headingRad * 0.5f;
-    tf_stamped.transform.rotation.x = 0.0f;
-    tf_stamped.transform.rotation.y = 0.0f;
-    tf_stamped.transform.rotation.z = sinf(h);
-    tf_stamped.transform.rotation.w = cosf(h);
-
-    g_tf_msg.transforms.data[0] = tf_stamped;
-}
 
 // ============================================================
 // CALLBACK: nhận /cmd_vel từ ROS2 → điều khiển motor
@@ -245,27 +212,50 @@ static void cmd_vel_callback(const void *msgin) {
 // FILL LaserScan message từ g_x3Scan
 // ============================================================
 static void fill_scan_msg() {
+    // Update header string fields on every publish
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
+    g_scan_msg.header.frame_id.size = 11;
+    g_scan_msg.header.frame_id.capacity = 12;
     g_scan_msg.header.stamp.sec = millis() / 1000;
     g_scan_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
 
-    g_scan_msg.angle_min = 0.0f;
-    g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 2000.0f;  // 2000 bins — YDLIDAR X3 ~3600 pts/scan
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;  // 10 Hz
     g_scan_msg.range_min = 0.12f;  // 12cm
     g_scan_msg.range_max = 8.0f;   // 8m
 
-    // Init ranges array — 2000 bins (was 360, too coarse for X3's ~3600 raw pts)
-    if (g_scan_msg.ranges.size == 0) {
-        g_scan_msg.ranges.data = (float*)malloc(2000 * sizeof(float));
-        g_scan_msg.ranges.size = 2000;
-        g_scan_msg.ranges.capacity = 2000;
+    // Init ranges array only. With MQTT+WiFi+micro-ROS already eating heap
+    // (~8KB largest contiguous block at boot), even 2KB for ranges is risky.
+    // `intensities` is OPTIONAL in sensor_msgs/LaserScan (slam_toolbox ignores it),
+    // so leave it empty (size=0) to save 8KB heap.
+    if (g_scan_msg.ranges.data == NULL) {
+        const size_t total_bins = 360;  // Was 2000; heap too tight
+        g_scan_msg.ranges.data = (float*)malloc(total_bins * sizeof(float));
+        if (g_scan_msg.ranges.data == NULL) {
+            Serial.println("[scan] malloc(1440) FAILED — heap exhausted, skip /scan");
+            g_scan_msg.ranges.size = 0;
+            g_scan_msg.ranges.capacity = 0;
+            return;
+        }
+        g_scan_msg.ranges.size = total_bins;
+        g_scan_msg.ranges.capacity = total_bins;
+        // intensities: intentionally size=0 — ROS serializer handles empty sequences
     }
 
-    // Zero all
-    for (size_t i = 0; i < 2000; i++) g_scan_msg.ranges.data[i] = 0.0f;
+    // Skip publish entirely if allocation failed
+    if (g_scan_msg.ranges.size == 0 || g_scan_msg.ranges.data == NULL) {
+        return;
+    }
+
+    // Zero all bins
+    for (size_t i = 0; i < g_scan_msg.ranges.size; i++) {
+        g_scan_msg.ranges.data[i] = 0.0f;
+    }
+
+    // Update angle params to match new bin count
+    g_scan_msg.angle_min = 0.0f;
+    g_scan_msg.angle_max = 2.0f * M_PI;
+    g_scan_msg.angle_increment = (2.0f * M_PI) / (float)g_scan_msg.ranges.size;
 
     // Fill từ ::g_x3Scan (góc theo rad, distance theo mm).
     // Định nghĩa ở global namespace (YdlidarX3.h). Dùng `::` để tránh bị
@@ -277,9 +267,9 @@ static void fill_scan_msg() {
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;  // filter out-of-range
         if (p.quality < 10) continue;
 
-        int idx = (int)(p.angleRad / (2.0f * M_PI) * 2000.0f);
-        if (idx < 0) idx += 2000;
-        if (idx >= 2000) idx = 1999;
+        int idx = (int)(p.angleRad / (2.0f * M_PI) * (float)g_scan_msg.ranges.size);
+        if (idx < 0) idx += g_scan_msg.ranges.size;
+        if (idx >= (int)g_scan_msg.ranges.size) idx = g_scan_msg.ranges.size - 1;
 
         float dist_m = (float)p.distanceMm / 1000.0f;
         // Use min() — closest point wins this bin (slam_toolbox prefers shorter range)
@@ -293,13 +283,16 @@ static void fill_scan_msg() {
 // ============================================================
 static void fill_odom_msg() {
     // ::g_pose ở global namespace (Localization.h). Đã được include trước.
-    // Dùng reference để tránh re-declare.
     const Pose2D &pose = ::g_pose;
-    static float prev_x = 0, prev_y = 0;
-    static uint32_t prev_ms = 0;
 
+    // Update header string fields on every publish — capacity is REQUIRED by
+    // micro-ROS CDR deserialization; without it agent reads garbage.
     g_odom_msg.header.frame_id.data = (char*)"odom";
+    g_odom_msg.header.frame_id.size = 4;
+    g_odom_msg.header.frame_id.capacity = 5;
     g_odom_msg.child_frame_id.data = (char*)"base_link";
+    g_odom_msg.child_frame_id.size = 10;
+    g_odom_msg.child_frame_id.capacity = 11;
     g_odom_msg.header.stamp.sec = millis() / 1000;
     g_odom_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
 
@@ -320,6 +313,7 @@ static void fill_odom_msg() {
 
     // Covariance (rough estimates)
     for (int i = 0; i < 36; i++) g_odom_msg.pose.covariance[i] = 0.0f;
+    for (int i = 0; i < 36; i++) g_odom_msg.twist.covariance[i] = 0.0f;
     g_odom_msg.pose.covariance[0] = 0.01f;  // x
     g_odom_msg.pose.covariance[7] = 0.01f;  // y
     g_odom_msg.pose.covariance[35] = 0.03f; // yaw
@@ -355,7 +349,8 @@ static void fill_imu_msg() {
         g_imu_msg.linear_acceleration_covariance[i]  = 0.0f;
     }
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
-    g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
+    g_imu_msg.header.frame_id.size = 9;
+    g_imu_msg.header.frame_id.capacity = 10;
     g_imu_msg.header.stamp.sec = millis() / 1000;
     g_imu_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
 }
@@ -420,17 +415,22 @@ inline bool init() {
         &g_executor, &g_cmd_vel_sub, &g_cmd_vel_msg, cmd_vel_callback, ON_NEW_DATA
     );
 
-    // 7. Init messages
+    // 7. Init messages — capacity fields are REQUIRED by micro-ROS CDR
+    // deserialization. Without them, agent reads garbage past the null terminator.
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
-    g_scan_msg.header.frame_id.size = strlen(g_scan_msg.header.frame_id.data);
+    g_scan_msg.header.frame_id.size = 11;
+    g_scan_msg.header.frame_id.capacity = 12;
 
     g_odom_msg.header.frame_id.data = (char*)"odom";
-    g_odom_msg.header.frame_id.size = strlen(g_odom_msg.header.frame_id.data);
+    g_odom_msg.header.frame_id.size = 4;
+    g_odom_msg.header.frame_id.capacity = 5;
     g_odom_msg.child_frame_id.data = (char*)"base_link";
-    g_odom_msg.child_frame_id.size = strlen(g_odom_msg.child_frame_id.data);
+    g_odom_msg.child_frame_id.size = 10;
+    g_odom_msg.child_frame_id.capacity = 11;
 
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
-    g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
+    g_imu_msg.header.frame_id.size = 9;
+    g_imu_msg.header.frame_id.capacity = 10;
 
     g_initialized = true;
     Serial.printf("[micro-ROS] ✅ Node ready, publishing:/scan /odom /imu/data, subscribing /cmd_vel (agent %s:%d)\n",
@@ -469,13 +469,6 @@ inline void spin() {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
-    }
-
-    // 5. Publish /tf @ 20 Hz (mỗi 50ms)
-    if (now - g_last_tf_ms >= 50) {
-        g_last_tf_ms = now;
-        fill_tf_msg();
-        rcl_publish(&g_tf_pub, &g_tf_msg, NULL);
     }
 
     // 5. State machine for connection
