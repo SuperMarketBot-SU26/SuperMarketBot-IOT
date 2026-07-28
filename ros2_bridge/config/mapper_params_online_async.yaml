@@ -1,93 +1,70 @@
 # =====================================================================
 #  mapper_params_online_async.yaml — SLAM Toolbox cho YDLIDAR X3 (ESP32-S3)
 # =====================================================================
-# Mục tiêu:
-#   - Bản đồ sắc nét, tường thẳng, không chĩa tia (giống RViz2)
-#   - Siết scan-matching & loop-closure cho môi trường trong nhà (supermarket)
-#   - Đồng bộ với bộ lọc ở bridge:
-#       range_min = 0.15m, range_max = 6.0m
-#
-# Cách dùng:
-#   ros2 launch slam_toolbox online_async_launch.py \
-#       slam_toolbox_node:=slam_toolbox \
-#       --params-file $(ros2 pkg prefix slam_toolbox)/share/slam_toolbox/config/../none  # ignore
-#   Thực ra nên pass file này qua CLI:
-#   ros2 launch slam_toolbox online_async_launch.py \
-#       params_file:=/path/to/mapper_params_online_async.yaml
-# =====================================================================
 
-# ---------- Bản đồ ----------
-map_frame: map
-odom_frame: odom
-base_frame: base_link
-scan_topic: /scan
-mode: mapping   # online_async
+slam_toolbox:
+  ros__parameters:
+    # ---------- Bản đồ ----------
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_link
+    scan_topic: /scan
+    mode: mapping   # online_async
 
-# Độ phân giải 5cm / pixel (chuẩn cho LiDAR tầm trung 6m, cửa hàng trong nhà)
-resolution: 0.05
+    # Độ phân giải 5cm / pixel (chuẩn cho LiDAR tầm trung 6m, cửa hàng trong nhà)
+    resolution: 0.05
 
-# Vùng nhớ bản đồ ban đầu 20m × 20m (sẽ auto-resize khi quét thêm)
-# Tâm bản đồ đặt tại robot lúc bắt đầu
-map_start_x: 0.0
-map_start_y: 0.0
-map_start_yaw: 0.0
+    # Vùng nhớ bản đồ ban đầu 20m × 20m (sẽ auto-resize khi quét thêm)
+    map_start_x: 0.0
+    map_start_y: 0.0
+    map_start_yaw: 0.0
 
-# ---------- Phạm vi LiDAR ----------
-# Phải khớp với filter ở bridge (esp32_ros2_bridge.py)
-max_laser_range: 6.0
-min_laser_range: 0.15
+    # ---------- Phạm vi LiDAR ----------
+    max_laser_range: 6.0
+    min_laser_range: 0.15
 
-# ---------- Phạm vi bản đồ (siết cho YDLIDAR X3) ----------
-# Siêu thị mô phỏng 30m × 30m, không vượt quá.
-# Tránh map "phình to" vô hạn khi scan có nhiễu.
-map_update_interval: 2.0
-max_update_range: 5.5
-minimum_travel_distance: 0.1
-minimum_travel_heading: 0.15
+    # ---------- Phạm vi bản đồ (siết cho YDLIDAR X3) ----------
+    map_update_interval: 2.0
+    max_update_range: 5.5
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.15
+    skip_odometry: false
 
-# Bỏ qua nếu cùng vị trí, tránh spam node
-skip_odometry: false
+    # ---------- Scan Matching — Siết chặt ----------
+    link_match_minimum_response_fine: 0.75
+    link_scan_max_distance: 1.5
 
-# ---------- Scan Matching — Siết chặt ----------
-# response_fine: ngưỡng chất lượng khớp cạnh tường (0..1)
-# 0.75 = tường phải khớp ≥ 75% mới chấp nhận → tường thẳng tắp như kẻ chỉ
-link_match_minimum_response_fine: 0.75
-link_scan_max_distance: 1.5   # không khớp scan quá xa (1.5m)
+    # Loop Closure — cho phép khớp khi robot quay lại điểm cũ
+    loop_search_maximum_distance: 5.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 2.0
+    loop_match_minimum_response_coarse: 0.7
+    loop_match_minimum_response_fine: 0.75
+    loop_subscribe_notifications: true
+    loop_close_one_shot: false
 
-# Loop Closure — cho phép khớp khi robot quay lại điểm cũ
-loop_search_maximum_distance: 5.0
-do_loop_closing: true
-loop_match_minimum_chain_size: 10
-loop_match_maximum_variance_coarse: 2.0
-loop_match_minimum_response_coarse: 0.7
-loop_match_minimum_response_fine: 0.75
-loop_subscribe_notifications: true
-loop_close_one_shot: false
+    # Tốc độ khớp vị trí (correlation)
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
 
-# Tốc độ khớp vị trí (correlation)
-correlation_search_space_dimension: 0.5
-correlation_search_space_resolution: 0.01
-correlation_search_space_smear_deviation: 0.1
+    # ---------- Tối ưu đồ thị ----------
+    optimization_solver: slam_toolbox_msgs/msg/SolverMsg
+    solver_plugin: slam_toolbox::SpaSolver
 
-# ---------- Tối ưu đồ thị ----------
-# Dùng SPA (Sparse Pose Adjustment) thay cho Ceres — nhanh hơn trên embedded
-optimization_solver: slam_toolbox_msgs/msg/SolverMsg
-solver_plugin: slam_toolbox::SpaSolver
+    # ---------- Bảo vệ chống "jump" pose ----------
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_odometry_covariance: 0.0001
 
-# ---------- Bảo vệ chống "jump" pose ----------
-# Bỏ qua nếu pose có covariance quá lớn (lúc SLAM reset)
-use_scan_matching: true
-use_scan_barycenter: true
-minimum_odometry_covariance: 0.0001
+    # ---------- Debug ----------
+    debug_logging: false
+    throttle_scans: 1
+    publish_occupancy_grid: true
+    publish_tf: true
 
-# ---------- Debug ----------
-debug_logging: false
-throttle_scans: 1
-publish_occupancy_grid: true
-publish_tf: true
-
-# ---------- Xử lý mảng scan ----------
-# Cho YDLIDAR X3 6-10 Hz
-use_response_not_equally_weighted: true
-transform_publish_period: 0.05   # 20 Hz publish TF
-tf_buffer_duration: 30.0
+    # ---------- Xử lý mảng scan ----------
+    use_response_not_equally_weighted: true
+    transform_publish_period: 0.05   # 20 Hz publish TF
+    tf_buffer_duration: 30.0
