@@ -1,0 +1,134 @@
+# Debug & Test Discipline — BẮT BUỘC khi sửa bug SuperMarketBot-IOT
+
+Quy tắc này áp dụng cho MỌI task sửa bug / viết driver / chỉnh firmware. Mục tiêu: bug lặp lại lần sau phải được phát hiện NGAY khi chạy, không cần user debug tay.
+
+---
+
+## 1. Trước khi viết code fix — phải có
+
+### 1.1 Compile-time asserts (`static_assert`)
+
+Mỗi struct/hằng số quan trọng phải có `static_assert` ràng buộc:
+
+```cpp
+static_assert(BAUD >= 115200, "BAUD < 115200 — sensor factory default");
+static_assert(BUFFER_SIZE >= 1024, "BUFFER_SIZE phải >= 1024");
+static_assert(sizeof(float) == 4, "Cần float 32-bit");
+```
+
+Đặt NGAY SAU `#include` / constexpr, không xếo vào giữa function. Mục đích: nếu ai đó đổi config sai, **build fail** thay vì chạy sai im lặng.
+
+### 1.2 Runtime asserts trong `init()`
+
+Validate resource ngay khi khởi tạo, log lỗi rõ ràng:
+
+```cpp
+uint32_t largestBlock = ESP.getMaxAllocHeap();
+if (largestBlock < 4096) {
+  Serial.printf("[X3] ❌ Heap largest block = %u B (cần >= 4KB)\n", (unsigned)largestBlock);
+} else {
+  Serial.printf("[X3] Heap OK: largest block = %u B\n", (unsigned)largestBlock);
+}
+```
+
+Không cần `assert()` macro — chỉ cần **log** + (tuỳ chọn) refuse init. Tránh throw exception trên Arduino.
+
+---
+
+## 2. Trong khi viết code fix — phải có
+
+### 2.1 Diagnostic counters
+
+Bất kỳ driver nào đọc stream (UART, I2C, SPI, CAN) phải có struct counters:
+
+```cpp
+struct Diag {
+  uint32_t bytesRead;      // tổng bytes drain thành công
+  uint32_t bytesDropped;   // bytes mất do FIFO/buffer tràn
+  uint32_t syncLosses;     // số lần sai header → phải resync
+  uint32_t crcErrors;      // packet sai checksum
+  uint32_t framesPublished;
+};
+```
+
+Expose `extern Diag g_x3Diag;` để `setup()` log 1 lần khi boot. Reset khi user yêu cầu hoặc mỗi N phút.
+
+### 2.2 Rate-limited log (KHÔNG spam)
+
+**Log trong code firmware phải theo rate-limit.** Mặc định: 1 lần / 1 giây, **chỉ in khi có vấn đề** (counter > threshold).
+
+```cpp
+// ❌ BAD: spam Serial mỗi poll, block UART → mất bytes
+Serial.printf("[X3] pts=%d\n", count);
+
+// ✅ GOOD: log 1 Hz, chỉ khi có anomaly
+static uint32_t lastLogMs = 0;
+if (nowMs - lastLogMs > 1000 && (g_x3Diag.bytesDropped > 0 || g_x3Diag.syncLosses > 5)) {
+  lastLogMs = nowMs;
+  Serial.printf("[X3-DIAG] drop=%u sync=%u\n", ...);
+  // reset counters để log delta lần sau
+}
+```
+
+Quy tắc:
+- **KHÔNG** in log mỗi loop. **KHÔNG** in log mỗi packet.
+- **ĐƯỢC** in log 1 Hz, 1 phút, 1 lần/init, 1 lần/error.
+- Happy-path (không có lỗi) → im lặng. Chỉ log khi có vấn đề hoặc khi user gọi hàm debug.
+
+### 2.3 Test hook (tuỳ chọn)
+
+Driver nên có hàm `resetDiag()` và `getDiag()` để host test hoặc benchmark:
+
+```cpp
+void x3ResetDiag() { memset(&g_x3Diag, 0, sizeof(g_x3Diag)); }
+```
+
+---
+
+## 3. Sau khi viết code fix — phải có
+
+### 3.1 Self-test trong `setup()` (nếu có thể)
+
+Nếu driver có thể tự kiểm tra (loopback test, dummy data), làm ngay khi boot:
+
+```cpp
+#if defined(X3_SELFTEST) && X3_SELFTEST
+if (!x3Selftest()) {
+  Serial.println("[X3] ❌ Selftest FAIL — check wiring");
+}
+#endif
+```
+
+Không bắt buộc, nhưng khuyến khịch cho sensor drivers.
+
+### 3.2 Log summary 1 lần / N giây
+
+Driver quan trọng (LiDAR, IMU, motor) nên có 1 log tóm tắt định kỳ — KHÔNG phải mỗi loop, mà 1 lần / 5–10 giây:
+
+```cpp
+// Mỗi 5s: 1 dòng tóm tắt tình trạng
+if (nowMs - lastSummaryMs > 5000) {
+  Serial.printf("[X3] scan=%u rate=%.1fHz avg_pts=%u\n", ...);
+}
+```
+
+---
+
+## 4. Áp dụng
+
+| Tình huống | Yêu cầu |
+|---|---|
+| Sửa bug LiDAR / IMU / motor | 1.1 + 1.2 + 2.1 + 2.2 + 3.2 |
+| Thêm sensor mới | 1.1 + 1.2 + 2.1 + 2.2 + 3.1 + 3.2 |
+| Sửa logic control | 1.2 + 2.2 (không cần counters trừ khi đụng timing) |
+| Thêm MQTT/WiFi task | 2.2 (rate-limit log) + 3.2 (summary) |
+
+---
+
+## 5. Anti-patterns (TRÁNH)
+
+- ❌ `Serial.println(...)` mỗi poll → block 1-2 ms → mất data UART.
+- ❌ Log "happy path" liên tục ("[OK] reading sensor...") → che log lỗi thật.
+- ❌ Không có diagnostic counters → khi bug tái xuất, phải thêm printf rồi build lại.
+- ❌ `assert()` macro không có Serial fallback → crash im lặng.
+- ❌ Magic numbers trong code (`if (x > 4500)`) → thay bằng `#define` + comment WHY.
