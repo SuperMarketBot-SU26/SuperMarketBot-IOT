@@ -198,31 +198,16 @@ inline void botDriveMecanumPro(
         rr = rr * scale / 100;
     }
 
-    // Apply to motors — LUÔN đi qua layout (slot mapping + inversion + scale)
-    {
-        const int32_t spRaw[4] = {fl, rl, fr, rr};
-        int32_t spMapped[4];
-        for (int si = 0; si < 4; si++) {
-            int32_t v = spRaw[si];
-            if (g_motInv[si]) v = -v;
-            extern float g_motorScale[4];
-            int32_t scaleFP = (int32_t)(g_motorScale[si] * 1024.f + 0.5f);
-            v = (v * scaleFP) / 1024;
-            spMapped[si] = v;
-        }
-        if (smooth) {
-            for (int si = 0; si < 4; si++) {
-                uint8_t p = g_mapMotSlot[si];
-                if (p > 3) p = (uint8_t)si;
-                motorDriveSmooth((MotorId)p, spMapped[si]);
-            }
-        } else {
-            for (int si = 0; si < 4; si++) {
-                uint8_t p = g_mapMotSlot[si];
-                if (p > 3) p = (uint8_t)si;
-                motorDrive((MotorId)p, spMapped[si]);
-            }
-        }
+    // Apply smooth motor drive
+    if (smooth) {
+        motorDriveSmooth(MID_FL, fl);
+        motorDriveSmooth(MID_RL, rl);
+        motorDriveSmooth(MID_FR, fr);
+        motorDriveSmooth(MID_RR, rr);
+    } else {
+        // Direct drive for emergency stop
+        const int32_t sp[4] = {fl, rl, fr, rr};
+        motorApplyLayout(sp);
     }
 }
 
@@ -347,31 +332,15 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
         locSetDriveCmd(0, 0);
     }
 
-    // 8) Apply to motors — LUÔN đi qua layout (slot mapping + inversion + scale)
-    {
-        const int32_t spRaw[4] = {fl, rl, fr, rr};
-        int32_t spMapped[4];
-        for (int si = 0; si < 4; si++) {
-            int32_t v = spRaw[si];
-            if (g_motInv[si]) v = -v;
-            extern float g_motorScale[4];
-            int32_t scaleFP = (int32_t)(g_motorScale[si] * 1024.f + 0.5f);
-            v = (v * scaleFP) / 1024;
-            spMapped[si] = v;
-        }
-        if (smooth) {
-            for (int si = 0; si < 4; si++) {
-                uint8_t p = g_mapMotSlot[si];
-                if (p > 3) p = (uint8_t)si;
-                motorDriveSmooth((MotorId)p, spMapped[si]);
-            }
-        } else {
-            for (int si = 0; si < 4; si++) {
-                uint8_t p = g_mapMotSlot[si];
-                if (p > 3) p = (uint8_t)si;
-                motorDrive((MotorId)p, spMapped[si]);
-            }
-        }
+    // 8) Apply to motors (smooth or immediate).
+    if (smooth) {
+        motorDriveSmooth(MID_FL, fl);
+        motorDriveSmooth(MID_RL, rl);
+        motorDriveSmooth(MID_FR, fr);
+        motorDriveSmooth(MID_RR, rr);
+    } else {
+        const int32_t sp[4] = {fl, rl, fr, rr};
+        motorApplyLayout(sp);
     }
 }
 

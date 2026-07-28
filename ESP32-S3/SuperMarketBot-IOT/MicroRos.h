@@ -68,43 +68,10 @@ static tf2_msgs__msg__TFMessage     g_tf_msg;
 // State
 static bool   g_initialized = false;
 static String g_agent_ip = MICRO_ROS_AGENT_IP;
+static int    g_agent_port = MICRO_ROS_AGENT_PORT;
 static uint32_t g_last_scan_ms = 0;
 static uint32_t g_last_odom_ms = 0;
 static uint32_t g_last_imu_ms = 0;
-static uint32_t g_last_tf_ms = 0;
-
-// ============================================================
-// FILL TF Message (odom -> base_link) từ g_pose
-// ============================================================
-static void fill_tf_msg() {
-    const Pose2D &pose = ::g_pose;
-    static geometry_msgs__msg__TransformStamped tf_stamped;
-
-    if (g_tf_msg.transforms.size == 0) {
-        g_tf_msg.transforms.data = (geometry_msgs__msg__TransformStamped*)malloc(sizeof(geometry_msgs__msg__TransformStamped));
-        g_tf_msg.transforms.size = 1;
-        g_tf_msg.transforms.capacity = 1;
-
-        tf_stamped.header.frame_id.data = (char*)"odom";
-        tf_stamped.header.frame_id.size = 4;
-        tf_stamped.child_frame_id.data = (char*)"base_link";
-        tf_stamped.child_frame_id.size = 9;
-    }
-
-    tf_stamped.header.stamp.sec = millis() / 1000;
-    tf_stamped.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
-    tf_stamped.transform.translation.x = pose.x;
-    tf_stamped.transform.translation.y = pose.y;
-    tf_stamped.transform.translation.z = 0.0f;
-
-    float h = pose.headingRad * 0.5f;
-    tf_stamped.transform.rotation.x = 0.0f;
-    tf_stamped.transform.rotation.y = 0.0f;
-    tf_stamped.transform.rotation.z = sinf(h);
-    tf_stamped.transform.rotation.w = cosf(h);
-
-    g_tf_msg.transforms.data[0] = tf_stamped;
-}
 
 // ============================================================
 // CALLBACK: nhận /cmd_vel từ ROS2 → điều khiển motor
@@ -469,13 +436,6 @@ inline void spin() {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
-    }
-
-    // 5. Publish /tf @ 20 Hz (mỗi 50ms)
-    if (now - g_last_tf_ms >= 50) {
-        g_last_tf_ms = now;
-        fill_tf_msg();
-        rcl_publish(&g_tf_pub, &g_tf_msg, NULL);
     }
 
     // 5. State machine for connection
