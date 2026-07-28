@@ -218,21 +218,21 @@ static void fill_scan_msg() {
 
     g_scan_msg.angle_min = 0.0f;
     g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;  // 360 bins cho 1 vòng
+    g_scan_msg.angle_increment = (2.0f * M_PI) / 2000.0f;  // 2000 bins — YDLIDAR X3 ~3600 pts/scan
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;  // 10 Hz
     g_scan_msg.range_min = 0.12f;  // 12cm
     g_scan_msg.range_max = 8.0f;   // 8m
 
-    // Init ranges array (zero-fill)
+    // Init ranges array — 2000 bins (was 360, too coarse for X3's ~3600 raw pts)
     if (g_scan_msg.ranges.size == 0) {
-        g_scan_msg.ranges.data = (float*)malloc(360 * sizeof(float));
-        g_scan_msg.ranges.size = 360;
-        g_scan_msg.ranges.capacity = 360;
+        g_scan_msg.ranges.data = (float*)malloc(2000 * sizeof(float));
+        g_scan_msg.ranges.size = 2000;
+        g_scan_msg.ranges.capacity = 2000;
     }
 
     // Zero all
-    for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
+    for (size_t i = 0; i < 2000; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
     // Fill từ ::g_x3Scan (góc theo rad, distance theo mm).
     // Định nghĩa ở global namespace (YdlidarX3.h). Dùng `::` để tránh bị
@@ -244,12 +244,14 @@ static void fill_scan_msg() {
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;  // filter out-of-range
         if (p.quality < 10) continue;
 
-        int idx = (int)(p.angleRad / (2.0f * M_PI) * 360.0f);
-        if (idx < 0) idx += 360;
-        if (idx >= 360) idx = 359;
+        int idx = (int)(p.angleRad / (2.0f * M_PI) * 2000.0f);
+        if (idx < 0) idx += 2000;
+        if (idx >= 2000) idx = 1999;
 
         float dist_m = (float)p.distanceMm / 1000.0f;
-        g_scan_msg.ranges.data[idx] = dist_m;
+        // Use min() — closest point wins this bin (slam_toolbox prefers shorter range)
+        float &slot = g_scan_msg.ranges.data[idx];
+        if (slot == 0.0f || dist_m < slot) slot = dist_m;
     }
 }
 
