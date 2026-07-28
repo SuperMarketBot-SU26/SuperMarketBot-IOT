@@ -374,16 +374,16 @@
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
 /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
  *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
-#define STA_SSID               "2K2L"     // Ưu tiên 1 - WiFi trường FPT
-#define STA_PASS               "01010804"
+#define STA_SSID               "Tran coffee 1"     // Ưu tiên 1 - WiFi trường FPT
+#define STA_PASS               "xincamon@"
 #define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "asksnuggie"
-#define STA_SSID_3             "Tran coffee 1"    // Dự phòng / quán cafe (ưu tiên 3)
-#define STA_PASS_3             "xincamon@"
+#define STA_SSID_3             "Khkh"    // Dự phòng / quán cafe (ưu tiên 3)
+#define STA_PASS_3             "khoa101042"
 #define STA_SSID_4             "2K2L"                 // Ưu tiên 4 — điền SSID + PASS bên dưới
 #define STA_PASS_4             "01010804"
-#define STA_SSID_5             "FPTU_HallA"       // Ưu tiên 5 - WiFi Lab FPT
-#define STA_PASS_5             "12345678"
+#define STA_SSID_5             "FPTH_Student"       // Ưu tiên 5 - WiFi Lab FPT
+#define STA_PASS_5             "hoithanghieu"
 #define STA_CONNECT_TIMEOUT_MS 10000u   // Timeout mỗi SSID (ms) — giảm xuống để thử nhanh hơn
 #define STA_MAX_RETRIES        3        // Số lần thử mỗi SSID trước khi sang SSID tiếp theo
 /** Kênh 2.4 GHz (1–11). 6 thường ít chồng lấn; tránh kênh “lạ” nếu điện thoại lọc theo vùng. */
