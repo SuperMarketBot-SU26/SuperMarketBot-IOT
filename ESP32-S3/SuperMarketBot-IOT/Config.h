@@ -374,8 +374,8 @@
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
 /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
  *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
-#define STA_SSID               "Tran coffee 1"     // Ưu tiên 1 - WiFi trường FPT
-#define STA_PASS               "xincamon@"
+#define STA_SSID               "Khkh"     // Ưu tiên 1 - WiFi trường FPT
+#define STA_PASS               "khoa101042"
 #define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "asksnuggie"
 #define STA_SSID_3             "Khkh"    // Dự phòng / quán cafe (ưu tiên 3)
@@ -407,6 +407,14 @@
 /** 0 = Dùng Rosbridge WebSocket.
  *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
 #define USE_MICRO_ROS           1
+/** IP của máy Linux chạy micro-ros-agent. Thay đổi mỗi khi chuyển WiFi / mạng.
+ *  Tìm IP: `ip addr show` (linux) hoặc `ipconfig` (Windows).
+ *  Ví dụ:
+ *    - Nhà (WiFi nhà):      "192.168.1.241"
+ *    - Trường (WiFi trường): "192.168.x.x"   ← xem IP laptop trên mạng trường
+ *    - Điểm khác: `ip addr show` trên laptop rồi điền vào đây */
+#define MICRO_ROS_AGENT_IP      "192.168.154.120"
+#define MICRO_ROS_AGENT_PORT    8888
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
  *  ESP chỉ đọc được 0..~3.3 V trên chân ADC — cần chiết áp 2 điện trở từ nguồn
