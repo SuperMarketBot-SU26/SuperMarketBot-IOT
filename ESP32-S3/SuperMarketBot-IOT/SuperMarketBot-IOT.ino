@@ -402,7 +402,8 @@ static void taskControl(void *pvParams) {
     sensorsPollLidar();
 #endif
 #if USE_YDLIDAR_X3
-    x3Poll();
+    // NOTE: LiDAR drain đã chuyển sang taskX3 riêng (xem setup()).
+    // Task chạy priority 6, period 5ms — drain UART không block control loop.
 #endif
     sensorsPollUS();
 
@@ -631,6 +632,17 @@ void setup() {
     8192, nullptr, 1,
     nullptr, 1
   );
+
+#if USE_YDLIDAR_X3
+  // Core 1: LiDAR X3 — priority 6 (cao nhất, real-time UART drain 5ms period)
+  // Fix lỗi "tụt pts khi ROS2 lên": drain UART trong task riêng, không bị
+  // micro-ROS agent hay MQTT block. FIFO đầy = mất bytes = X3 resync = pts giảm.
+  xTaskCreatePinnedToCore(
+    taskX3, "LidarX3",
+    4096, nullptr, 6,
+    nullptr, 1
+  );
+#endif
 
   // Core 1: Điều khiển — stack 8KB, priority 5 (real-time)
   xTaskCreatePinnedToCore(
