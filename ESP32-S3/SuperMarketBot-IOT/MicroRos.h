@@ -24,6 +24,7 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>  // v2.1: rmw_uros_sync_session + epoch_millis
 
 // Message types
 #include <sensor_msgs/msg/laser_scan.h>
@@ -216,8 +217,10 @@ static void fill_scan_msg() {
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
     g_scan_msg.header.frame_id.size = 11;
     g_scan_msg.header.frame_id.capacity = 12;
-    g_scan_msg.header.stamp.sec = millis() / 1000;
-    g_scan_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    // v2.2: revert to millis()-based stamps (see fill_odom_msg for rationale)
+    const uint32_t nowMs_scan = millis();
+    g_scan_msg.header.stamp.sec     = nowMs_scan / 1000u;
+    g_scan_msg.header.stamp.nanosec = (nowMs_scan % 1000u) * 1000000UL;
 
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;  // 10 Hz
@@ -279,80 +282,153 @@ static void fill_scan_msg() {
 }
 
 // ============================================================
-// FILL Odometry message từ g_pose (encoder + IMU)
+// FILL Odometry message từ g_pose (Localization) + encoder + IMU.
+// v2.1 (2026-07-27): FIX zero angular_velocity bug.
+//
+// Bug trước đây: twist.twist.angular.z = 0.0f (hardcode) → EKF
+// robot_localization fusion sai → RViz không xoay theo robot.
+// Fix: angular.z = (Δheading EKF) / dt trong khoảng giữa 2 lần publish.
 // ============================================================
+static uint32_t s_odomPrevMs = 0;
+static float    s_odomPrevHeading = 0.f;
+
 static void fill_odom_msg() {
-    // ::g_pose ở global namespace (Localization.h). Đã được include trước.
     const Pose2D &pose = ::g_pose;
 
-    // Update header string fields on every publish — capacity is REQUIRED by
-    // micro-ROS CDR deserialization; without it agent reads garbage.
+    // ---- Header ----
     g_odom_msg.header.frame_id.data = (char*)"odom";
     g_odom_msg.header.frame_id.size = 4;
     g_odom_msg.header.frame_id.capacity = 5;
     g_odom_msg.child_frame_id.data = (char*)"base_link";
     g_odom_msg.child_frame_id.size = 10;
     g_odom_msg.child_frame_id.capacity = 11;
-    g_odom_msg.header.stamp.sec = millis() / 1000;
-    g_odom_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    // v2.2: revert to millis()-based stamps. EKF + slam consume this OK
+    // because use_sim_time=false and they fuse on receipt. /tf publication
+    // (year-1970-stamped) is no longer published from ESP32.
+    const uint32_t nowMs_od = millis();
+    g_odom_msg.header.stamp.sec     = nowMs_od / 1000u;
+    g_odom_msg.header.stamp.nanosec = (nowMs_od % 1000u) * 1000000UL;
 
+    // ---- Pose ----
     g_odom_msg.pose.pose.position.x = pose.x;
     g_odom_msg.pose.pose.position.y = pose.y;
     g_odom_msg.pose.pose.position.z = 0.0f;
-
-    // Quaternion từ heading (yaw)
-    float h = pose.headingRad * 0.5f;
+    const float h = pose.headingRad * 0.5f;
     g_odom_msg.pose.pose.orientation.x = 0.0f;
     g_odom_msg.pose.pose.orientation.y = 0.0f;
     g_odom_msg.pose.pose.orientation.z = sinf(h);
-    g_odom_msg.pose.pose.orientation.w = cosf(h);
+    g_odom_msg.pose.pose.orientation.w  = cosf(h);
 
-    float linearMps = ((g_state.rpmFL + g_state.rpmFR) / 2.0f) * (WHEEL_CIRC_M / 60.0f);
+    // ---- Twist linear: từ RPM trung bình (Localization / Odometry) ----
+    const float wheelRps = ((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f;
+    const float linearMps = wheelRps * (float)WHEEL_CIRC_M;
     g_odom_msg.twist.twist.linear.x = linearMps;
-    g_odom_msg.twist.twist.angular.z = 0.0f;
+    g_odom_msg.twist.twist.linear.y = 0.0f;
+    g_odom_msg.twist.twist.linear.z = 0.0f;
 
-    // Covariance (rough estimates)
-    for (int i = 0; i < 36; i++) g_odom_msg.pose.covariance[i] = 0.0f;
-    for (int i = 0; i < 36; i++) g_odom_msg.twist.covariance[i] = 0.0f;
-    g_odom_msg.pose.covariance[0] = 0.01f;  // x
-    g_odom_msg.pose.covariance[7] = 0.01f;  // y
-    g_odom_msg.pose.covariance[35] = 0.03f; // yaw
+    // ---- Twist angular: từ delta heading / dt (FIX bug) ----
+    // Heading đã được fusion bởi imuFusion::step → g_pose.headingRad (EKF 1D).
+    // Tính angular.z = (h_now - h_prev) / dt rad/s.
+    if (s_odomPrevMs != 0) {
+        const float dt = (float)(nowMs_od - s_odomPrevMs) / 1000.0f;
+        if (dt > 0.001f && dt < 5.0f) {
+            float dH = pose.headingRad - s_odomPrevHeading;
+            // wrap về [-π, π] để tránh 2π jump
+            while (dH >  (float)M_PI) dH -= 2.f * (float)M_PI;
+            while (dH < -(float)M_PI) dH += 2.f * (float)M_PI;
+            g_odom_msg.twist.twist.angular.x = 0.0f;
+            g_odom_msg.twist.twist.angular.y = 0.0f;
+            g_odom_msg.twist.twist.angular.z = dH / dt;
+        }
+    } else {
+        // Publish đầu tiên — chưa có dt, gửi 0.
+        g_odom_msg.twist.twist.angular.x = 0.0f;
+        g_odom_msg.twist.twist.angular.y = 0.0f;
+        g_odom_msg.twist.twist.angular.z = 0.0f;
+    }
+    s_odomPrevMs      = nowMs_od;
+    s_odomPrevHeading = pose.headingRad;
+
+    // ---- Covariance: tune theo hardware. Pose.gps-style diag. ----
+    for (int i = 0; i < 36; i++) {
+        g_odom_msg.pose.covariance[i]    = 0.0f;
+        g_odom_msg.twist.covariance[i]   = 0.0f;
+    }
+    g_odom_msg.pose.covariance[0]  = 0.05f;  // x (5cm 1-sigma)
+    g_odom_msg.pose.covariance[7]  = 0.05f;  // y
+    g_odom_msg.pose.covariance[35] = 0.10f;  // yaw (≈5.7°)
+    g_odom_msg.twist.covariance[0] = 0.02f;  // vx
+    g_odom_msg.twist.covariance[35] = 0.10f; // vyaw
 }
 
 // ============================================================
-// FILL Imu message từ g_pose.headingRad (heading đã qua EKF fusion).
-// sensor_msgs/Imu yêu cầu orientation là quaternion. Heading chỉ có yaw
-// nên roll=pitch=0; quaternion = (0, 0, sin(h/2), cos(h/2)).
-// angular_velocity để 0 (firmware không publish gyro Z qua micro-ROS —
-// nếu cần, thêm subscription ở ImuMpu6050.h sau).
-// linear_acceleration để 0 (firmware không có accelerometer).
-// Trước đây fill_imu_msg chỉ set header → /imu/data publish toàn 0 về
-// orientation → EKF robot_localization fusion sai khi chạy ROS2 EKF.
+// FILL Imu message từ MPU6050 gyro Z thật + fused heading quaternion.
+// v2.1 (2026-07-27): FIX all-zero bug.
+//
+// Bug trước đây: angular_velocity = linear_acceleration = (0,0,0)
+// hardcode → ROS2 EKF không hợp nhất được gyro → SLAM heading.
+// Fix:
+//   - angular_velocity.z = gyro Z thô đã trừ bias (rad/s), từ imuMpu6050GetGyroZ().
+//   - linear_acceleration.z = 9.81 m/s² (gravity, robot đứng yên trên sàn).
+//   - Covariance -1 cho unknown components (X,Y theo sensor_msgs spec).
 // ============================================================
+static uint32_t s_imuPrevGyroZ_ms __attribute__((unused)) = 0;
+static float    s_imuPrevGyroZ_radps __attribute__((unused)) = 0.f;
+
 static void fill_imu_msg() {
     const Pose2D &pose = ::g_pose;
+
+    // ---- Orientation: heading quaternion từ EKF fusion ----
     const float h = pose.headingRad * 0.5f;
     g_imu_msg.orientation.x = 0.0f;
     g_imu_msg.orientation.y = 0.0f;
     g_imu_msg.orientation.z = sinf(h);
-    g_imu_msg.orientation.w = cosf(h);
+    g_imu_msg.orientation.w  = cosf(h);
+
+    // ---- angular_velocity.z: gyro thô từ MPU6050 (rad/s) ----
+    // x,y = 0 (chỉ dùng 1 trục Z cho heading fusion).
+    float gyroZ = 0.f;
+    bool gyroOk = false;
+#if USE_IMU_MPU6050
+    gyroOk = ::imuMpu6050GetGyroZ(gyroZ);
+#endif
     g_imu_msg.angular_velocity.x = 0.0f;
     g_imu_msg.angular_velocity.y = 0.0f;
-    g_imu_msg.angular_velocity.z = 0.0f;
+    g_imu_msg.angular_velocity.z = gyroOk ? gyroZ : 0.0f;
+
+    // ---- linear_acceleration: chỉ set Z = gravity khi đứng yên trên sàn ----
+    // MPU6050 accelerometer chưa được expose qua API, mặc định coi như đứng yên.
+    // (-Z axis convention: sensor reports -9.81 m/s² on Z when upright; nhưng
+    // ROS convention is +9.81 on Z for ENU → +X forward, +Y left, +Z up.)
     g_imu_msg.linear_acceleration.x = 0.0f;
     g_imu_msg.linear_acceleration.y = 0.0f;
-    g_imu_msg.linear_acceleration.z = 0.0f;
-    // Covariance 9x9 = zero (sensor không báo uncertainty).
+    g_imu_msg.linear_acceleration.z = 9.81f;
+
+    // ---- Covariance theo sensor_msgs/Imu spec ----
+    // Diag entries = variance (1-sigma²). Off-diag = 0.
+    // Linear_acceleration.x và y đánh -1 (unknown) vì MPU6050 API chưa expose.
     for (int i = 0; i < 9; i++) {
         g_imu_msg.orientation_covariance[i]          = 0.0f;
         g_imu_msg.angular_velocity_covariance[i]     = 0.0f;
         g_imu_msg.linear_acceleration_covariance[i]  = 0.0f;
     }
+    g_imu_msg.orientation_covariance[0] = -1.0f;  // roll  unknown
+    g_imu_msg.orientation_covariance[4] = -1.0f;  // pitch unknown
+    g_imu_msg.orientation_covariance[8] = 0.02f;  // yaw   var ≈ (0.14 rad/s)² ~ 0.02
+    g_imu_msg.angular_velocity_covariance[0] = -1.0f;  // wx unknown
+    g_imu_msg.angular_velocity_covariance[4] = -1.0f;  // wy unknown
+    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : -1.0f;  // wz
+    g_imu_msg.linear_acceleration_covariance[0] = -1.0f;  // ax unknown
+    g_imu_msg.linear_acceleration_covariance[4] = -1.0f;  // ay unknown
+    g_imu_msg.linear_acceleration_covariance[8] = 0.01f;  // az (assume gravity is correct)
+
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
-    g_imu_msg.header.stamp.sec = millis() / 1000;
-    g_imu_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    // v2.2: revert to millis()-based stamps (see fill_odom_msg for rationale)
+    const uint32_t nowMs_imu = millis();
+    g_imu_msg.header.stamp.sec     = nowMs_imu / 1000u;
+    g_imu_msg.header.stamp.nanosec = (nowMs_imu % 1000u) * 1000000UL;
 }
 
 // ============================================================
@@ -373,6 +449,12 @@ inline bool init() {
 
     // 3. Node
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
+
+    // (v2.2) Removed rmw_uros_sync_session call. On this micro-ros_arduino +
+    // WiFi UDP build, the function returns OK but doesn't actually offset the
+    // clock — rmw_uros_epoch_millis() returns MCU uptime, not synced epoch.
+    // Stamps use millis() throughout; consumers tolerate this when /tf is not
+    // published from ESP32.
 
     // 4. Publishers
     // QoS strategy: KEEP ESP32 DEFAULTS, fix mismatch on ROS2 side.
@@ -433,14 +515,36 @@ inline bool init() {
     g_imu_msg.header.frame_id.capacity = 10;
 
     g_initialized = true;
-    Serial.printf("[micro-ROS] ✅ Node ready, publishing:/scan /odom /imu/data, subscribing /cmd_vel (agent %s:%d)\n",
-                  g_agent_ip.c_str(), g_agent_port);
+    Serial.printf("[micro-ROS] Node ready. agent=%s:%d\n", g_agent_ip.c_str(), g_agent_port);
+
+    // Diagnostic state at init — capture for [Diag] log periodic.
+    Serial.printf("[micro-ROS] IMU enabled=%d, encoder enabled=%d, heap=%u\n",
+#if USE_IMU_MPU6050
+                  g_imuEnabled ? 1 : 0,
+#else
+                  0,
+#endif
+#if USE_ENCODER_HARDWARE
+                  1,
+#else
+                  0,
+#endif
+                  (unsigned)ESP.getFreeHeap());
     return true;
 }
 
 // ============================================================
 // SPIN: gọi mỗi loop iteration
 // Spin executor + publish data
+// v2.1 (2026-07-27): ADD /tf publish + diagnostic health log.
+// v2.2 (2026-07-28): ROLL BACK /tf publish + sync_session. ESP32 has no RTC;
+//     rmw_uros_epoch_millis() on this micro-ros_arduino+UDP build returns MCU
+//     uptime (ms) not actually-synced epoch, so tf2 rejects all /tf frames as
+//     "from the past" (32 days into the year 1970). The robust fix: STOP
+//     publishing /tf from ESP32. robot_state_publisher (static URDF TFs) +
+//     ekf_node (converts /odom → odom→base_link TF) handle TF on ROS2 side.
+//     /odom, /imu/data, /scan still use millis()-based stamps; EKF and slam
+//     have always accepted those silently when /tf wasn't part of the chain.
 // ============================================================
 inline void spin() {
     if (!g_initialized) return;
@@ -457,25 +561,64 @@ inline void spin() {
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
     }
 
-    // 3. Publish /odom @ 50 Hz
-    if (now - g_last_odom_ms >= 20) {
+    // 3. Publish /odom @ 30 Hz (mỗi ~33 ms).
+    //    v2.1: angular.z computed from Δheading — see fill_odom_msg().
+    if (now - g_last_odom_ms >= 33) {
         g_last_odom_ms = now;
         fill_odom_msg();
         rcl_publish(&g_odom_pub, &g_odom_msg, NULL);
     }
 
-    // 4. Publish /imu/data @ 50 Hz
-    if (now - g_last_imu_ms >= 20) {
+    // 4. Publish /imu/data @ 30 Hz (mỗi ~33 ms).
+    //    v2.1: angular_velocity.z từ MPU6050 gyro thô — see fill_imu_msg().
+    if (now - g_last_imu_ms >= 33) {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
     }
+
+    // (v2.2) /tf publication REMOVED. ekf_node owns odom→base_link TF.
+    //        robot_state_publisher owns base_link→{laser,imu,wheels} static TFs.
 
     // 5. State machine for connection
     static uint32_t last_ping_ms = 0;
     if (now - last_ping_ms >= 1000) {
         last_ping_ms = now;
         // micro-ros library auto-pings agent
+    }
+
+    // 6. DIAGNOSTIC LOG: in trạng thái sensor mỗi 3s để bắt lỗi zero.
+    static uint32_t last_diag_ms = 0;
+    if (now - last_diag_ms >= 3000) {
+        last_diag_ms = now;
+
+        float gyroZ = 0.f;
+        bool imuOk = false;
+#if USE_IMU_MPU6050
+        imuOk = ::imuMpu6050GetGyroZ(gyroZ);
+#endif
+        const float wheelRpmAvg = (g_state.rpmFL + g_state.rpmFR) * 0.5f;
+        const float wheelMps = wheelRpmAvg * (float)WHEEL_CIRC_M / 60.0f;
+        // Compute angular.z quickly for log
+        float angZ = 0.f;
+        if (s_odomPrevMs != 0) {
+            const float dt = (float)(now - s_odomPrevMs) / 1000.0f;
+            if (dt > 0.001f && dt < 5.0f) {
+                float dH = g_pose.headingRad - s_odomPrevHeading;
+                while (dH >  (float)M_PI) dH -= 2.f * (float)M_PI;
+                while (dH < -(float)M_PI) dH += 2.f * (float)M_PI;
+                angZ = dH / dt;
+            }
+        }
+        Serial.printf("[Diag] imu=%d gyroZ=%+.3f rad/s | wheelAvg=%.1f rpm (%.3f m/s) | "
+                      "yaw=%+.2f° | odom.lin.x=%+.3f odom.ang.z=%+.3f | "
+                      "encL=%ld encR=%ld\n",
+                      imuOk ? 1 : 0, gyroZ,
+                      wheelRpmAvg, wheelMps,
+                      g_pose.headingRad * 180.f / (float)M_PI,
+                      g_odom_msg.twist.twist.linear.x,
+                      angZ,
+                      (long)::odomGetTicksL(), (long)::odomGetTicksR());
     }
 }
 
