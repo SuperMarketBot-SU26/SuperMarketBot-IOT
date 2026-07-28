@@ -8,9 +8,11 @@
  *       - Lấy khoảng cách min trong một cung góc (vd: trước xe, ±30°) → obstacle backup.
  *       - Lấy toàn bộ scan để gửi qua micro-ROS /scan topic.
  *
- *  Protocol X3 (tham khảo X3 datasheet):
- *    Header 0xAA 0x55 | length(1) | freq(2) | payload(length-3 bytes) | checksum(1)
- *    payload: mỗi 2 bytes = 1 point sample (distance_mm = uint16 LE / 4).
+ *  Protocol X3 (tham khảo X3 datasheet & YDLIDAR-SDK):
+ *    0xAA 0x55 | CT(1) | LSN(1) | FSA(2) | LSA(2) | CS(1) | payload(LSN*2 bytes)
+ *    - CT bit 0 == 1 → "rotation boundary" marker (LSN often == 0 cho marker packet)
+ *    - FSA/LSA: First/Last Sample Angle (°) = uint16 LE / 64
+ *    - payload: mỗi 2 bytes = 1 point sample (distance_mm = uint16 LE / 4).
  *
  *  Quan trọng — TẠI SAO PTS BỊ TỤT KHI ROS2 LÊN:
  *    - Baud 115200 chỉ chứa ~11.5 KB/s. Ở 4 kHz sample rate → 20 KB/s KHÔNG vừa.
@@ -75,7 +77,9 @@ struct X3Diag {
   uint32_t syncLosses;      // số lần phát hiện sai header 0xAA55 → phải resync
   uint32_t checksumErrors;  // số packet sai checksum
   uint32_t scansPublished;  // số scan đã publish thành công
-  uint32_t lastDropLogMs;   // millis lần cuối log diagnostic
+  uint32_t zeroSamplePkts;  // packet có sampleCount==0 (X3 CT indicator thường gửi 0)
+  uint32_t packetsParsed;   // packet đã parse thành công
+  uint32_t packetsRejected; // packet bị reject (sampleCount > 200, oversize, etc)
 };
 
 extern X3Scan g_x3Scan;
@@ -187,8 +191,39 @@ inline uint16_t x3DrainUart() {
       continue;
     }
 
+    uint8_t CT = s_buf[2];
     uint8_t sampleCount = s_buf[3];
     uint16_t packageLen = 10 + (sampleCount * 2);
+
+    // === X3 protocol quirks ===
+    // - CT bit 0 == 1 → "rotation boundary" packet (often sampleCount==0, just signals end-of-360°)
+    // - Trên firmware X3, packet "zero packet" (CT bit 0) thường được gửi NGAY TRƯỚC packet đầu
+    //   tiên của rotation mới. Vì vậy flush khi gặp nó.
+    bool isRotationBoundary = (CT & 0x01) != 0;
+
+    // Nếu sampleCount==0, không parse point data; coi như zero-packet (boundary marker)
+    if (sampleCount == 0) {
+      g_x3Diag.zeroSamplePkts++;
+      // Flush accumulator nếu có data
+      if (s_accumCount > 0) {
+        memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
+        g_x3Scan.count = s_accumCount;
+        g_x3Scan.scanSeq++;
+        g_x3Scan.lastScanMs = nowMs;
+        g_x3Scan.scanReady = true;
+        g_x3Diag.scansPublished++;
+        s_accumCount = 0;
+      }
+      // Bỏ qua 10 byte header, không có payload
+      if (s_bufLen >= 10) {
+        memmove(s_buf, s_buf + 10, s_bufLen - 10);
+        s_bufLen -= 10;
+      } else {
+        s_bufLen = 0;
+      }
+      continue;
+    }
+
     if (s_bufLen < packageLen) break; // chưa đủ, đợi packet kế tiếp
 
     // 2) Tính góc start/end
@@ -199,10 +234,22 @@ inline uint16_t x3DrainUart() {
     float diffAngle = endAngle - startAngle;
     if (diffAngle < 0) diffAngle += 360.0f;
 
-    // 3) Timeout: nếu quá 80ms không packet → flush accumulator
-    bool timeout = (nowMs - s_lastPacketMs) > 80;
+    // 3) Flush accumulator nếu packet này là rotation boundary
+    //    (đảm bảo scan đầy đủ trước khi ghi packet mới của rotation tiếp theo)
+    if (isRotationBoundary && s_accumCount > 0) {
+      memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
+      g_x3Scan.count = s_accumCount;
+      g_x3Scan.scanSeq++;
+      g_x3Scan.lastScanMs = nowMs;
+      g_x3Scan.scanReady = true;
+      g_x3Diag.scansPublished++;
+      s_accumCount = 0;
+    }
+
+    // 4) Vẫn duy trì timeout-based flush làm fallback (nếu X3 firmware
+    //    này không gửi zero-packet đều)
+    bool timeout = (nowMs - s_lastPacketMs) > 200;
     if (timeout && s_accumCount >= 100) {
-      // Copy sang g_x3Scan (atomic vì taskX3 priority 6 > readers)
       memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
       g_x3Scan.count = s_accumCount;
       g_x3Scan.scanSeq++;
@@ -213,6 +260,9 @@ inline uint16_t x3DrainUart() {
     }
     s_lastPacketMs = nowMs;
 
+    g_x3Diag.packetsParsed++;
+
+    // 5) Đọc points
     if (sampleCount > 0 && sampleCount <= 200) {
       float angleStep = (sampleCount > 1) ? (diffAngle / (sampleCount - 1)) : 0.0f;
       for (uint8_t i = 0; i < sampleCount; i++) {
@@ -229,9 +279,11 @@ inline uint16_t x3DrainUart() {
           s_accumCount++;
         }
       }
+    } else {
+      g_x3Diag.packetsRejected++;
     }
 
-    // 4) Trượt phần còn lại lên đầu
+    // 6) Trượt phần còn lại lên đầu
     if (s_bufLen >= packageLen) {
       memmove(s_buf, s_buf + packageLen, s_bufLen - packageLen);
       s_bufLen -= packageLen;
@@ -240,23 +292,39 @@ inline uint16_t x3DrainUart() {
     }
   }
 
-// === Rate-limited diagnostic log (chỉ in khi có vấn đề) ===
+  // === Rate-limited diagnostic log (chỉ in khi có vấn đề) ===
   if (nowMs - s_dbgLastMs > 1000) {
     s_dbgLastMs = nowMs;
     bool hasIssue = (g_x3Diag.bytesDropped > 0) ||
                     (g_x3Diag.syncLosses > 5) ||
-                    (g_x3Diag.checksumErrors > 0);
+                    (g_x3Diag.checksumErrors > 0) ||
+                    (g_x3Diag.scansPublished == 0);  // critical: no scans = bug
     if (hasIssue) {
-      Serial.printf("[X3-DIAG] bytesRead=%u drop=%u syncLoss=%u scan=%u avail=%d\n",
+      Serial.printf("[X3-DIAG] read=%u drop=%u sync=%u parsed=%u zero=%u scan=%u avail=%d\n",
                     (unsigned)g_x3Diag.bytesRead,
                     (unsigned)g_x3Diag.bytesDropped,
                     (unsigned)g_x3Diag.syncLosses,
+                    (unsigned)g_x3Diag.packetsParsed,
+                    (unsigned)g_x3Diag.zeroSamplePkts,
                     (unsigned)g_x3Diag.scansPublished,
                     Serial1.available());
+
+      // Hex dump 22 byte đầu của s_buf để debug protocol (chỉ khi scan=0
+      // — happy path không cần dump). Format như debug cũ để dễ compare.
+      static uint32_t s_dumpLastMs = 0;
+      if (g_x3Diag.scansPublished == 0 && (nowMs - s_dumpLastMs) > 5000) {
+        s_dumpLastMs = nowMs;
+        Serial.printf("[X3-HEX] first22=");
+        uint16_t n = (s_bufLen < 22) ? s_bufLen : 22;
+        for (uint16_t i = 0; i < n; i++) Serial.printf("%02X ", s_buf[i]);
+        Serial.println();
+      }
+
       // Reset counters để lần sau chỉ log delta mới (tránh spam)
       g_x3Diag.bytesDropped = 0;
       g_x3Diag.syncLosses = 0;
       g_x3Diag.checksumErrors = 0;
+      g_x3Diag.packetsRejected = 0;
     }
   }
 
@@ -320,7 +388,8 @@ struct X3Scan {
   bool scanReady;
 };
 struct X3Diag {
-  uint32_t bytesRead, bytesDropped, syncLosses, checksumErrors, scansPublished, lastDropLogMs;
+  uint32_t bytesRead, bytesDropped, syncLosses, checksumErrors,
+           scansPublished, zeroSamplePkts, packetsParsed, packetsRejected;
 };
 extern X3Scan g_x3Scan;
 extern X3Diag g_x3Diag;
