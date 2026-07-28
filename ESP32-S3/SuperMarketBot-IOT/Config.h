@@ -69,10 +69,9 @@
 #define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> Cắm vào chân RX của YDLIDAR (tránh 43/44 bị trùng Serial console)
 #define YDLIDAR_X3_RX           2   // ESP32 RX (GPIO 2) -> Cắm vào chân TX của YDLIDAR
 #define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
-#define YDLIDAR_X3_BAUD         115200  // Baudrate chuẩn của YDLIDAR X3 (firmware này không hỗ trợ đổi baud)
-                                          // X3 vẫn ở 115200 → ESP32 cũng 115200 → match → ổn định
-                                          // 115200 → ~349 pts/scan ổn định (parser đã OK)
-                                          // Để tăng pts: KHÔNG đổi baud, dùng sample rate 4kHz (đã làm)
+#define YDLIDAR_X3_BAUD         115200  // YDLIDAR X3 factory default baudrate.
+                                          // Thử 230400 trước — nếu first16 không có 0xAA 0x55 thì X3 ở 115200.
+                                          // 115200 → ~349 pts/scan ở sample rate 4kHz. Đủ cho SLAM.
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
 #define YDLIDAR_SCAN_BUFF_SIZE  4096  // Buffer bytes cho nhiều scan packet (tăng từ 1024)
 
