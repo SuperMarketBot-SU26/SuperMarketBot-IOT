@@ -106,12 +106,17 @@ static void cmd_vel_callback(const void *msgin) {
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
     // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
     // WebUI 'joy' update g_state.joyLastMs mỗi lần nhận (xem CtrlJson.h).
+    // FIX: when gating, explicitly call botStop() so any stale PWM from a
+    // previous /cmd_vel is cleared. Without this the wheels kept spinning at
+    // the last PWM value while the WebUI joystick was actively driving — and
+    // if the WebUI session crashed mid-joystick, the robot ran forever.
     const uint32_t nowMs = millis();
     const uint32_t joyAgeMs = (g_state.joyLastMs != 0)
         ? (nowMs - g_state.joyLastMs)
         : 0xFFFFFFFFu;
     if (joyAgeMs < 300u) {
-        return;  // WebUI đang giữ joystick, để nó điều khiển
+        ::botStop();
+        return;
     }
 #endif
 
@@ -138,6 +143,9 @@ static void cmd_vel_callback(const void *msgin) {
           Serial.printf("[cmd_vel] ROTATE ang=%.3f → in_pwm=%ld → out_pwm=%ld/1023\n",
                         ang, (long)pwm, (long)outPwm);
         }
+        // ROS2 đã thực sự điều khiển motor → đánh dấu để controlTask
+        // MODE_MANUAL bỏ qua (xem SuperMarketBot-IOT.ino case MODE_MANUAL).
+        g_state.cmd_velLastMs = nowMs;
         if (ang > 0) ::botRotateCW((uint16_t)pwm);
         else         ::botRotateCCW((uint16_t)pwm);
     } else if (fabs(lin) > 0.05f) {
@@ -203,6 +211,9 @@ static void cmd_vel_callback(const void *msgin) {
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
 
         const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
+        // ROS2 đã thực sự điều khiển motor → đánh dấu để controlTask
+        // MODE_MANUAL bỏ qua (xem SuperMarketBot-IOT.ino case MODE_MANUAL).
+        g_state.cmd_velLastMs = nowMs;
         ::motorApplyLayout(sp);
     } else {
         ::botStop();
@@ -232,10 +243,17 @@ static void fill_scan_msg() {
     // `intensities` is OPTIONAL in sensor_msgs/LaserScan (slam_toolbox ignores it),
     // so leave it empty (size=0) to save 8KB heap.
     if (g_scan_msg.ranges.data == NULL) {
-        const size_t total_bins = 360;  // Was 2000; heap too tight
+        // Down-sampled from 360 to 180: 360 * 4 = 1440 bytes ranges data
+        // pushes the CDR-encoded /scan over the default micro-ROS UDP MTU
+        // (~1500 B), and the agent fails to deserialize with
+        // "deserialization error processing WRITE_DATA submessage". 180 bins
+        // gives ~720 bytes + header, well under MTU. Angular resolution drops
+        // from 1° to 2° per bin — still adequate for slam_toolbox in a
+        // corridor (the X3 bins get duplicated into adjacent 1° bins anyway).
+        const size_t total_bins = 180;
         g_scan_msg.ranges.data = (float*)malloc(total_bins * sizeof(float));
         if (g_scan_msg.ranges.data == NULL) {
-            Serial.println("[scan] malloc(1440) FAILED — heap exhausted, skip /scan");
+            Serial.println("[scan] malloc(720) FAILED — heap exhausted, skip /scan");
             g_scan_msg.ranges.size = 0;
             g_scan_msg.ranges.capacity = 0;
             return;

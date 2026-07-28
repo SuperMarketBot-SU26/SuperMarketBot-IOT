@@ -28,6 +28,7 @@
 
 #include "Config.h"
 #include "SensorLayout.h"
+#include "Motors.h"           // v2.4: cần MotorId (MID_FL/FR) + g_motorDir[] cho encoder sign
 #include "Localization.h"
 
 #define ODOM_PERIOD_MS 100
@@ -133,15 +134,44 @@ inline void odomUpdate() {
   const float dt = (float)ODOM_PERIOD_MS / 1000.0f;
 
   // ---- 2) Quãng đường mỗi bên (m) ----
+  // v2.4 (2026-07-28): FIX direction-blind encoder.
+  //
+  // Hardware chỉ có 1 kênh encoder mỗi bánh (không có quadrature) → chỉ đếm
+  // xung, không phân biệt chiều. Encoder ISR chỉ ++, không bao giờ --.
+  //
+  // Bug: khi xoay tại chỗ (botRotateCW: trái +pwm, phải -pwm), cả 2 bánh
+  // đều quay → cả 2 encoder đều ++. Công thức cũ:
+  //     ds = (dsL + dsR) / 2  (cộng magnitude)
+  // → nghĩ robot đang TIẾN với vận tốc 2×1 bánh, gây teleport pose 5-15 m
+  // khi chỉ xoay 6s lệnh 0.4 rad/s (user-observed 2026-07-28).
+  //
+  // Fix: LẤY DẤU từ motor direction (g_motorDir[]). Mỗi bánh:
+  //   - Số xung = magnitude (encoder đo)
+  //   - Dấu     = motor command direction (hệ thống điều khiển biết)
+  // Khi 2 bánh quay ngược chiều nhau, ds tự triệt tiêu → ds = 0 cho rotation.
+  //
+  // Cẩn thận: g_motorDir[motorId] đã bao gồm motor inversion (g_motInv[])
+  // và motor scale (g_motorScale[]). Khi lastMotorSpeed[motorId] = 0 (stop),
+  // ta giữ ds sign = 0 để không tích phân.
   const float mPerTick = WHEEL_CIRC_M / ENC_PPR;
-  const float dsL = (float)dTicksL * mPerTick;   // có dấu (+ tiến, - lùi)
-  const float dsR = (float)dTicksR * mPerTick;
-  const float ds  = (dsL + dsR) * 0.5f;           // translation trung bình
+  // Encoder FL / FR dùng chung xung với left/right (Config.h:151-154):
+  //   FL=RL=ENC_L, FR=RR=ENC_R.
+  // Ta lấy direction từ motor FL (slot 0) cho bên trái, motor FR (slot 2) cho bên phải.
+  // BẢO THỦ: chỉ đổi dấu khi motor đã chạy đủ lâu (>200ms) để tránh trạng thái
+  // chuyển tiếp gây dấu sai. Nếu motor command gần 0 (brake/coast) → giữ ds=0.
+  const float dirL = (float)g_motorDir[MID_FL];   // -1 / 0 / +1
+  const float dirR = (float)g_motorDir[MID_FR];
+  const float dsL = (dirL == 0.f) ? 0.f : dirL * ((float)dTicksL * mPerTick);
+  const float dsR = (dirR == 0.f) ? 0.f : dirR * ((float)dTicksR * mPerTick);
+  const float ds  = (dsL + dsR) * 0.5f;           // translation trung bình (đã signed)
 
   // ---- 3) RPM thật ----
   // RPM = (xung/100ms) × (60s/100ms) / PPR = (xung × 600) / PPR
-  const float rpmL = ((float)dTicksL / dt) * 60.0f / ENC_PPR;
-  const float rpmR = ((float)dTicksR / dt) * 60.0f / ENC_PPR;
+  // v2.4: sign theo motor direction (cùng logic với dsL/dsR ở trên).
+  // Trước đây rpm_unsigned → RPM thường +6000 (cộng 2 bánh ngược dấu)
+  // → twist.twist.linear.x = 32 m/s khi xoay tại chỗ.
+  const float rpmL = dirL * ((float)dTicksL / dt) * 60.0f / ENC_PPR;
+  const float rpmR = dirR * ((float)dTicksR / dt) * 60.0f / ENC_PPR;
 
   // Lưu RPM vật lý (slot 0..3 = FL, RL, FR, RR).
   // Vì 4 bánh trái/phải dùng chung xung → set RPM cho cả 2 bánh cùng bên.

@@ -482,8 +482,15 @@ struct RobotState {
   /** Millis lần cuối nhận `{t:"joy"}` từ WebUI. cmd_vel_callback (MicroRos.h)
    *  dùng giá trị này để gate /cmd_vel từ ROS2: nếu joystick còn tươi (≤300ms)
    *  thì bỏ qua ROS2, để WebUI điều khiển. Ngược lại ROS2 Nav2 thắng tự động.
-   *  Cập nhật trong CtrlJson.h khi parse `t == "joy"`. */
+   *  Cậpập nhật trong CtrlJson.h khi parse `t == "joy"`. */
   volatile uint32_t joyLastMs;
+  /** Millis lần cuối ROS2 gửi /cmd_vel KHÔNG bị gate (tức là cmd_vel_callback
+   *  đã thực sự điều khiển motor, không phải bị botStop do WebUI gate).
+   *  controlTask MODE_MANUAL (SuperMarketBot-IOT.ino) dùng giá trị này để
+   *  biết ROS2 đang "own" motor và KHÔNG gọi botStop/botDrive — tránh race
+   *  với cmd_vel_callback ở tần suất 20Hz vs /cmd_vel (10Hz) gây jitter
+   *  PWM 0 ↔ PWM lệnh mỗi 50-100ms. Cập nhật trong MicroRos.h cmd_vel_callback. */
+  volatile uint32_t cmd_velLastMs;
   volatile uint16_t baseSpeed;    // 0..PWM_MAX — lái tay + mặc định khi chưa chỉnh auto
   volatile uint16_t autoBaseSpeed;// 0..PWM_MAX — tốc độ nền riêng cho tự hành (slider web)
   volatile uint16_t waypointBaseSpeed; // 0..PWM_MAX — tốc độ riêng cho Waypoint Nav (slider web)
