@@ -286,6 +286,12 @@ inline void tick() {
   /* --- FSM --- */
   switch (s.fsm) {
     case ST_CRUISE: {
+      // Tính tốc độ trước (dùng chung cho mọi nhánh)
+      uint16_t spd = g_state.waypointBaseSpeed;
+      if (spd == 0) spd = g_state.autoBaseSpeed;
+      if (spd == 0) spd = g_state.baseSpeed;
+      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
+
       // 1) US brake: nếu US trước quá gần → AVOID_US
       int16_t frontCm = obsFrontCm();
       if (obsCmValid(frontCm) && frontCm < (int16_t)(AUTO_EXPLORE_US_BRAKE_MM / 10)) {
@@ -293,36 +299,60 @@ inline void tick() {
         pidYawReset();
         s.fsm = ST_AVOID_US;
         s.stateEnterMs = now;
+        s.hasWallTarget = false;
         Serial.println(F("[AUTO-EXPLORE] Front US < 25cm → AVOID_US"));
         break;
       }
 
-      // 2) Bám tường phải: dùng US.PHẢI (khi có) hoặc LIDAR cung 60-120°
-      // Nếu mất tường phải (> 80cm) → SPIN_DETECT
+      // 2) Bám tường phải: dùng LIDAR cung 60-120°
       uint16_t rightMm = x3MinInArc(90.0f, 30.0f);    // cung 60-120° (phía phải)
-      if (rightMm < 100 || rightMm > 1500) {
-        // Mất tường phải → xoay tìm hướng mới
+
+      if (rightMm < 100) {
+        // Quá gần tường phải → xoay tìm hướng mới ngay
         botStop();
         pidYawReset();
         s.fsm = ST_SPIN_DETECT;
         s.stateEnterMs = now;
         s.spinStartHeading = g_pose.headingRad;
         s.hasSpinTarget = false;
-        Serial.println(F("[AUTO-EXPLORE] Mất tường phải → SPIN_DETECT"));
+        s.hasWallTarget = false;
+        Serial.println(F("[AUTO-EXPLORE] Quá gần tường phải → SPIN_DETECT"));
         break;
       }
 
-      // 3) Bám tường: nếu quá gần → rẽ phải nhẹ, nếu quá xa → rẽ trái nhẹ
+      if (rightMm > 1500) {
+        // Mất tường phải (hoặc LiDAR chưa có dữ liệu) → ĐI THẲNG tiến phía trước
+        // Chỉ chuyển SPIN_DETECT nếu đi thẳng > 3s mà vẫn không thấy tường
+        if (!s.hasWallTarget) {
+          s.wallTargetHeading = g_pose.headingRad;
+          s.hasWallTarget = true;
+          s.stateEnterMs = now;
+          Serial.println(F("[AUTO-EXPLORE] Mất tường phải → đi thẳng tìm tường..."));
+        }
+        if (now - s.stateEnterMs >= 3000) {
+          // Đã đi thẳng 3s mà vẫn không thấy tường → xoay tìm hướng mới
+          botStop();
+          pidYawReset();
+          s.fsm = ST_SPIN_DETECT;
+          s.stateEnterMs = now;
+          s.spinStartHeading = g_pose.headingRad;
+          s.hasSpinTarget = false;
+          s.hasWallTarget = false;
+          Serial.println(F("[AUTO-EXPLORE] Đi thẳng 3s không thấy tường → SPIN_DETECT"));
+          break;
+        }
+        // Đi thẳng giữ heading hiện tại
+        botDriveSmoothNormal(0, 100, spd);
+        break;
+      }
+
+      // 3) Có tường phải (100mm..1500mm) → Bám tường bình thường
+      s.hasWallTarget = false;   // Reset timer đi thẳng
       float wallErr = (float)rightMm - (float)AUTO_EXPLORE_MIN_WALL_DIST_MM;
       // wallErr > 0: quá xa (rẽ trái → steer âm với wall ở bên phải)
       // wallErr < 0: quá gần (rẽ phải → steer dương)
       float steer = -wallErr / 100.0f;        // scale: 100mm = 1.0 steer
       steer = constrain(steer, -40.0f, 40.0f);
-
-      uint16_t spd = g_state.waypointBaseSpeed;
-      if (spd == 0) spd = g_state.autoBaseSpeed;
-      if (spd == 0) spd = g_state.baseSpeed;
-      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
 
       // Đi thẳng + bẻ lái MƯỢT (giống manual) — qua botDriveSmoothNormal.
       botDriveSmoothNormal((int16_t)steer, 100, spd);
