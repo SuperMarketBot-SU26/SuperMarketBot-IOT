@@ -36,6 +36,15 @@ namespace imuFusion {
   inline void applySlamPose(float headingAbsRad);  // defined in ImuFusion.h
 }
 
+// v2.4 (2026-07-28): default IMU_FUSION_ENABLE = 1 nếu chưa include ImuFusion.h.
+// Localization locUpdate() cần biết EKF có bật hay không để quyết định có
+// cộng dTheta trực tiếp vào heading (legacy) hay để EKF quản lý (mới).
+// ImuFusion.h define IMU_FUSION_ENABLE kèm default 1 nếu user chưa set.
+#if !defined(IMU_FUSION_ENABLE)
+// Default same as ImuFusion.h: EKF bật by default.
+#define IMU_FUSION_ENABLE  1
+#endif
+
 #ifndef WHEEL_BASE_M
 #define WHEEL_BASE_M    0.365f  // khoảng cách tâm 2 bên bánh (m) — dùng cho dTheta khi lách
 #endif
@@ -175,8 +184,11 @@ inline void locUpdate(float dsL, float dsR, float dt) {
     if (dt <= 0.f || dt > 2.f) return;
   }
 
-  // Translation trung bình từ 2 encoder.
-  const float ds = (dsL + dsR) * 0.5f;
+  // Translation trung bình từ 2 encoder (đã signed: dương = tiến, âm = lùi).
+  // Bảo thủ: dùng ngưỡng rất nhỏ (0.5mm/100ms) để loại bỏ tick noise khi đứng yên,
+  // vì encoder 1-channel khi motor brake vẫn có thể tạo 1-2 tick / 100ms do rung.
+  const float dsRaw = (dsL + dsR) * 0.5f;
+  const float ds = (fabsf(dsRaw) < 0.0005f) ? 0.f : dsRaw;
 
   // dTheta từ chênh lệch 2 bánh (rad).
   //   arc = (dsR - dsL); góc = arc / WHEEL_BASE_M
@@ -189,13 +201,26 @@ inline void locUpdate(float dsL, float dsR, float dt) {
   g_pose.x += ds * cosf(h);
   g_pose.y += ds * sinf(h);
 
-  // Apply rotation từ encoder. Nếu chỉ truyền ds=0 (encoder tắt / PWM fallback),
-  // bỏ qua để không lan truyền sai số 0.
+  // v2.4 (2026-07-28): DROP direct heading += dTheta để khử double-counting.
+  //
+  // Trước đây locUpdate cộng dTheta trực tiếp vào g_pose.headingRad. Nhưng
+  // imuFusion::step() (gọi mỗi SAFE_LOOP_MS từ taskControl) đã predict heading
+  // bằng gyro và updateWheel bằng PWM-derived dθ. Sau khi locUpdate cộng
+  // thêm encoder-derived dθ, g_pose.headingRad có 2 nguồn quay (EKF + raw),
+  // hai nguồn KHÔNG giống nhau về mặt giá trị → drift heading, occasional
+  // quaternion flip khi crossing 0/2π wraparound (user-observed: 169° snap
+  // trong 100ms khi xoay 0.4 rad/s).
+  //
+  // Fix: BỎ direct += . Heading giờ chỉ do EKF quản lý (encoder dθ cho IMU
+  // fusion không còn cần vì ImuFusion vẫn tự tính từ leftPct/rightPct).
+#if !IMU_FUSION_ENABLE
+  // Legacy fallback (IMU off): giữ behavior cũ.
   if (dsL != 0.f || dsR != 0.f) {
     g_pose.headingRad += dTheta;
     while (g_pose.headingRad <  0.f)              g_pose.headingRad += 2.f * (float)M_PI;
     while (g_pose.headingRad >= 2.f * (float)M_PI) g_pose.headingRad -= 2.f * (float)M_PI;
   }
+#endif
 }
 
 /**

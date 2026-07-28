@@ -92,6 +92,7 @@ RobotState g_state = {
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
   .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
   .joyLastMs = 0,
+  .cmd_velLastMs = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
   .waypointBaseSpeed = 0,
@@ -425,6 +426,17 @@ static void taskControl(void *pvParams) {
     /* ── 5) Mode dispatch ─────────────────────────────────────────── */
     switch (g_state.mode) {
       case MODE_MANUAL: {
+        // Gate ROS2 ownership: nếu ROS2 cmd_vel vừa mới điều khiển motor (≤300ms)
+        // thì KHÔNG can thiệp — để cmd_vel_callback hoàn toàn sở hữu motor.
+        // Không có gate này, controlTask 20Hz sẽ xen vào giữa các tick cmd_vel
+        // 10Hz với botStop()/botDrive() — gây jitter PWM 0↔lệnh mỗi 50-100ms
+        // (WebManager joystick = 0 ở giữa là đường nặng nề nhất).
+        const uint32_t cvAgeMs = (g_state.cmd_velLastMs != 0)
+            ? (millis() - g_state.cmd_velLastMs)
+            : 0xFFFFFFFFu;
+        if (cvAgeMs < 300u) {
+            break;
+        }
         if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
           botStop();
         } else {
