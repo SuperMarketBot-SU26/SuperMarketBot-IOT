@@ -16,6 +16,9 @@
 #define MICROROS_H
 
 #include "Config.h"
+#include "PidController.h"   // heading lock: pidYawReset / pidYawCompute
+#include "WaypointNav.h"     // heading lock: wpNormalizeAngle
+#include "Localization.h"    // g_pose, g_imuEnabled (for IMU heading lock)
 #include <Arduino.h>
 
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
@@ -103,6 +106,11 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr int32_t ROS2_PWM_MIN     = 400;
     constexpr int32_t ROS2_PWM_MAX     = (int32_t)PWM_MAX;
 
+    // Heading lock static state — function-level scope so it's visible from
+    // both branches (forward branch uses it; else branch resets it).
+    static float s_tgtH = 0.f;
+    static bool  s_have = false;
+
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
     // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
     // WebUI 'joy' update g_state.joyLastMs mỗi lần nhận (xem CtrlJson.h).
@@ -122,18 +130,15 @@ static void cmd_vel_callback(const void *msgin) {
 
     if (fabs(ang) > 0.05f && fabs(lin) < 0.05f) {
         // ── Xoay tại chỗ ─────────────────────────────────────────────
-        // Map angular velocity (rad/s) → PWM trực tiếp, KHÔNG qua joystick
-        // curve. Trước đây `pwm = constrain(ang * 150, 30, 200)` → PWM tối
-        // đa 200, sau MIN_MOTOR_PWM mapping chỉ ~337/1023 — quá yếu để xoay
-        // robot trên mặt đất (bánh quay trên không nhưng stall khi có tải).
-        //
-        // Mapping: 0.05 rad/s → ROS2_PWM_MIN, 1.0 rad/s → PWM_MAX.
-        // ROS2_PWM_MIN = 400 đủ torque khởi động xoay trên mặt đất.
+        // Map angular velocity (rad/s) → PWM qua QUADRATIC CURVE (giống
+        // botDrive). ang=0.05 → PWM ~423, ang=0.10 → PWM ~492, ang=1.0 →
+        // PWM 1023. Low-end mượt cho Nav2 rotate-in-place quay chậm.
         const float angMag = fabsf(ang);
-        int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN_RADPS) /
-                                 (ROS2_ANG_MAX_RADPS - ROS2_ANG_MIN_RADPS)) *
-                                (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
-        if (pwm < ROS2_PWM_MIN) pwm = ROS2_PWM_MIN;
+        const float angNorm = (angMag < ROS2_ANG_MIN_RADPS) ? 0.f : (angMag / ROS2_ANG_MAX_RADPS);
+        const float angCurve = angNorm * angNorm;     // [0..1]
+        int32_t pwm = (angCurve > 0.f)
+            ? ROS2_PWM_MIN + (int32_t)(angCurve * (float)(ROS2_PWM_MAX - ROS2_PWM_MIN))
+            : 0;
         if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
         // Debug log — verify mapping mỗi 200ms trong lúc xoay.
         static uint32_t s_lastRotLog = 0;
@@ -150,19 +155,24 @@ static void cmd_vel_callback(const void *msgin) {
         else         ::botRotateCCW((uint16_t)pwm);
     } else if (fabs(lin) > 0.05f) {
         // ── Đi thẳng / rẽ trong khi tiến ──────────────────────────────
-        // Map linear velocity (m/s) → PWM thẳng, KHÔNG qua joystick curve.
-        // Trước đây `botDrive(0, throttle, 180)` với throttle=lin*200 đi qua
-        // quadratic curve: lin=0.20 (Nav2 desired_linear_vel) → throttle=40 →
-        // yCurve=16 → PWM=29. Sau MIN_MOTOR_PWM mapping chỉ ~194/1023, không
-        // đủ torque để vượt ma sát tĩnh.
+        // Map linear velocity (m/s) → PWM thẳng qua QUADRATIC CURVE (giống
+        // botDrive() trong Motors.h), giúp:
+        //   - Low-end mượt: lin=0.05 → PWM ~423, lin=0.10 → PWM ~492,
+        //     lin=0.26 → PWM 1023. Quan trọng cho Nav2 ramp tốc độ.
         //
-        // Mapping: 0.05 m/s → ROS2_PWM_MIN, 0.26 m/s (Nav2 max_vel_x) → PWM_MAX.
-        // Tuyến tính, đơn giản, dễ kiểm.
+        // Công thức (giống botDrive):
+        //   linNorm  = lin / LIN_MAX         ∈ [-1, 1]
+        //   linCurve = linNorm * |linNorm|   ∈ [-1, 1]  (x² × sign)
+        //   fwdPwm   = MIN + |linCurve| × (MAX - MIN)
+        //
+        // Khi chỉ xoay tại chỗ (lin < 0.05 và |ang| > 0.05) đã xử lý ở
+        // nhánh trên — không vào đây.
         const float linMag = fabsf(lin);
-        int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN_MPS) /
-                                    (ROS2_LIN_MAX_MPS - ROS2_LIN_MIN_MPS)) *
-                                   (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
-        if (fwdPwm < ROS2_PWM_MIN) fwdPwm = ROS2_PWM_MIN;
+        const float linNorm = (linMag < ROS2_LIN_MIN_MPS) ? 0.f : (linMag / ROS2_LIN_MAX_MPS);
+        const float linCurve = linNorm * linNorm;     // [0..1] magnitude sau curve
+        int32_t fwdPwm = (linCurve > 0.f)
+            ? ROS2_PWM_MIN + (int32_t)(linCurve * (float)(ROS2_PWM_MAX - ROS2_PWM_MIN))
+            : 0;
         if (fwdPwm > ROS2_PWM_MAX) fwdPwm = ROS2_PWM_MAX;
 
         // Tính PWM riêng từng bên cho kết hợp lin + ang (differential drive).
@@ -187,6 +197,53 @@ static void cmd_vel_callback(const void *msgin) {
         if (rightPwm < 0) rightPwm = 0;
         if (leftPwm  > ROS2_PWM_MAX) leftPwm  = ROS2_PWM_MAX;
         if (rightPwm > ROS2_PWM_MAX) rightPwm = ROS2_PWM_MAX;
+
+        // ── IMU heading lock (giống WebManager MODE_MANUAL) ────────────
+        // Khi Nav2 gửi ang ≈ 0 (muốn đi thẳng) nhưng sai lệch cơ khí khiến
+        // robot lệch hướng, IMU heading PID sẽ tự điều chỉnh chênh lệch
+        // PWM 2 bên để robot đi thẳng. Áp dụng khi:
+        //   - IMU enabled (g_imuEnabled)
+        //   - ang gần 0 (< 0.02 rad/s = ~1.1°/s)
+        //   - lin đủ lớn (đang thực sự di chuyển)
+        //   - s_tgtH đã lock 1 frame trước (s_have=true) — tránh lần đầu
+        //     tiên khi g_pose.headingRad vừa random (boot hoặc vừa init)
+        //     gây steer đột biến
+        //
+        // BỎ QUA khi |ang| >= 0.02 để không cản Nav2 xoay chủ động.
+        // PID state ở PidController.h (static); gọi 10Hz với dt_s=0.1 OK.
+        constexpr float HEADING_LOCK_ANG_THRESH = 0.02f;  // rad/s
+        constexpr float HEADING_LOCK_RELOCK = 0.436f;     // 25°
+        constexpr float HEADING_LOCK_STEER_MAX = 85.f;    // %
+        if (g_imuEnabled && fabsf(ang) < HEADING_LOCK_ANG_THRESH) {
+            if (!s_have) {
+                s_tgtH = g_pose.headingRad;
+                pidYawReset();
+                s_have = true;
+                // Skip steer application on first frame — bảo đảm steer=0
+                // ngay cả khi g_pose.headingRad không ổn định.
+            } else {
+                float dh = wpNormalizeAngle(g_pose.headingRad - s_tgtH);
+                if (fabsf(dh) > HEADING_LOCK_RELOCK) {
+                    s_tgtH = g_pose.headingRad;
+                    pidYawReset();
+                }
+                float steer = constrain(pidYawCompute(s_tgtH, g_pose.headingRad, 0.1f),
+                                        -HEADING_LOCK_STEER_MAX, HEADING_LOCK_STEER_MAX);
+                // Apply steer as % differential trên fwdPwm trước khi reverse.
+                // steer > 0 → rẽ phải → left faster, right slower.
+                int32_t steerPwm = (int32_t)((steer / 100.f) * (float)fwdPwm);
+                leftPwm  = fwdPwm + steerPwm;
+                rightPwm = fwdPwm - steerPwm;
+                if (leftPwm  < 0) leftPwm  = 0;
+                if (rightPwm < 0) rightPwm = 0;
+                if (leftPwm  > ROS2_PWM_MAX) leftPwm  = ROS2_PWM_MAX;
+                if (rightPwm > ROS2_PWM_MAX) rightPwm = ROS2_PWM_MAX;
+            }
+        } else {
+            // Nav2 đang xoay chủ động → reset target để lần tới đi thẳng
+            // lại có heading reference tươi.
+            s_have = false;
+        }
 
         // Đảo chiều nếu lin âm (lùi)
         if (lin < 0) {
@@ -216,6 +273,9 @@ static void cmd_vel_callback(const void *msgin) {
         g_state.cmd_velLastMs = nowMs;
         ::motorApplyLayout(sp);
     } else {
+        // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
+        // lần tới di chuyển có target tươi.
+        s_have = false;
         ::botStop();
     }
 }
@@ -503,7 +563,15 @@ inline bool init() {
     );
 
     // 5. Subscribers
-    rclc_subscription_init_default(
+    // /cmd_vel: BEST_EFFORT, depth=1. A stale velocity command that arrives
+    // late (WiFi jitter, DDS retransmit) is unsafe to replay — it could
+    // resume a high-throttle PWM that was issued before a stop or ESTOP.
+    // The watchdog in spin() (500 ms) and MODE_MANUAL cvAgeMs gate (300 ms)
+    // are the safety net when commands stop arriving. supervisor.py now
+    // sends /cmd_vel via /cmd_vel_manual (distinct from /cmd_vel_out),
+    // so loopback no longer poisons the watchdog.
+    // NOTE: rclc_subscription_init_best_effort uses depth=1 by default.
+    rclc_subscription_init_best_effort(
         &g_cmd_vel_sub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/cmd_vel"
