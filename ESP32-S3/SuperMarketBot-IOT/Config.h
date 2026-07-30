@@ -47,18 +47,15 @@
  
  #define M_STBY        47    // Standby chung cho 2 TB6612
  
- // TF-Luna đã bỏ hoàn toàn (2026-07-30).
- // YDLIDAR X3 dùng Serial1: ESP32 RX=GPIO43 (nhận từ YDLIDAR TX),
- //                          ESP32 TX=GPIO1  (gửi lệnh tới YDLIDAR RX).
- // GPIO 43 là chân U1RXD input-only; GPIO 44 input-only nên dùng GPIO 1 cho TX.
+// YDLIDAR X3: ESP32 TX=GPIO43 -> YDLIDAR RX,  ESP32 RX=GPIO44 <- YDLIDAR TX
  #define LIDAR_MAX_CM  800
  
  /* -------------------- YDLIDAR X3 (360°, 30m, SLAM) ------------------ */
  #define USE_YDLIDAR_X3          1   // Bật YDLIDAR X3
- #define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> RX của YDLIDAR
- #define YDLIDAR_X3_RX          44   // ESP32 RX (GPIO 44) -> TX của YDLIDAR
+ #define YDLIDAR_X3_TX           44  // ESP32 RX (GPIO 44) -> TX của YDLIDAR
+ #define YDLIDAR_X3_RX           1   // ESP32 TX (GPIO 1) -> RX của YDLIDAR
  #define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
- #define YDLIDAR_X3_BAUD         115200  // YDLIDAR X3 factory default baudrate
+ #define YDLIDAR_X3_BAUD         115200  // YDLIDAR X3 baud rate (try 115200 if issues)
  #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
  #define YDLIDAR_SCAN_BUFF_SIZE  4096  // Buffer bytes cho nhiều scan packet (tăng từ 1024)
  

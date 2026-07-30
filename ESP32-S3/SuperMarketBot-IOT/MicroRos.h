@@ -96,7 +96,7 @@ static void cmd_vel_callback(const void *msgin) {
 
     g_state.cmd_velLastMs = nowMs;
     // Set moving flag: true if this cmd_vel has actual motion, false if stop
-    g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
+    g_state.cmd_velMoving = (fabs(lin) > 0.05f || fabs(ang) > 0.05f);
     // Debug: log each incoming cmd_vel (throttled)
     static uint32_t s_lastLog = 0;
     if (nowMs - s_lastLog > 500u) {
@@ -159,7 +159,6 @@ static void cmd_vel_callback(const void *msgin) {
     } else {
         // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
         // lần tới di chuyển có target tươi.
-        s_have = false;
         ::botStop();
     }
 }
@@ -213,16 +212,8 @@ static void fill_scan_msg() {
 }
 
 // ============================================================
-// FILL Odometry message từ g_pose (Localization) + encoder + IMU.
-// v2.1 (2026-07-27): FIX zero angular_velocity bug.
-//
-// Bug trước đây: twist.twist.angular.z = 0.0f (hardcode) → EKF
-// robot_localization fusion sai → RViz không xoay theo robot.
-// Fix: angular.z = (Δheading EKF) / dt trong khoảng giữa 2 lần publish.
+// FILL Odometry message
 // ============================================================
-static uint32_t s_odomPrevMs = 0;
-static float    s_odomPrevHeading = 0.f;
-
 static void fill_odom_msg() {
     const Pose2D &pose = g_pose;
 
