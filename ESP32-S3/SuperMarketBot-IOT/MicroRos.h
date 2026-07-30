@@ -16,6 +16,9 @@
 #define MICROROS_H
 
 #include "Config.h"
+#include "PidController.h"   // heading lock: pidYawReset / pidYawCompute
+#include "WaypointNav.h"     // heading lock: wpNormalizeAngle
+#include "Localization.h"    // g_pose, g_imuEnabled (for IMU heading lock)
 #include <Arduino.h>
 
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
@@ -23,6 +26,7 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>  // v2.1: rmw_uros_sync_session + epoch_millis
 
 // Message types
 #include <sensor_msgs/msg/laser_scan.h>
@@ -148,8 +152,14 @@ static void cmd_vel_callback(const void *msgin) {
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
         const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
+        // ROS2 đã thực sự điều khiển motor → đánh dấu để controlTask
+        // MODE_MANUAL bỏ qua (xem SuperMarketBot-IOT.ino case MODE_MANUAL).
+        g_state.cmd_velLastMs = nowMs;
         ::motorApplyLayout(sp);
     } else {
+        // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
+        // lần tới di chuyển có target tươi.
+        s_have = false;
         ::botStop();
     }
 }
@@ -158,6 +168,7 @@ static void cmd_vel_callback(const void *msgin) {
 // FILL LaserScan message từ g_x3Scan
 // ============================================================
 static void fill_scan_msg() {
+    // Update header string fields on every publish
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
     g_scan_msg.header.frame_id.size = 11;
     g_scan_msg.header.frame_id.capacity = 12;
@@ -191,9 +202,9 @@ static void fill_scan_msg() {
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;
         if (p.quality < 10) continue;
 
-        int idx = (int)(p.angleRad / (2.0f * M_PI) * 360.0f);
-        if (idx < 0) idx += 360;
-        if (idx >= 360) idx = 359;
+        int idx = (int)(p.angleRad / (2.0f * M_PI) * (float)g_scan_msg.ranges.size);
+        if (idx < 0) idx += g_scan_msg.ranges.size;
+        if (idx >= (int)g_scan_msg.ranges.size) idx = g_scan_msg.ranges.size - 1;
 
         float dist_m = (float)p.distanceMm / 1000.0f;
         float &slot = g_scan_msg.ranges.data[idx];
@@ -202,11 +213,20 @@ static void fill_scan_msg() {
 }
 
 // ============================================================
-// FILL Odometry message từ g_pose (encoder + IMU)
+// FILL Odometry message từ g_pose (Localization) + encoder + IMU.
+// v2.1 (2026-07-27): FIX zero angular_velocity bug.
+//
+// Bug trước đây: twist.twist.angular.z = 0.0f (hardcode) → EKF
+// robot_localization fusion sai → RViz không xoay theo robot.
+// Fix: angular.z = (Δheading EKF) / dt trong khoảng giữa 2 lần publish.
 // ============================================================
+static uint32_t s_odomPrevMs = 0;
+static float    s_odomPrevHeading = 0.f;
+
 static void fill_odom_msg() {
     const Pose2D &pose = g_pose;
 
+    // ---- Header ----
     g_odom_msg.header.frame_id.data = (char*)"odom";
     g_odom_msg.header.frame_id.size = 4;
     g_odom_msg.header.frame_id.capacity = 5;
@@ -225,7 +245,7 @@ static void fill_odom_msg() {
     g_odom_msg.pose.pose.orientation.x = 0.0f;
     g_odom_msg.pose.pose.orientation.y = 0.0f;
     g_odom_msg.pose.pose.orientation.z = sinf(h);
-    g_odom_msg.pose.pose.orientation.w = cosf(h);
+    g_odom_msg.pose.pose.orientation.w  = cosf(h);
 
     const float wheelRps = ((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f;
     const float linearMps = wheelRps * (float)WHEEL_CIRC_M;
@@ -266,6 +286,9 @@ static void fill_odom_msg() {
 // ============================================================
 // FILL Imu message
 // ============================================================
+static uint32_t s_imuPrevGyroZ_ms __attribute__((unused)) = 0;
+static float    s_imuPrevGyroZ_radps __attribute__((unused)) = 0.f;
+
 static void fill_imu_msg() {
     const Pose2D &pose = g_pose;
 

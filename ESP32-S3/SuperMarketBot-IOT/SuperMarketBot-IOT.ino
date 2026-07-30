@@ -49,6 +49,20 @@
 #endif
 #include "esp_heap_caps.h"
 
+// Forward declarations for task functions (defined below setup() / loop())
+static void taskControl(void *pvParams);
+static void taskWebIO(void *pvParams);
+static void taskMQTT(void *pvParams);
+#if USE_YDLIDAR_X3
+// taskX3 is defined inline in YdlidarX3.h — no forward declaration needed here.
+#endif
+// taskMicroRos: dedicated FreeRTOS task for micro-ROS DDS spin.
+// Separating it from taskControl (which drives motors) means that even if
+// rclc_executor_spin_some() blocks for seconds during a WiFi/DDS reconnect,
+// the motor control loop still runs every SAFE_LOOP_MS on the same tick
+// schedule and the hardware watchdog keeps getting fed.
+static void taskMicroRos(void *pvParams);
+
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
 static void printMemInfo() {
   Serial.println(F("--- Bộ nhớ (ESP, runtime) ---"));
@@ -92,6 +106,7 @@ RobotState g_state = {
   .distFL = 0, .distRL = 0, .distFR = 0, .distRR = 0,
   .cmdX = 0, .cmdY = 0, .cmdStrafe = 0,
   .joyLastMs = 0,
+  .cmd_velLastMs = 0,
   .baseSpeed = 0,
   .autoBaseSpeed = 0,
   .waypointBaseSpeed = 0,
@@ -287,14 +302,75 @@ static void autoNavigateAvoidance() {
  *       - MODE_WAYPOINT: wpNavTick() — Pure Pursuit + OA + Align.
  *       - MODE_LINE    : lineDecoderUpdate() — TCRT5000 8-ch line tracking.
  * =================================================================== */
+
+// ── Task: micro-ROS DDS spin (runs on Core 1, priority 4) ───────────────
+// Shares Core 1 with taskControl (priority 5) and taskMQTT (priority 1).
+// We run at a lower priority than taskControl so the motor loop always preempts
+// us when needed. The rclc executor's internal timeout (5 ms per spin_some)
+// is short enough that it yields frequently and doesn't starve taskControl.
+static void taskMicroRos(void *pvParams) {
+  (void)pvParams;
+  Serial.println(F("[taskMicroRos] Started on Core 1"));
+
+  while (true) {
+    // microRos::tick() calls rclc_executor_spin_some() (5 ms timeout),
+    // then runs the 500 ms /cmd_vel watchdog, then publishes /scan @ 10 Hz,
+    // /odom @ 30 Hz, /imu/data @ 30 Hz. It must stay inside the if
+    // (g_initialized) guard so it never runs before micro-ROS is ready.
+    microRos::tick();
+    // No vTaskDelay — rclc_executor_spin_some() is the yield point.
+    // The executor's internal RCL_MS_TO_NS(5) timeout means it blocks for
+    // at most 5 ms before returning, giving taskControl plenty of chances
+    // to preempt on its 50 ms tick.
+  }
+  // Unreachable — loop forever. The task is deleted by FreeRTOS only on
+  // a catastrophic panic, in which case the hardware watchdog fires first.
+}
+
 static void taskControl(void *pvParams) {
   const TickType_t xPeriod = pdMS_TO_TICKS(SAFE_LOOP_MS);
   TickType_t xLastWake = xTaskGetTickCount();
+  uint32_t s_lastLoopMs = millis();  // track actual loop period for PID dt
 
   TickType_t odomTick = xTaskGetTickCount();
 
+  // Register this task with the hardware watchdog. esp_task_wdt_init()
+  // was called in setup() after microRos::init(). The watchdog resets every
+  // SAFE_LOOP_MS = 50 ms in the loop below — well inside the 5 s window.
+  TaskHandle_t me = xTaskGetCurrentTaskHandle();
+  esp_err_t add_err = esp_task_wdt_add(me);
+  Serial.printf("[WDT] taskControl add result: %s (handle=%p)\n", esp_err_to_name(add_err), me);
+
   while (true) {
-    /* ── Guard: 12s đầu luôn MANUAL, không cho tự chạy ───────────── */
+    uint32_t loopStartMs = millis();
+    uint32_t dtMs = (loopStartMs >= s_lastLoopMs) ? (loopStartMs - s_lastLoopMs) : 0;
+    if (dtMs > 200) dtMs = 200;   // cap: avoid huge dt on scheduler hiccup
+    const float dt_s = (float)dtMs * 0.001f;
+
+    s_lastLoopMs = loopStartMs;
+
+    // DEBUG: periodic diagnostics (every 5s)
+    {
+      static uint32_t s_lastDiag = 0;
+      if (loopStartMs - s_lastDiag > 5000) {
+        s_lastDiag = loopStartMs;
+        Serial.printf("[DIAG] dtMs=%lu dt_s=%.4f freeheap=%u wifi=%s\n",
+            (unsigned long)dtMs, (double)dt_s,
+            (unsigned)esp_get_free_heap_size(),
+            WiFi.status() == WL_CONNECTED ? "conn" : "DISC");
+      }
+    }
+
+    // Feed hardware watchdog — catches cases where taskControl is delayed
+    // (e.g., rclc_executor_spin_some blocking in micro-ROS task) for >5 s.
+    esp_err_t rst_err = esp_task_wdt_reset();
+    if (rst_err != ESP_OK) {
+      static uint32_t s_last_warn = 0;
+      if (millis() - s_last_warn > 5000) {
+        Serial.printf("[WDT] reset error: %s\n", esp_err_to_name(rst_err));
+        s_last_warn = millis();
+      }
+    }
     if (millis() < BOOT_GUARD_MS) {
       if (g_state.mode != MODE_MANUAL) {
         robotForceManualStop();
@@ -402,7 +478,8 @@ static void taskControl(void *pvParams) {
     sensorsPollLidar();
 #endif
 #if USE_YDLIDAR_X3
-    x3Poll();
+    // NOTE: LiDAR drain đã chuyển sang taskX3 riêng (xem setup()).
+    // Task chạy priority 6, period 5ms — drain UART không block control loop.
 #endif
     sensorsPollUS();
 
@@ -460,6 +537,8 @@ static void taskControl(void *pvParams) {
               s_tgtH = g_pose.headingRad;
               pidYawReset();
               s_have = true;
+              Serial.printf("[HLK] activated — tgtH=%.3f (IMU enabled=%d)\n",
+                  (double)s_tgtH, g_imuEnabled);
             }
             /* Nếu drift quá 25° → re-lock */
             float dh = wpNormalizeAngle(g_pose.headingRad - s_tgtH);
@@ -467,11 +546,26 @@ static void taskControl(void *pvParams) {
               s_tgtH = g_pose.headingRad;
               pidYawReset();
             }
-            float dt_s = (float)SAFE_LOOP_MS / 1000.f;
             float steer = constrain(pidYawCompute(s_tgtH, g_pose.headingRad, dt_s), -85.f, 85.f);
+            // DEBUG: log every 2s when heading lock is active
+            {
+              static uint32_t s_lastDebug = 0;
+              uint32_t now = millis();
+              if (now - s_lastDebug > 2000) {
+                float err = wpNormalizeAngle(s_tgtH - g_pose.headingRad);
+                Serial.printf("[HLK] tgt=%.3f cur=%.3f err=%.3f steer=%.1f s_have=%d\n",
+                    (double)s_tgtH, (double)g_pose.headingRad, (double)err, (double)steer, s_have);
+                s_lastDebug = now;
+              }
+            }
             botDrive((int16_t)steer, g_state.cmdY, g_state.baseSpeed);
           } else {
-            s_have = false;
+            // Heading lock only active for pure fwd/back. Any turn or stop → reset.
+            if (s_have) {
+              pidYawReset();
+              s_have = false;
+              Serial.println(F("[HLK] deactivated — PID reset"));
+            }
             // Nếu có xoay hướng (cmdX != 0), ưu tiên nâng công suất theo g_state.rotateBaseSpeed (slider Xoay Hướng)
             uint16_t baseSpd = g_state.baseSpeed;
             uint16_t activeSpeed = baseSpd;
@@ -504,12 +598,11 @@ static void taskControl(void *pvParams) {
 #endif
     }
 
-    // ── micro-ROS spin (handles /cmd_vel callback + publishes /scan,/odom,/imu) ──
-#if USE_MICRO_ROS
-    microRos::tick();
-#endif
-
     vTaskDelayUntil(&xLastWake, xPeriod);
+    uint32_t nowMs = millis();
+    uint32_t loopMs = nowMs - s_lastLoopMs;
+    s_lastLoopMs = nowMs;
+    (void)loopMs;  // future: expose via diagnostics if needed
   }
 }
 
@@ -581,7 +674,9 @@ static void taskMQTT(void *pvParams) {
  *  setup() — Chạy trên Core 1 (Arduino default)
  * =================================================================== */
 void setup() {
-  // Vô hiệu hóa Task Watchdog toàn hệ thống để tránh bị reset do TLS handshake quá lâu
+  // Vô hiệu hóa Task Watchdog trong quá trình boot để tránh reset do
+  // TLS handshake hoặc WiFi kết nối lâu. Sẽ được bật lại SAU khi mọi thứ
+  // đã initialize xong (sau microRos::init).
   esp_task_wdt_deinit();
 
   g_logQueue = xQueueCreate(64, sizeof(LogMessage));
@@ -656,12 +751,26 @@ void setup() {
     nullptr, 1
   );
 
-  // Core 1: Điều khiển — stack 8KB, priority 5 (real-time)
+#if USE_YDLIDAR_X3
+  // Core 1: LiDAR X3 — priority 6 (cao nhất, real-time UART drain 5ms period)
+  // Fix lỗi "tụt pts khi ROS2 lên": drain UART trong task riêng, không bị
+  // micro-ROS agent hay MQTT block. FIFO đầy = mất bytes = X3 resync = pts giảm.
   xTaskCreatePinnedToCore(
-    taskControl, "Control",
-    8192, nullptr, 5,
+    taskX3, "LidarX3",
+    4096, nullptr, 6,
     nullptr, 1
   );
+#endif
+
+  // WDT init BEFORE all tasks so add() always succeeds. FreeRTOS may schedule
+  // as soon as a task is created, so init must be first.
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 5000,
+      .idle_core_mask = 0,
+      .trigger_panic = false,
+  };
+  esp_err_t wdt_err = esp_task_wdt_init(&wdt_config);
+  Serial.printf("[Boot] WDT init: %s\n", esp_err_to_name(wdt_err));
 
   Serial.println(F("[Boot] Tasks created. Robot ready!"));
   Serial.printf("[Boot] Dashboard:  http://%s\n", WiFi.softAPIP().toString().c_str());
@@ -670,17 +779,37 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf(F("[Boot] STA IP:     %s  (MQTT broker: %s:%d)\n"),
                   WiFi.localIP().toString().c_str(), MQTT_BROKER_HOST, (int)MQTT_BROKER_PORT);
+  } else {
+    Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
+  }
+#endif
+
+  // Core 1: Điều khiển — stack 8KB, priority 5 (real-time)
+  xTaskCreatePinnedToCore(
+    taskControl, "Control",
+    8192, nullptr, 5,
+    nullptr, 1
+  );
+  Serial.println(F("[Boot] taskControl created on Core 1."));
+
+#if WIFI_STA_ENABLE
+  if (WiFi.status() == WL_CONNECTED) {
     // ── micro-ROS init (after WiFi STA is up) ────────────────────────
 #if USE_MICRO_ROS
     Serial.println(F("[Boot] Initializing micro-ROS..."));
     if (microRos::init()) {
       Serial.println(F("[Boot] micro-ROS initialized SUCCESS."));
+      BaseType_t mr = xTaskCreatePinnedToCore(
+          taskMicroRos, "MicroRos",
+          8192, nullptr, 4,
+          nullptr, 1
+      );
+      Serial.printf(F("[Boot] taskMicroRos %s on Core 1.\n"),
+          (mr == pdPASS) ? "created" : "FAILED");
     } else {
-      Serial.println(F("[Boot] micro-ROS FAILED — will retry in taskControl."));
+      Serial.println(F("[Boot] micro-ROS FAILED."));
     }
 #endif
-  } else {
-    Serial.println(F("[Boot] STA: CHUA ket noi — MQTT disabled"));
   }
 #endif
   printMemInfo();
