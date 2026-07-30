@@ -19,8 +19,7 @@
 #include <Arduino.h>
 
 #if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
-// Bật micro-ROS: Hãy cài thư viện micro_ros_arduino vào Arduino IDE và bỏ comment 5 dòng dưới:
- #include <micro_ros_arduino.h>
+#include <micro_ros_arduino.h>
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
@@ -30,22 +29,15 @@
 #include <nav_msgs/msg/odometry.h>
 #include <geometry_msgs/msg/twist.h>
 #include <sensor_msgs/msg/imu.h>
-#include <tf2_msgs/msg/tf_message.h>
 
 // WiFi transport (UDP)
 #include <WiFi.h>
 
-// ============================================================
-// CONFIG
-// ============================================================
-// Đặt IP Ubuntu chạy micro-ros-agent
-// Tìm bằng: ip addr show  → inet 192.168.x.x
-#define MICRO_ROS_AGENT_IP    "192.168.137.69"
-#define MICRO_ROS_AGENT_PORT  8888
-
-// WiFi credentials (set trong Config.h hoặc hardcode)
-// #define WIFI_SSID "your_ssid"
-// #define WIFI_PASS "your_pass"
+// Forward declarations — actual types defined in YdlidarX3.h / Localization.h
+// Placed at GLOBAL scope (NOT inside microRos namespace) so the linker
+// correctly finds the definitions in YdlidarX3.h / Localization.h.
+extern struct X3Scan g_x3Scan;
+extern struct Pose2D g_pose;
 
 namespace microRos {
 
@@ -59,7 +51,6 @@ static rclc_executor_t  g_executor;
 static rcl_publisher_t  g_scan_pub;
 static rcl_publisher_t  g_odom_pub;
 static rcl_publisher_t  g_imu_pub;
-static rcl_publisher_t  g_tf_pub;
 
 // Subscribers
 static rcl_subscription_t g_cmd_vel_sub;
@@ -69,7 +60,6 @@ static sensor_msgs__msg__LaserScan  g_scan_msg;
 static nav_msgs__msg__Odometry      g_odom_msg;
 static sensor_msgs__msg__Imu        g_imu_msg;
 static geometry_msgs__msg__Twist    g_cmd_vel_msg;
-static tf2_msgs__msg__TFMessage     g_tf_msg;
 
 // State
 static bool   g_initialized = false;
@@ -79,101 +69,70 @@ static uint32_t g_last_scan_ms = 0;
 static uint32_t g_last_odom_ms = 0;
 static uint32_t g_last_imu_ms = 0;
 
+// Odometry angular velocity state
+static uint32_t s_odomPrevMs = 0;
+static float    s_odomPrevHeading = 0.f;
+
 // ============================================================
 // CALLBACK: nhận /cmd_vel từ ROS2 → điều khiển motor
 // ============================================================
-// Sửa: /cmd_vel từ ROS2 chỉ có hiệu lực khi WebUI KHÔNG đang gửi joystick.
-// Lý do: WebUI gửi `{t:"joy"}` thẳng vào g_state.cmdX/Y/Strafe (Core 0 WS),
-// controlTask (Core 1) đọc cmdX/Y đó mỗi 20ms để gọi botDrive. Đường
-// micro-ROS /cmd_vel (supervisor publish 1Hz) gọi botStop/botDrive ở context
-// khác, đè lên lệnh WebUI.
-// Hai đường không thể cùng chạy ổn định vì tần suất 20ms vs 5-10Hz:
-// - Nếu gate theo MODE_MANUAL: Nav2 vẫn không lái được vì ESP32 firmware
-//   g_state.mode không tự đổi khi ROS2 nav bắt đầu.
-// - Nếu gate theo "joy còn tươi" (≤300ms): tay lái giữ → gate đóng →
-//   WebUI thắng; tay nhả → gate mở → ROS2 Nav2 thắng tự động.
-// Threshold 300ms phù hợp với WebUI publish joystick ở ~10Hz (chu kỳ 100ms)
-// — dưới 3 lần drop liên tiếp thì coi như vẫn đang giữ.
 static void cmd_vel_callback(const void *msgin) {
     const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
-    float lin = msg->linear.x;   // m/s forward
-    float ang = msg->angular.z;  // rad/s rotation
+    float lin = msg->linear.x;
+    float ang = msg->angular.z;
 
-#if defined(USE_MICRO_ROS) && (USE_MICRO_ROS == 1)
     // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
-    // WebUI 'joy' update g_state.joyLastMs mỗi lần nhận (xem CtrlJson.h).
+    // Threshold 300ms phù hợp với WebUI publish joystick ở ~10Hz.
     const uint32_t nowMs = millis();
     const uint32_t joyAgeMs = (g_state.joyLastMs != 0)
-        ? (nowMs - g_state.joyLastMs)
-        : 0xFFFFFFFFu;
+        ? (nowMs - g_state.joyLastMs) : 0xFFFFFFFFu;
     if (joyAgeMs < 300u) {
-        return;  // WebUI đang giữ joystick, để nó điều khiển
+        return;
     }
-#endif
 
-    if (fabs(ang) > 0.05f && fabs(lin) < 0.05f) {
-        // ── Xoay tại chỗ ─────────────────────────────────────────────
-        // Map angular velocity (rad/s) → PWM trực tiếp, KHÔNG qua joystick
-        // curve. Trước đây `pwm = constrain(ang * 150, 30, 200)` → PWM tối
-        // đa 200, sau MIN_MOTOR_PWM mapping chỉ ~337/1023 — quá yếu để xoay
-        // robot trên mặt đất (bánh quay trên không nhưng stall khi có tải).
-        //
-        // Mapping mới: 0.05 rad/s → ROS2_PWM_MIN, 1.0 rad/s → PWM_MAX.
-        // ROS2_PWM_MIN = 400 đủ torque khởi động xoay trên mặt đất.
-        constexpr float ROS2_ANG_MIN_RADPS = 0.05f;
-        constexpr float ROS2_ANG_MAX_RADPS = 1.00f;
-        constexpr int32_t ROS2_PWM_MIN = 400;
-        constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
+    g_state.cmd_velLastMs = nowMs;
+    // Set moving flag: true if this cmd_vel has actual motion, false if stop
+    g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
+    // Debug: log each incoming cmd_vel (throttled)
+    static uint32_t s_lastLog = 0;
+    if (nowMs - s_lastLog > 500u) {
+        s_lastLog = nowMs;
+        Serial.printf("[uROS-cb] lin=%.3f ang=%.3f → teleopActive\n", lin, ang);
+    }
+
+    constexpr float ROS2_ANG_MIN = 0.05f;
+    constexpr float ROS2_ANG_MAX = 1.00f;
+    constexpr float ROS2_LIN_MIN = 0.05f;
+    constexpr float ROS2_LIN_MAX = 0.26f;
+    constexpr int32_t ROS2_PWM_MIN = 400;
+    constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
+
+    if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < ROS2_LIN_MIN) {
+        // ── Xoay tại chỗ (linear map) ─────────────────────────────
         const float angMag = fabsf(ang);
-        int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN_RADPS) /
-                                 (ROS2_ANG_MAX_RADPS - ROS2_ANG_MIN_RADPS)) *
+        int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
+                                 (ROS2_ANG_MAX - ROS2_ANG_MIN)) *
                                 (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
         if (pwm < ROS2_PWM_MIN) pwm = ROS2_PWM_MIN;
         if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
-        // Debug log — verify mapping mỗi 200ms trong lúc xoay.
-        static uint32_t s_lastRotLog = 0;
-        if (millis() - s_lastRotLog > 200u) {
-          s_lastRotLog = millis();
-          int32_t outPwm = 130 + (pwm * (1023 - 130)) / 1023;
-          Serial.printf("[cmd_vel] ROTATE ang=%.3f → in_pwm=%ld → out_pwm=%ld/1023\n",
-                        ang, (long)pwm, (long)outPwm);
-        }
         if (ang > 0) ::botRotateCW((uint16_t)pwm);
         else         ::botRotateCCW((uint16_t)pwm);
-    } else if (fabs(lin) > 0.05f) {
-        // ── Đi thẳng / rẽ trong khi tiến ──────────────────────────────
-        // Map linear velocity (m/s) → PWM thẳng, KHÔNG qua joystick curve.
-        // Trước đây `botDrive(0, throttle, 180)` với throttle=lin*200 đi qua
-        // quadratic curve: lin=0.20 (Nav2 desired_linear_vel) → throttle=40 →
-        // yCurve=16 → PWM=29. Sau MIN_MOTOR_PWM mapping chỉ ~194/1023, không
-        // đủ torque để vượt ma sát tĩnh.
-        //
-        // Mapping mới: 0.05 m/s → ROS2_PWM_MIN, 0.26 m/s (Nav2 max_vel_x) →
-        // PWM_MAX. Tuyến tính, đơn giản, dễ kiểm.
-        constexpr float ROS2_LIN_MIN_MPS = 0.05f;
-        constexpr float ROS2_LIN_MAX_MPS = 0.26f;  // match Nav2 max_vel_x
+    } else if (fabs(lin) > ROS2_LIN_MIN) {
+        // ── Đi thẳng / rẽ (linear map) ─────────────────────────────
         const float linMag = fabsf(lin);
-        int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN_MPS) /
-                                    (ROS2_LIN_MAX_MPS - ROS2_LIN_MIN_MPS)) *
-                                   (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
+        int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN) /
+                                     (ROS2_LIN_MAX - ROS2_LIN_MIN)) *
+                                    (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
         if (fwdPwm < ROS2_PWM_MIN) fwdPwm = ROS2_PWM_MIN;
         if (fwdPwm > ROS2_PWM_MAX) fwdPwm = ROS2_PWM_MAX;
 
-        // Tính PWM riêng từng bên cho kết hợp lin + ang (differential drive).
-        // Tỉ lệ ang/lin → chênh PWM 2 bên. Với lin nhỏ nhất (0.05 m/s) và ang
-        // max (1 rad/s), chênh có thể vượt fwdPwm → cap về 0 cho bên lùi.
-        // Nav2 hầu như không gửi lin rất nhỏ + ang lớn cùng lúc (controller
-        // giảm lin khi xoay), nên đây là trường hợp hiếm.
-        int32_t rotPwm = (int32_t)(fabsf(ang) *
-                                   (ROS2_PWM_MAX / ROS2_ANG_MAX_RADPS) * 0.5f);
-        if (rotPwm > fwdPwm) rotPwm = fwdPwm;  // không để bên nào âm khi xoay trong khi tiến chậm
+        int32_t rotPwm = (int32_t)(fabsf(ang) * (ROS2_PWM_MAX / 1.00f) * 0.5f);
+        if (rotPwm > fwdPwm) rotPwm = fwdPwm;
         int32_t leftPwm, rightPwm;
         if (ang >= 0) {
-            // Rẽ phải: bên trái nhanh hơn
             leftPwm  = fwdPwm + rotPwm;
             rightPwm = fwdPwm - rotPwm;
         } else {
-            // Rẽ trái: bên phải nhanh hơn
             leftPwm  = fwdPwm - rotPwm;
             rightPwm = fwdPwm + rotPwm;
         }
@@ -181,29 +140,13 @@ static void cmd_vel_callback(const void *msgin) {
         if (rightPwm < 0) rightPwm = 0;
         if (leftPwm  > ROS2_PWM_MAX) leftPwm  = ROS2_PWM_MAX;
         if (rightPwm > ROS2_PWM_MAX) rightPwm = ROS2_PWM_MAX;
-
-        // Đảo chiều nếu lin âm (lùi)
         if (lin < 0) {
             leftPwm  = -leftPwm;
             rightPwm = -rightPwm;
         }
-
-        // Debug log — verify mapping mỗi 200ms trong lúc tiến.
-        static uint32_t s_lastFwdLog = 0;
-        if (millis() - s_lastFwdLog > 200u) {
-          s_lastFwdLog = millis();
-          int32_t outL = (leftPwm > 0)  ? (130 + (leftPwm  * 893) / 1023) : 0;
-          int32_t outR = (rightPwm > 0) ? (130 + (rightPwm * 893) / 1023) : 0;
-          Serial.printf("[cmd_vel] FWD lin=%.3f ang=%.3f → L_in=%ld R_in=%ld → L_out=%ld R_out=%ld/1023\n",
-                        lin, ang, (long)leftPwm, (long)rightPwm, (long)outL, (long)outR);
-        }
-
-        // Báo Localization để EKF wheel update dùng cho heading fusion.
-        // Trả về -100..+100 % so với PWM_MAX.
         locSetDriveCmd(
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
-
         const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
         ::motorApplyLayout(sp);
     } else {
@@ -216,32 +159,36 @@ static void cmd_vel_callback(const void *msgin) {
 // ============================================================
 static void fill_scan_msg() {
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
-    g_scan_msg.header.stamp.sec = millis() / 1000;
-    g_scan_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    g_scan_msg.header.frame_id.size = 11;
+    g_scan_msg.header.frame_id.capacity = 12;
+    const uint32_t nowMs = millis();
+    g_scan_msg.header.stamp.sec = nowMs / 1000;
+    g_scan_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
 
     g_scan_msg.angle_min = 0.0f;
     g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;  // 360 bins cho 1 vòng
+    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;
     g_scan_msg.time_increment = 0.0f;
-    g_scan_msg.scan_time = 0.1f;  // 10 Hz
-    g_scan_msg.range_min = 0.12f;  // 12cm
-    g_scan_msg.range_max = 8.0f;   // 8m
+    g_scan_msg.scan_time = 0.1f;
+    g_scan_msg.range_min = 0.12f;
+    g_scan_msg.range_max = 8.0f;
 
-    // Init ranges array (zero-fill)
-    if (g_scan_msg.ranges.size == 0) {
+    // Init ranges array — capacity fields REQUIRED for CDR deserialization
+    if (g_scan_msg.ranges.data == NULL) {
         g_scan_msg.ranges.data = (float*)malloc(360 * sizeof(float));
         g_scan_msg.ranges.size = 360;
         g_scan_msg.ranges.capacity = 360;
+        if (g_scan_msg.ranges.data == NULL) {
+            Serial.println("[scan] malloc FAILED");
+            return;
+        }
     }
 
-    // Zero all
     for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
-    // Fill từ g_x3Scan (góc theo rad, distance theo mm)
-    extern X3Scan g_x3Scan;
     for (uint16_t i = 0; i < g_x3Scan.count; i++) {
         const LidarPoint &p = g_x3Scan.points[i];
-        if (p.distanceMm < 120 || p.distanceMm > 8000) continue;  // filter out-of-range
+        if (p.distanceMm < 120 || p.distanceMm > 8000) continue;
         if (p.quality < 10) continue;
 
         int idx = (int)(p.angleRad / (2.0f * M_PI) * 360.0f);
@@ -249,7 +196,8 @@ static void fill_scan_msg() {
         if (idx >= 360) idx = 359;
 
         float dist_m = (float)p.distanceMm / 1000.0f;
-        g_scan_msg.ranges.data[idx] = dist_m;
+        float &slot = g_scan_msg.ranges.data[idx];
+        if (slot == 0.0f || dist_m < slot) slot = dist_m;
     }
 }
 
@@ -257,77 +205,115 @@ static void fill_scan_msg() {
 // FILL Odometry message từ g_pose (encoder + IMU)
 // ============================================================
 static void fill_odom_msg() {
-    extern Pose2D g_pose;
-    static float prev_x = 0, prev_y = 0;
-    static uint32_t prev_ms = 0;
+    const Pose2D &pose = g_pose;
 
     g_odom_msg.header.frame_id.data = (char*)"odom";
+    g_odom_msg.header.frame_id.size = 4;
+    g_odom_msg.header.frame_id.capacity = 5;
     g_odom_msg.child_frame_id.data = (char*)"base_link";
-    g_odom_msg.header.stamp.sec = millis() / 1000;
-    g_odom_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    g_odom_msg.child_frame_id.size = 10;
+    g_odom_msg.child_frame_id.capacity = 11;
+    const uint32_t nowMs = millis();
+    g_odom_msg.header.stamp.sec = nowMs / 1000;
+    g_odom_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
 
-    g_odom_msg.pose.pose.position.x = g_pose.x;
-    g_odom_msg.pose.pose.position.y = g_pose.y;
+    g_odom_msg.pose.pose.position.x = pose.x;
+    g_odom_msg.pose.pose.position.y = pose.y;
     g_odom_msg.pose.pose.position.z = 0.0f;
 
-    // Quaternion từ heading (yaw)
-    float h = g_pose.headingRad * 0.5f;
+    float h = pose.headingRad * 0.5f;
     g_odom_msg.pose.pose.orientation.x = 0.0f;
     g_odom_msg.pose.pose.orientation.y = 0.0f;
     g_odom_msg.pose.pose.orientation.z = sinf(h);
     g_odom_msg.pose.pose.orientation.w = cosf(h);
 
-    float linearMps = ((g_state.rpmFL + g_state.rpmFR) / 2.0f) * (WHEEL_CIRC_M / 60.0f);
+    const float wheelRps = ((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f;
+    const float linearMps = wheelRps * (float)WHEEL_CIRC_M;
     g_odom_msg.twist.twist.linear.x = linearMps;
-    g_odom_msg.twist.twist.angular.z = 0.0f;
+    g_odom_msg.twist.twist.linear.y = 0.0f;
+    g_odom_msg.twist.twist.linear.z = 0.0f;
 
-    // Covariance (rough estimates)
-    for (int i = 0; i < 36; i++) g_odom_msg.pose.covariance[i] = 0.0f;
-    g_odom_msg.pose.covariance[0] = 0.01f;  // x
-    g_odom_msg.pose.covariance[7] = 0.01f;  // y
-    g_odom_msg.pose.covariance[35] = 0.03f; // yaw
+    // Angular velocity from delta heading / dt
+    if (s_odomPrevMs != 0) {
+        const float dt = (float)(nowMs - s_odomPrevMs) / 1000.0f;
+        if (dt > 0.001f && dt < 5.0f) {
+            float dH = pose.headingRad - s_odomPrevHeading;
+            while (dH >  (float)M_PI) dH -= 2.f * (float)M_PI;
+            while (dH < -(float)M_PI) dH += 2.f * (float)M_PI;
+            g_odom_msg.twist.twist.angular.x = 0.0f;
+            g_odom_msg.twist.twist.angular.y = 0.0f;
+            g_odom_msg.twist.twist.angular.z = dH / dt;
+        }
+    } else {
+        g_odom_msg.twist.twist.angular.x = 0.0f;
+        g_odom_msg.twist.twist.angular.y = 0.0f;
+        g_odom_msg.twist.twist.angular.z = 0.0f;
+    }
+    s_odomPrevMs = nowMs;
+    s_odomPrevHeading = pose.headingRad;
+
+    for (int i = 0; i < 36; i++) {
+        g_odom_msg.pose.covariance[i] = 0.0f;
+        g_odom_msg.twist.covariance[i] = 0.0f;
+    }
+    g_odom_msg.pose.covariance[0] = 0.05f;
+    g_odom_msg.pose.covariance[7] = 0.05f;
+    g_odom_msg.pose.covariance[35] = 0.10f;
+    g_odom_msg.twist.covariance[0] = 0.02f;
+    g_odom_msg.twist.covariance[35] = 0.10f;
 }
 
 // ============================================================
-// FILL Imu message từ g_pose.headingRad (heading đã qua EKF fusion).
-// sensor_msgs/Imu yêu cầu orientation là quaternion. Heading chỉ có yaw
-// nên roll=pitch=0; quaternion = (0, 0, sin(h/2), cos(h/2)).
-// angular_velocity để 0 (firmware không publish gyro Z qua micro-ROS —
-// nếu cần, thêm subscription ở ImuMpu6050.h sau).
-// linear_acceleration để 0 (firmware không có accelerometer).
-// Trước đây fill_imu_msg chỉ set header → /imu/data publish toàn 0 về
-// orientation → EKF robot_localization fusion sai khi chạy ROS2 EKF.
+// FILL Imu message
 // ============================================================
 static void fill_imu_msg() {
-    extern Pose2D g_pose;
-    const float h = g_pose.headingRad * 0.5f;
+    const Pose2D &pose = g_pose;
+
+    float h = pose.headingRad * 0.5f;
     g_imu_msg.orientation.x = 0.0f;
     g_imu_msg.orientation.y = 0.0f;
     g_imu_msg.orientation.z = sinf(h);
     g_imu_msg.orientation.w = cosf(h);
+
+    float gyroZ = 0.f;
+    bool gyroOk = false;
+#if USE_IMU_MPU6050
+    gyroOk = ::imuMpu6050GetGyroZ(gyroZ);
+#endif
     g_imu_msg.angular_velocity.x = 0.0f;
     g_imu_msg.angular_velocity.y = 0.0f;
-    g_imu_msg.angular_velocity.z = 0.0f;
+    g_imu_msg.angular_velocity.z = gyroOk ? gyroZ : 0.0f;
     g_imu_msg.linear_acceleration.x = 0.0f;
     g_imu_msg.linear_acceleration.y = 0.0f;
-    g_imu_msg.linear_acceleration.z = 0.0f;
-    // Covariance 9x9 = zero (sensor không báo uncertainty).
+    g_imu_msg.linear_acceleration.z = 9.81f;
+
     for (int i = 0; i < 9; i++) {
-        g_imu_msg.orientation_covariance[i]          = 0.0f;
-        g_imu_msg.angular_velocity_covariance[i]     = 0.0f;
-        g_imu_msg.linear_acceleration_covariance[i]  = 0.0f;
+        g_imu_msg.orientation_covariance[i] = 0.0f;
+        g_imu_msg.angular_velocity_covariance[i] = 0.0f;
+        g_imu_msg.linear_acceleration_covariance[i] = 0.0f;
     }
+    g_imu_msg.orientation_covariance[0] = -1.0f;
+    g_imu_msg.orientation_covariance[4] = -1.0f;
+    g_imu_msg.orientation_covariance[8] = 0.02f;
+    g_imu_msg.angular_velocity_covariance[0] = -1.0f;
+    g_imu_msg.angular_velocity_covariance[4] = -1.0f;
+    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : -1.0f;
+    g_imu_msg.linear_acceleration_covariance[0] = -1.0f;
+    g_imu_msg.linear_acceleration_covariance[4] = -1.0f;
+    g_imu_msg.linear_acceleration_covariance[8] = 0.01f;
+
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
-    g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
-    g_imu_msg.header.stamp.sec = millis() / 1000;
-    g_imu_msg.header.stamp.nanosec = (millis() % 1000) * 1000000UL;
+    g_imu_msg.header.frame_id.size = 9;
+    g_imu_msg.header.frame_id.capacity = 10;
+    const uint32_t nowMs = millis();
+    g_imu_msg.header.stamp.sec = nowMs / 1000;
+    g_imu_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
 }
 
 // ============================================================
 // INIT: Khởi tạo micro-ROS node
 // ============================================================
 inline bool init() {
-    // 1. Set WiFi transport (UDP)
     set_microros_wifi_transports(
         (char*)WiFi.SSID().c_str(),
         (char*)WiFi.psk().c_str(),
@@ -335,14 +321,11 @@ inline bool init() {
         (uint16_t)g_agent_port
     );
 
-    // 2. Allocator + support
     g_allocator = rcl_get_default_allocator();
     rclc_support_init(&g_support, 0, NULL, &g_allocator);
 
-    // 3. Node
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
 
-    // 4. Publishers
     rclc_publisher_init_default(
         &g_scan_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
@@ -358,81 +341,72 @@ inline bool init() {
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
         "/imu/data"
     );
-    rclc_publisher_init_default(
-        &g_tf_pub, &g_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(tf2_msgs, msg, TFMessage),
-        "/tf"
-    );
 
-    // 5. Subscribers
-    rclc_subscription_init_default(
+    // /cmd_vel: BEST_EFFORT, depth=1. A stale velocity command that arrives
+    // late (WiFi jitter, DDS retransmit) is unsafe to replay — it could
+    // resume a high-throttle PWM that was issued before a stop or ESTOP.
+    // The watchdog in spin() (500 ms) and MODE_MANUAL cvAgeMs gate (300 ms)
+    // are the safety net when commands stop arriving.
+    // NOTE: rclc_subscription_init_best_effort uses depth=1 by default.
+    rclc_subscription_init_best_effort(
         &g_cmd_vel_sub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/cmd_vel"
     );
 
-    // 6. Executor (1 sub + 0 timers, callback handle intervals)
     rclc_executor_init(&g_executor, &g_support.context, 1, &g_allocator);
     rclc_executor_add_subscription(
         &g_executor, &g_cmd_vel_sub, &g_cmd_vel_msg, cmd_vel_callback, ON_NEW_DATA
     );
 
-    // 7. Init messages
+    // Init messages — capacity fields REQUIRED for CDR deserialization
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
-    g_scan_msg.header.frame_id.size = strlen(g_scan_msg.header.frame_id.data);
+    g_scan_msg.header.frame_id.size = 11;
+    g_scan_msg.header.frame_id.capacity = 12;
 
     g_odom_msg.header.frame_id.data = (char*)"odom";
-    g_odom_msg.header.frame_id.size = strlen(g_odom_msg.header.frame_id.data);
+    g_odom_msg.header.frame_id.size = 4;
+    g_odom_msg.header.frame_id.capacity = 5;
     g_odom_msg.child_frame_id.data = (char*)"base_link";
-    g_odom_msg.child_frame_id.size = strlen(g_odom_msg.child_frame_id.data);
+    g_odom_msg.child_frame_id.size = 10;
+    g_odom_msg.child_frame_id.capacity = 11;
 
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
-    g_imu_msg.header.frame_id.size = strlen(g_imu_msg.header.frame_id.data);
+    g_imu_msg.header.frame_id.size = 9;
+    g_imu_msg.header.frame_id.capacity = 10;
 
     g_initialized = true;
-    Serial.printf("[micro-ROS] ✅ Node ready, publishing:/scan /odom /imu/data, subscribing /cmd_vel (agent %s:%d)\n",
+    Serial.printf("[micro-ROS] Node ready. agent=%s:%d\n",
                   g_agent_ip.c_str(), g_agent_port);
     return true;
 }
 
 // ============================================================
-// SPIN: gọi mỗi loop iteration
-// Spin executor + publish data
+// SPIN
 // ============================================================
 inline void spin() {
     if (!g_initialized) return;
 
-    // 1. Spin executor (xử lý /cmd_vel callback)
     rclc_executor_spin_some(&g_executor, RCL_MS_TO_NS(5));
 
     uint32_t now = millis();
 
-    // 2. Publish /scan @ 10 Hz (mỗi 100ms)
     if (now - g_last_scan_ms >= 100) {
         g_last_scan_ms = now;
         fill_scan_msg();
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
     }
 
-    // 3. Publish /odom @ 50 Hz
-    if (now - g_last_odom_ms >= 20) {
+    if (now - g_last_odom_ms >= 33) {
         g_last_odom_ms = now;
         fill_odom_msg();
         rcl_publish(&g_odom_pub, &g_odom_msg, NULL);
     }
 
-    // 4. Publish /imu/data @ 50 Hz
-    if (now - g_last_imu_ms >= 20) {
+    if (now - g_last_imu_ms >= 33) {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
-    }
-
-    // 5. State machine for connection
-    static uint32_t last_ping_ms = 0;
-    if (now - last_ping_ms >= 1000) {
-        last_ping_ms = now;
-        // micro-ros library auto-pings agent
     }
 }
 
@@ -444,7 +418,6 @@ namespace microRos {
   inline bool init() { return false; }
   inline void spin() {}
   inline void tick() {}
-  inline void setAgent(const char* ip, int port) {}
 }
 #endif
 

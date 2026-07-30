@@ -424,9 +424,33 @@ static void taskControl(void *pvParams) {
     /* ── 5) Mode dispatch ─────────────────────────────────────────── */
     switch (g_state.mode) {
       case MODE_MANUAL: {
+        // Check if teleop (via micro-ROS /cmd_vel) is actively driving.
+        // cmd_vel_callback updates cmd_velLastMs each time it processes a
+        // non-gated /cmd_vel and directly calls motorApplyLayout/botRotate*.
+        // When teleop is active we must NOT call botStop() or botDrive() —
+        // the 2 control paths would fight each other and cause 20Hz jitter.
+        const uint32_t nowMs = millis();
+        const uint32_t cvAgeMs = (g_state.cmd_velLastMs != 0)
+            ? (nowMs - g_state.cmd_velLastMs) : 0xFFFFFFFFu;
+        // Two conditions needed:
+        // 1. teleop is alive (fresh timestamp) — prevents race with cmd_vel_callback
+        // 2. teleop is actually driving (cmd_velMoving=true) — ensures botStop() still
+        //    fires when teleop sends lin=0,ang=0 (stop command) even while still sending.
+        // When teleop goes silent entirely, cmd_velMoving stays false → botStop() fires
+        // after 500ms. When teleop sends a stop command while still alive, cmd_velMoving
+        // becomes false immediately → botStop() fires right away.
+        const bool teleopActive = g_state.cmd_velMoving && (cvAgeMs < 500u);
+        // Debug: log control task decision every 500ms
+        static uint32_t s_lastCtrlLog = 0;
+        if (nowMs - s_lastCtrlLog > 500u) {
+            s_lastCtrlLog = nowMs;
+            Serial.printf("[Ctrl-MANUAL] cmdX=%d cmdY=%d teleopActive=%d cvAgeMs=%u\n",
+                g_state.cmdX, g_state.cmdY, teleopActive, (unsigned)cvAgeMs);
+        }
+
         if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
-          botStop();
-        } else {
+          if (!teleopActive) botStop();
+        } else if (!teleopActive) {
           /* Lái thẳng tự do. Có heading lock nhẹ khi cmdY!=0 và cmdX==0
              để robot đi thẳng không bị lệch do sai lệch cơ khí. */
           static float s_tgtH = 0.f;
