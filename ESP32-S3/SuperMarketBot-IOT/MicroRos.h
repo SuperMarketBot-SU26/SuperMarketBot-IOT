@@ -196,6 +196,16 @@ static void fill_scan_msg() {
 
     for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
+    // intensities — explicitly zero-length to avoid garbage in CDR payload.
+    // The YDLIDAR X3 does not return intensity values; leaving the struct
+    // fields at their zero-initialized values is safe because micro-ROS
+    // CDR serializes the size/capacity fields.  Explicitly setting them
+    // avoids any ambiguity between library versions on how to handle an
+    // uninitialized sequence.
+    g_scan_msg.intensities.data     = NULL;
+    g_scan_msg.intensities.size     = 0;
+    g_scan_msg.intensities.capacity = 0;
+
     for (uint16_t i = 0; i < g_x3Scan.count; i++) {
         const LidarPoint &p = g_x3Scan.points[i];
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;
