@@ -362,6 +362,10 @@
  #define BOOT_GUARD_MS           12000u
  /** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (HiveMQ Cloud hoặc local broker). */
  #define WIFI_STA_ENABLE         1
+ /** 0 = Blocking: đợi WiFi kết nối xong mới tiếp tục boot (10s+ chờ).
+  *  1 = Non-blocking: WiFi + micro-ROS init chạy background trong task riêng.
+  *    Robot lái được ngay sau ~2s boot. micro-ROS kết nối khi WiFi ready. */
+ #define WIFI_STA_ASYNC          1
  /** 0 = Tắt hẳn kết nối MQTT (tránh treo khi chạy offline/local). 1 = Bật MQTT. */
  #define MQTT_ENABLE             1
  

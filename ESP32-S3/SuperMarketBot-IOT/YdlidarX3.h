@@ -92,26 +92,53 @@ extern X3Diag g_x3Diag;
  * NOTE: X3 firmware này KHÔNG hỗ trợ command đổi baud (0xA5 0x0B) — không gửi.
  */
 inline void x3Init() {
-#ifdef YDLIDAR_X3_M_CTR
-  if (YDLIDAR_X3_M_CTR >= 0) {
-    pinMode(YDLIDAR_X3_M_CTR, OUTPUT);
-    digitalWrite(YDLIDAR_X3_M_CTR, HIGH); // Bật động cơ quay LiDAR (M_CTR = HIGH)
-  }
-#endif
+  // === Pre-init: set pin modes to avoid floating inputs ===
+  // Nếu X3 đã bật trước ESP32, TX của X3 (→ ESP32 RX/GPIO1) sẽ bắt đầu
+  // gửi data ngay khi có nguồn. Đặt ESP32 pins trước giúp tránh floating state.
+  pinMode(YDLIDAR_X3_TX, OUTPUT);
+  digitalWrite(YDLIDAR_X3_TX, HIGH);   // Idle state cho RS232/UART TX: HIGH
+  pinMode(YDLIDAR_X3_RX, INPUT_PULLUP); // Pull ESP32 RX up — X3 TX idle = HIGH
 
   // === Tăng UART hardware FIFO lên max (ESP32 hỗ trợ tới 2048 byte) ===
-  // FIFO lớn = buffer giữa các lần poll, giảm dropped bytes khi scheduler bận.
   Serial1.setRxBufferSize(2048);
   Serial1.begin(YDLIDAR_X3_BAUD, SERIAL_8N1, YDLIDAR_X3_RX, YDLIDAR_X3_TX);
-  delay(100);
+  delay(50);
+
+  // === STOP any ongoing scan + drain stale bytes ===
+  // Nếu X3 bật trước ESP32, nó đã gửi nhiều data → drain trước khi sync.
+  uint8_t stopCmd[] = {0xA5, 0x65};
+  Serial1.write(stopCmd, sizeof(stopCmd));
+  Serial1.flush();  // đợi stop cmd ra khỏi UART hardware
+  delay(50);
+
+  // Drain tất cả bytes cũ đã nhận (stale scan data từ trước khi ESP32 init)
+  int drained = 0;
+  uint8_t tmp[128];
+  while (Serial1.available() > 0) {
+    int n = Serial1.readBytes(tmp, sizeof(tmp));
+    drained += n;
+  }
+  if (drained > 0) {
+    Serial.printf("[X3] Drained %d stale bytes before sync.\n", drained);
+  }
+
+  // Reset X3 device (firmware soft-reset) để đảm bảo clean state
+  uint8_t resetCmd[] = {0xA5, 0x80};
+  Serial1.write(resetCmd, sizeof(resetCmd));
+  Serial1.flush();
+  delay(200);  // X3 reboot ~100-200ms
+
+  // Drain again after reset (X3 gửi response packet trong lúc reboot)
+  drained = 0;
+  while (Serial1.available() > 0) {
+    int n = Serial1.readBytes(tmp, sizeof(tmp));
+    drained += n;
+  }
 
   // === Runtime asserts ===
   uint32_t largestBlock = ESP.getMaxAllocHeap();
   if (largestBlock < 4096) {
-    Serial.printf("[X3] ❌ Heap largest block = %u B (cần >= 4KB) — LiDAR có thể fail\n",
-                  (unsigned)largestBlock);
-  } else {
-    Serial.printf("[X3] Heap OK: largest block = %u B\n", (unsigned)largestBlock);
+    Serial.printf("[X3] Heap largest block = %u B (cần >= 4KB)\n", (unsigned)largestBlock);
   }
 
   g_x3Scan.count = 0;
@@ -120,20 +147,14 @@ inline void x3Init() {
   g_x3Scan.scanReady = false;
   memset(&g_x3Diag, 0, sizeof(g_x3Diag));
 
-  // === Tăng sample rate lên 4kHz (X3 firmware ≥ 1.4.0 hỗ trợ) ===
-  uint8_t setSampleRateCmd[] = {0xA5, 0x09, 0xA0, 0x0F};
-  Serial1.write(setSampleRateCmd, sizeof(setSampleRateCmd));
-  delay(50);
-
-  // === Start scan command ===
+  // === Start scan ===
   uint8_t startCmd[] = {0xA5, 0x60};
   Serial1.write(startCmd, sizeof(startCmd));
+  Serial1.flush();
   delay(50);
 
-  Serial.printf("[X3] Init done — UART @ %d baud, sample rate target ~4kHz\n",
-                YDLIDAR_X3_BAUD);
-  Serial.printf("[X3] NOTE: baud %d chỉ chứa ~%u pts/s. Nếu thấy <300 pts/scan → bottleneck UART.\n",
-                YDLIDAR_X3_BAUD, (unsigned)(YDLIDAR_X3_BAUD / 10 / 5));
+  Serial.printf("[X3] Init OK — %d baud. Drained %d bytes total.\n",
+                YDLIDAR_X3_BAUD, drained);
 }
 
 /**

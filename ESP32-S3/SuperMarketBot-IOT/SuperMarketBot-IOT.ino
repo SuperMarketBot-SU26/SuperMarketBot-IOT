@@ -29,6 +29,7 @@
 #include "PidController.h"
 #include "Localization.h"   // [Bước 5 - 2026-07-27] include trước CtrlJson.h để thấy locSetSlamPose()
 #include "ImuFusion.h"          // EKF 1D heading fusion (gyro + wheel + SLAM)
+#include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050 (must be before ImuFusion.h: imuFusion ns wraps getGyroZ)
 #include "AutoExplore.h"        // Mode Tự đi quét Map (frontier exploration)
 #include "WaypointNav.h"
 #include "StatusRGB.h"
@@ -53,15 +54,76 @@
 static void taskControl(void *pvParams);
 static void taskWebIO(void *pvParams);
 static void taskMQTT(void *pvParams);
+static void taskMicroRos(void *pvParams);  // forward — called by taskWifiConnect
 #if USE_YDLIDAR_X3
 // taskX3 is defined inline in YdlidarX3.h — no forward declaration needed here.
 #endif
-// taskMicroRos: dedicated FreeRTOS task for micro-ROS DDS spin.
-// Separating it from taskControl (which drives motors) means that even if
-// rclc_executor_spin_some() blocks for seconds during a WiFi/DDS reconnect,
-// the motor control loop still runs every SAFE_LOOP_MS on the same tick
-// schedule and the hardware watchdog keeps getting fed.
-static void taskMicroRos(void *pvParams);
+// taskWifiConnect: handles WiFi STA + micro-ROS init in background on Core 1.
+// Runs at priority 1 — below taskControl (5) so motor control always preempts.
+// Robot is ready to drive within ~2s of boot; network features connect async.
+static void taskWifiConnect(void *pvParams) {
+  (void)pvParams;
+  Serial.println(F("[taskWifiConnect] Started — connecting WiFi STA in background..."));
+
+  struct { const char* ssid; const char* pass; } staList[] = {
+    { STA_SSID,   STA_PASS   },
+    { STA_SSID_2, STA_PASS_2 },
+    { STA_SSID_3, STA_PASS_3 },
+    { STA_SSID_4, STA_PASS_4 },
+    { STA_SSID_5, STA_PASS_5 },
+  };
+  constexpr int STA_LIST_COUNT = sizeof(staList) / sizeof(staList[0]);
+  bool staOk = false;
+
+  for (int si = 0; si < STA_LIST_COUNT && !staOk; si++) {
+    if (staList[si].ssid == nullptr || strlen(staList[si].ssid) == 0) continue;
+    Serial.printf("[WiFi] STA [%d/%d]: \"%s\"...\n", si + 1, STA_LIST_COUNT, staList[si].ssid);
+    WiFi.begin(staList[si].ssid, staList[si].pass);
+
+    uint32_t staStart = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      if (millis() - staStart > STA_CONNECT_TIMEOUT_MS) {
+        Serial.printf("[WiFi] \"%s\" timeout.\n", staList[si].ssid);
+        WiFi.disconnect();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        break;
+      }
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("[WiFi] STA OK! \"%s\" = %s\n",
+                    staList[si].ssid, WiFi.localIP().toString().c_str());
+      g_mqttEnabled = true;
+      staOk = true;
+    }
+  }
+
+  if (!staOk) {
+    Serial.println(F("[WiFi] All SSIDs failed — AP-only mode."));
+  }
+
+  // WiFi ready — now init micro-ROS. This takes ~1-3s (UDP + DDS handshake).
+  // If agent isn't running yet, it will retry each spin_some() call.
+#if USE_MICRO_ROS
+  Serial.println(F("[taskWifiConnect] Initializing micro-ROS..."));
+  if (microRos::init()) {
+    Serial.println(F("[taskWifiConnect] micro-ROS OK!"));
+    BaseType_t mr = xTaskCreatePinnedToCore(
+        taskMicroRos, "MicroRos",
+        8192, nullptr, 4,
+        nullptr, 1
+    );
+    Serial.printf("[taskWifiConnect] taskMicroRos %s on Core 1.\n",
+                  (mr == pdPASS) ? "created" : "FAILED");
+  } else {
+    Serial.println(F("[taskWifiConnect] micro-ROS FAILED — will retry in spin."));
+    // Don't create taskMicroRos here. It will retry on next boot.
+    // taskMicroRos already polls g_initialized, so no special retry needed.
+  }
+#endif
+
+  vTaskDelete(nullptr);  // Task done — WiFi stays connected via ESP32 WiFi driver
+}
 
 // ── In bộ nhớ lúc chạy (Serial Monitor 115200) ─────────────────────
 static void printMemInfo() {
@@ -456,6 +518,12 @@ static void taskControl(void *pvParams) {
       // rate limiter này chỉ cắt spike cực lớn (>5σ IMU noise).
       static float s_prevFused = 0.f;
       static bool  s_firstFused = true;
+
+      // NaN guard: if fusedHeading is corrupt, keep last valid heading
+      if (!(fusedHeading == fusedHeading) || fabsf(fusedHeading) > 2.f * (float)M_PI) {
+        fusedHeading = s_prevFused;  // revert to last good value
+      }
+
       if (!s_firstFused) {
         float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
         const float MAX_DHEADING = 0.10f;  // ~5.7°
@@ -790,9 +858,12 @@ void setup() {
   );
   Serial.println(F("[Boot] taskControl created on Core 1."));
 
-#if WIFI_STA_ENABLE
+#if WIFI_STA_ASYNC
+  // WiFi STA + micro-ROS init chạy background — robot lái được ngay sau ~2s boot.
+  xTaskCreatePinnedToCore(taskWifiConnect, "WiFiConnect", 8192, nullptr, 1, nullptr, 1);
+  Serial.println(F("[Boot] taskWifiConnect spawned (non-blocking)."));
+#elif WIFI_STA_ENABLE
   if (WiFi.status() == WL_CONNECTED) {
-    // ── micro-ROS init (after WiFi STA is up) ────────────────────────
 #if USE_MICRO_ROS
     Serial.println(F("[Boot] Initializing micro-ROS..."));
     if (microRos::init()) {

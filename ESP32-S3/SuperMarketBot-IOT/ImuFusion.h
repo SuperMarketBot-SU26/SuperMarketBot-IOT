@@ -58,6 +58,14 @@ extern float g_dThetaEnc;
 #define IMU_FUSION_DEBUG        0        // 1: bật serial debug mỗi 1s; 0: tắt
 #endif
 
+// --- NaN guard constants ---
+#ifndef IMU_FUSION_SANITY_HEADING
+#define IMU_FUSION_SANITY_HEADING (2.0f * (float)M_PI)  // heading > 2π → corrupt
+#endif
+#ifndef IMU_FUSION_SANITY_BIAS
+#define IMU_FUSION_SANITY_BIAS    5.0f                    // |bias| > 5 rad/s → corrupt
+#endif
+
 // --- Ngưỡng an toàn ---
 #ifndef IMU_FUSION_WHEEL_MIN_DIFF
 #define IMU_FUSION_WHEEL_MIN_DIFF  5.0f  // % PWM khác biệt tối thiểu để tin wheel-derived dθ
@@ -138,6 +146,14 @@ inline void predict(float gyroZRad, float dt) {
   const float omega = gyroZRad - s.bias;
   s.heading = wrap2Pi(s.heading + omega * dt);
 
+  // NaN guard (no isnan() on ESP32 stdlib — use x!=x trick)
+  if (!(s.heading == s.heading) || !(omega == omega)) {
+    s.heading = 0.f;
+    s.bias = 0.f;
+    s.P00 = IMU_FUSION_P_HEADING; s.P01 = 0.f; s.P10 = 0.f; s.P11 = IMU_FUSION_P_BIAS;
+    return;
+  }
+
   // F P
   const float Fp00 = s.P00 - dt * s.P10;
   const float Fp01 = s.P01 - dt * s.P11;
@@ -154,59 +170,76 @@ inline void predict(float gyroZRad, float dt) {
 }
 
 /**
- * Update 1: dùng wheel-derived dθ để hiệu chỉnh heading & gyro bias.
+ * Update 1: Complementary filter — gyro-predict + wheel-correct heading.
  *
- * z_hat = (gyroZ - bias) × dt
- * z     = dθ_wheel
- * H     = [0, -dt]
+ * Predict:   heading_gyro = heading + (gyroZ - bias) * dt
+ * Correct:   residual = dTheta_wheel - (gyroZ - bias) * dt
+ *            heading += K * residual
+ *            bias   += K * residual / dt
  *
- * @param gyroZRad       Vận tốc góc đo được (rad/s) — CẦN truyền vào để tính residual
- * @param dThetaWheelRad Tổng xoay từ wheel trong dt (rad)
- * @param dt             Bước thời gian (giây)
+ * K is a fixed gain (not derived from P matrix — P01=0 in this ESP32 setup
+ * because P starts diagonal, which kills the Kalman gain. Complementary filter
+ * is equivalent to EKF with a fixed K and is numerically stable.)
+ *
+ * @param gyroZRad        Vận tốc góc đo được (rad/s) — CẦN truyền vào để tính residual
+ * @param dThetaWheelRad   Tổng xoay từ wheel trong dt (rad)
+ * @param dt              Bước thời gian (giây)
  */
+#ifndef IMU_FUSION_K_CORRECT
+#define IMU_FUSION_K_CORRECT 0.15f  // gain: 0.15 = 15% encoder correction per step
+                                      // 6.7 steps to close 63% of a 1° error
+#endif
+
 inline void updateWheel(float gyroZRad, float dThetaWheelRad, float dt) {
   State& s = getState();
   if (!s.initialized || dt <= 0.f) return;
 
-  // y = z - z_hat = dθ_wheel - (gyroZ - bias) × dt
-  const float y = dThetaWheelRad - (gyroZRad - s.bias) * dt;
+  // Sanity check: skip if inputs are garbage (x!=x is the portable NaN check)
+  if (!(dThetaWheelRad == dThetaWheelRad) || !(gyroZRad == gyroZRad)) return;
+  // Clamp to physically impossible values — catch corrupted data
+  if (fabsf(dThetaWheelRad) > 10.f) return;
 
-  // H P H^T = [0 -dt] [P00 P01; P10 P11] [0; -dt] = P11 × dt²
-  const float S = s.P11 * dt * dt + IMU_FUSION_R_WHEEL;
-  if (S <= 0.f) return;
+  // Residual: wheel says we rotated dTheta, gyro-predict says we rotated (gyro-bias)*dt
+  // If they agree → residual ≈ 0 → no correction.
+  // If wheel says more than gyro → positive residual → heading += positive → catch up
+  // If wheel says less than gyro → negative residual → heading -= positive → catch up
+  float residual = dThetaWheelRad - (gyroZRad - s.bias) * dt;
 
-  // K = P H^T / S ; H^T = [0; -dt]
-  const float K0 = -s.P01 * dt / S;
-  const float K1 = -s.P11 * dt / S;
+  // Clamp residual to avoid single-step spikes (e.g. encoder glitch)
+  const float MAX_RESIDUAL = 0.1f;  // ~5.7°
+  if (residual >  MAX_RESIDUAL) residual =  MAX_RESIDUAL;
+  if (residual < -MAX_RESIDUAL) residual = -MAX_RESIDUAL;
 
-  // Update state
-  s.heading = wrap2Pi(s.heading + K0 * y);
-  s.bias   += K1 * y;
+  s.heading = wrap2Pi(s.heading + IMU_FUSION_K_CORRECT * residual);
 
-  // P_new = (I - K H) P
-  // K H = [K0*0  K0*-dt] = [0  -K0*dt]
-  //       [K1*0  K1*-dt]   [0  -K1*dt]
-  const float oldP01 = s.P01, oldP11 = s.P11;
-  s.P00 = s.P00;
-  s.P01 = oldP01 - K0 * dt * oldP11;
-  s.P10 = s.P10 - K1 * dt * oldP01;
-  s.P11 = oldP11 - K1 * dt * oldP11;
+  // Bias update: if wheel consistently disagrees with gyro, nudge bias.
+  // bias += (K / dt) * residual — skip if dt is too small (avoid div-by-zero)
+  if (dt > 0.001f) {
+    s.bias += 0.02f * residual / dt;
+  }
 
-  if (s.P11 < 1e-9f) s.P11 = 1e-9f;
-
-  // Clamp bias
+  // Clamp bias to physical limits
   if (s.bias >  IMU_FUSION_BIAS_CLAMP) s.bias =  IMU_FUSION_BIAS_CLAMP;
   if (s.bias < -IMU_FUSION_BIAS_CLAMP) s.bias = -IMU_FUSION_BIAS_CLAMP;
+
+  // NaN guard after write
+  if (!(s.heading == s.heading) || !(s.bias == s.bias)) {
+    s.heading = 0.f;
+    s.bias = 0.f;
+  }
 }
 
 /**
  * Update 2: heading tuyệt đối từ SLAM.
  *
  * H = [1, 0]
+ *
+ * NaN guard: if headingAbsRad is invalid, skip.
  */
 inline void updateSlam(float headingAbsRad) {
   State& s = getState();
   if (!s.initialized) return;
+  if (!(headingAbsRad == headingAbsRad)) return;
 
   const float y = wrapPi(headingAbsRad - s.heading);
 
@@ -279,7 +312,7 @@ inline float step(float gyroZRad, float dt, int leftPct, int rightPct) {
 }
 
 /**
- * EKF step overload: dùng encoder thực (g_dThetaEnc) thay vì PWM-derived dθ.
+ * EKF step: dùng encoder thực (g_dThetaEnc).
  *
  * Gọi từ taskControl mỗi SAFE_LOOP_MS (50ms). g_dThetaEnc được set bởi
  * odomUpdate() mỗi ODOM_PERIOD_MS (100ms) — dùng chung giá trị trong 100ms.
@@ -288,9 +321,45 @@ inline float step(float gyroZRad, float dt, int leftPct, int rightPct) {
  * @param dt        Bước thời gian (giây)
  * @return heading đã fusion (rad, [0, 2π))
  */
+/**
+ * Reset state if corrupted by NaN (called automatically by step()).
+ * Returns true if reset was performed.
+ */
+inline bool resetIfNan() {
+  State& s = getState();
+  if (!(s.heading == s.heading) || !(s.bias == s.bias) ||
+      fabsf(s.heading) > IMU_FUSION_SANITY_HEADING ||
+      fabsf(s.bias) > IMU_FUSION_SANITY_BIAS) {
+    Serial.printf("[EKF] NaN/drift detected — resetting. was h=%.3f bias=%.3f\n",
+                  s.heading, s.bias);
+    // Use 0 as seed heading, NOT g_pose.headingRad (which may also be NaN).
+    // On first init, imuFusion::init() already synced from g_pose.headingRad
+    // so zero here is safe — the next imuFusion::init() call will re-sync.
+    s.heading     = 0.f;
+    s.bias       = 0.f;
+    s.P00        = IMU_FUSION_P_HEADING;
+    s.P01        = 0.f;
+    s.P10        = 0.f;
+    s.P11        = IMU_FUSION_P_BIAS;
+    s.initialized = true;
+    s_zuptStillTicks = 0;
+    return true;
+  }
+  return false;
+}
+
 inline float step(float gyroZRad, float dt) {
 #if IMU_FUSION_ENABLE
   State& s = getState();
+
+  // NaN guard: if heading or bias is corrupted, reset immediately.
+  // This catches cases where residual overflow or dt=0 causes NaN propagation.
+  if (resetIfNan()) return s.heading;
+
+  // Skip this step if inputs are invalid (x!=x is the portable NaN check)
+  if (!(gyroZRad == gyroZRad) || !(g_dThetaEnc == g_dThetaEnc) || dt <= 0.f || dt > 2.f) {
+    return s.heading;  // keep last valid heading
+  }
 
   // ZUPT — Zero-Velocity Update: freeze heading khi robot đứng yên.
   // Phát hiện chuyển động bằng 2 nguồn:
@@ -305,6 +374,19 @@ inline float step(float gyroZRad, float dt) {
     s_zuptStillTicks = 0;  // Reset counter khi robot chuyển động
   } else {
     s_zuptStillTicks++;
+#if IMU_FUSION_DEBUG
+    // Log mỗi 2s trong trạng thái settling (trước khi FROZEN)
+    static uint32_t s_settleLogMs = 0;
+    if (s_zuptStillTicks < IMU_FUSION_ZUPT_SETTLE_TICKS) {
+      uint32_t now = millis();
+      if (now - s_settleLogMs >= 2000) {
+        s_settleLogMs = now;
+        Serial.printf("[EKF] h=%.3f zupt=%u/%d settling dThEnc=%.5f gyroZ=%.5f\n",
+                      s.heading, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS,
+                      g_dThetaEnc, gyroZRad);
+      }
+    }
+#endif
     if (s_zuptStillTicks >= IMU_FUSION_ZUPT_SETTLE_TICKS) {
       // Settled: freeze hoàn toàn — không predict, không update.
       // Bias vẫn nudge về 0 để khi chuyển động lại, bias ≈ 0.
@@ -313,12 +395,12 @@ inline float step(float gyroZRad, float dt) {
       s.P11 *= 0.95f;
 
 #if IMU_FUSION_DEBUG
-      static uint8_t s_debugTick = 0;
-      if (++s_debugTick >= 20) {
-        s_debugTick = 0;
-        Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d FROZEN\n",
-                      s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS);
-      }
+  static uint8_t s_debugTick = 0;
+  if (++s_debugTick >= 20) {
+    s_debugTick = 0;
+    Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d FROZEN\n",
+                  s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS);
+  }
 #endif
       return s.heading;
     }
@@ -336,8 +418,10 @@ inline float step(float gyroZRad, float dt) {
   static uint8_t s_debugTick = 0;
   if (++s_debugTick >= 20) {
     s_debugTick = 0;
-    Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d\n",
-                  s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS);
+    // Thêm encoder + gyro diagnostics để debug drift
+    Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d dThEnc=%.4f gyroZ=%.4f\n",
+                  s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS,
+                  g_dThetaEnc, gyroZRad);
   }
 #endif
 

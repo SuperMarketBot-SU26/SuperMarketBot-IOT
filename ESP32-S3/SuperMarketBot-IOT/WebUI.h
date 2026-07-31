@@ -1526,7 +1526,7 @@ inline void webUIInit() {
   Serial.println(
       F("[WiFi] Dien thoai ket noi VAO mang do robot phat (khong phai WiFi nha). Mat khau: AP_PASS trong Config.h"));
 
-#if WIFI_STA_ENABLE
+#if WIFI_STA_ENABLE && !WIFI_STA_ASYNC
   /* Thử kết nối lần lượt các SSID đã cấu hình — kết nối được cái đầu tiên tìm thấy.
    * Robot vẫn chạy SoftAP trong khi thử STA, MQTT chỉ bật khi STA thành công. */
   {
@@ -1569,6 +1569,10 @@ inline void webUIInit() {
       Serial.println(F("[WiFi] Tat ca SSID that bai — AP-only mode, MQTT disabled."));
     }
   }
+#elif WIFI_STA_ASYNC
+  // WiFi STA + micro-ROS init chạy trong taskWifiConnect (non-blocking).
+  // robot lái được ngay sau ~2s boot. Xem log "[taskWifiConnect]" để theo dõi.
+  Serial.println(F("[WiFi] STA async — connection deferred to background task."));
 #endif
 
   g_httpServer.on("/", HTTP_GET, []() {

@@ -345,6 +345,20 @@ inline bool init() {
         (uint16_t)g_agent_port
     );
 
+    // BLOCKING: sync ESP32 clock with agent clock. Without this, message
+    // timestamps (scan, odom) use ESP32 millis() while TF uses agent wall-clock,
+    // causing ~50ms/second drift → map drag, odom jump, SLAM desync.
+    // Timeout 2s so a failed sync doesn't hang boot; on failure we proceed
+    // with unsynced timestamps which is still better than nothing.
+    const int SYNC_TIMEOUT_MS = 2000;
+    if (!rmw_uros_sync_session(SYNC_TIMEOUT_MS)) {
+        Serial.printf("[micro-ROS] WARNING: clock sync failed (agent=%s:%d). "
+                      "Map drag may occur.\n",
+                      g_agent_ip.c_str(), g_agent_port);
+    } else {
+        Serial.printf("[micro-ROS] Clock synced with agent.\n");
+    }
+
     g_allocator = rcl_get_default_allocator();
     rclc_support_init(&g_support, 0, NULL, &g_allocator);
 
@@ -413,7 +427,15 @@ inline void spin() {
 
     rclc_executor_spin_some(&g_executor, RCL_MS_TO_NS(5));
 
+    // Re-sync every 10 seconds to prevent clock drift (ESP32 vs agent clocks
+    // can diverge ~10-50ms/minute depending on WiFi jitter). A short ping
+    // keeps timestamps aligned without blocking the control loop.
+    static uint32_t s_last_sync_ms = 0;
     uint32_t now = millis();
+    if (now - s_last_sync_ms >= 10000) {
+        s_last_sync_ms = now;
+        rmw_uros_sync_session(100);  // 100ms timeout for ping
+    }
 
     if (now - g_last_scan_ms >= 100) {
         g_last_scan_ms = now;
