@@ -105,49 +105,51 @@ static void cmd_vel_callback(const void *msgin) {
     }
 
     constexpr float ROS2_ANG_MIN = 0.05f;
-    constexpr float ROS2_ANG_MAX = 1.00f;
+    constexpr float ROS2_ANG_MAX_ROT = 4.00f;
+    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
     constexpr float ROS2_LIN_MIN = 0.05f;
-    constexpr float ROS2_LIN_MAX = 0.26f;
-    constexpr int32_t ROS2_PWM_MIN = 400;
+    constexpr float ROS2_LIN_MAX = 0.65f;
+    constexpr int32_t ROS2_PWM_MIN = 800;
+    constexpr int32_t ROS2_PWM_MIN_ROT = 800;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < ROS2_LIN_MIN) {
         // ── Xoay tại chỗ (linear map) ─────────────────────────────
         const float angMag = fabsf(ang);
         int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
-                                 (ROS2_ANG_MAX - ROS2_ANG_MIN)) *
-                                (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
-        if (pwm < ROS2_PWM_MIN) pwm = ROS2_PWM_MIN;
+                                 (ROS2_ANG_MAX_ROT - ROS2_ANG_MIN)) *
+                                (ROS2_PWM_MAX - ROS2_PWM_MIN_ROT) + ROS2_PWM_MIN_ROT);
+        if (pwm < ROS2_PWM_MIN_ROT) pwm = ROS2_PWM_MIN_ROT;
         if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
-        if (ang > 0) ::botRotateCW((uint16_t)pwm);
-        else         ::botRotateCCW((uint16_t)pwm);
+        if (ang > 0) ::botRotateCCW((uint16_t)pwm);
+        else         ::botRotateCW((uint16_t)pwm);
     } else if (fabs(lin) > ROS2_LIN_MIN) {
         // ── Đi thẳng / rẽ (linear map) ─────────────────────────────
-        const float linMag = fabsf(lin);
-        int32_t fwdPwm = (int32_t)(((linMag - ROS2_LIN_MIN) /
-                                     (ROS2_LIN_MAX - ROS2_LIN_MIN)) *
-                                    (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
-        if (fwdPwm < ROS2_PWM_MIN) fwdPwm = ROS2_PWM_MIN;
-        if (fwdPwm > ROS2_PWM_MAX) fwdPwm = ROS2_PWM_MAX;
+        // ── Đi thẳng / rẽ (Arcade Mix với Deadband Mapping) ────────────────
+        float normFwd = lin / ROS2_LIN_MAX;
+        float normRot = ang / ROS2_ANG_MAX_FWD;
 
-        int32_t rotPwm = (int32_t)(fabsf(ang) * (ROS2_PWM_MAX / 1.00f) * 0.5f);
-        if (rotPwm > fwdPwm) rotPwm = fwdPwm;
-        int32_t leftPwm, rightPwm;
-        if (ang >= 0) {
-            leftPwm  = fwdPwm + rotPwm;
-            rightPwm = fwdPwm - rotPwm;
-        } else {
-            leftPwm  = fwdPwm - rotPwm;
-            rightPwm = fwdPwm + rotPwm;
+        // Trong ROS, ang > 0 là xoay TRÁI (CCW).
+        // Xoay trái -> Bánh phải phải quay nhanh hơn bánh trái.
+        float normLeft  = normFwd - normRot;
+        float normRight = normFwd + normRot;
+
+        float maxNorm = max(fabsf(normLeft), fabsf(normRight));
+        if (maxNorm > 1.0f) {
+            normLeft  /= maxNorm;
+            normRight /= maxNorm;
         }
-        if (leftPwm  < 0) leftPwm  = 0;
-        if (rightPwm < 0) rightPwm = 0;
-        if (leftPwm  > ROS2_PWM_MAX) leftPwm  = ROS2_PWM_MAX;
-        if (rightPwm > ROS2_PWM_MAX) rightPwm = ROS2_PWM_MAX;
-        if (lin < 0) {
-            leftPwm  = -leftPwm;
-            rightPwm = -rightPwm;
-        }
+
+        // Map the normalized speed to physical PWM, ensuring it bypasses the deadzone
+        auto mapPwm = [&](float norm) -> int32_t {
+            if (fabsf(norm) < 0.01f) return 0;
+            int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
+            if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
+            return (norm >= 0) ? p : -p;
+        };
+
+        int32_t leftPwm  = mapPwm(normLeft);
+        int32_t rightPwm = mapPwm(normRight);
         locSetDriveCmd(
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
@@ -211,7 +213,13 @@ static void fill_scan_msg() {
         if (p.distanceMm < 120 || p.distanceMm > 8000) continue;
         if (p.quality < 10) continue;
 
-        int idx = (int)(p.angleRad / (2.0f * M_PI) * (float)g_scan_msg.ranges.size);
+        // YDLidar X3 spins clockwise, but ROS expects counter-clockwise.
+        // If we don't invert, physical right appears on RViz left!
+        float ros_angle = (2.0f * (float)M_PI) - p.angleRad;
+        if (ros_angle < 0.0f) ros_angle += 2.0f * (float)M_PI;
+        if (ros_angle >= 2.0f * (float)M_PI) ros_angle -= 2.0f * (float)M_PI;
+
+        int idx = (int)(ros_angle / (2.0f * M_PI) * (float)g_scan_msg.ranges.size);
         if (idx < 0) idx += g_scan_msg.ranges.size;
         if (idx >= (int)g_scan_msg.ranges.size) idx = g_scan_msg.ranges.size - 1;
 

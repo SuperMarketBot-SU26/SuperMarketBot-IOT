@@ -112,7 +112,7 @@
 #define IMU_FUSION_ENABLE 1   // Bật EKF (Hợp nhất Gyro + Bỏ qua Encoder nhờ variance cực lớn)
 #define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17 — U2TXD, không xung đột YDLIDAR)
 #define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18 — U2RXD, không xung đột YDLIDAR)
-#define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
+#define IMU_YAW_INVERTED 0     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 #define IMU_FUSION_DEBUG 0    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
  
  /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
