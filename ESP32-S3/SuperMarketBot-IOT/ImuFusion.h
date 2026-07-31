@@ -28,6 +28,11 @@
 #define IMU_FUSION_ENABLE  1   // Bật EKF fusion; đặt 0 để fallback về heading cũ (gyro only)
 #endif
 
+// Shared encoder-derived dTheta — set once per ODOM_PERIOD_MS (100ms) by Odometry.h,
+// consumed by imuFusion::step() every SAFE_LOOP_MS (50ms).
+// This replaces the old PWM→dθ approximation that drifted under voltage sag.
+extern float g_dThetaEnc;
+
 // --- Covariance khởi tạo & process noise ---
 #ifndef IMU_FUSION_P_HEADING
 #define IMU_FUSION_P_HEADING    1.0f     // P[0,0] ban đầu (rad^2)
@@ -49,10 +54,25 @@
 #ifndef IMU_FUSION_R_SLAM
 #define IMU_FUSION_R_SLAM       0.0025f  // (rad^2) SLAM heading (≈3° sai số 1-sigma)
 #endif
+#ifndef IMU_FUSION_DEBUG
+#define IMU_FUSION_DEBUG        0        // 1: bật serial debug mỗi 1s; 0: tắt
+#endif
 
 // --- Ngưỡng an toàn ---
 #ifndef IMU_FUSION_WHEEL_MIN_DIFF
 #define IMU_FUSION_WHEEL_MIN_DIFF  5.0f  // % PWM khác biệt tối thiểu để tin wheel-derived dθ
+#endif
+#ifndef IMU_FUSION_ZUPT_MAX_DTHETA
+#define IMU_FUSION_ZUPT_MAX_DTHETA 0.002f  // rad/tick: ngưỡng để coi là "đứng yên" (0.11°/tick)
+#endif
+#ifndef IMU_FUSION_ZUPT_GYRO_THRESH
+#define IMU_FUSION_ZUPT_GYRO_THRESH 0.005f  // rad/s — phát hiện chuyển động qua gyro (nhạy hơn encoder)
+#endif
+#ifndef IMU_FUSION_ZUPT_SETTLE_TICKS
+#define IMU_FUSION_ZUPT_SETTLE_TICKS 10    // ticks đứng yên trước khi kích hoạt ZUPT (10×50ms = 0.5s)
+#endif
+#ifndef IMU_FUSION_ZUPT_RATE
+#define IMU_FUSION_ZUPT_RATE         0.20f  // bias *= (1 - 0.20) mỗi tick khi ZUPT: halving time = ~3 ticks
 #endif
 #ifndef IMU_FUSION_BIAS_CLAMP
 #define IMU_FUSION_BIAS_CLAMP    0.5f    // |bias| không vượt ±0.5 rad/s (≈ ±28°/s)
@@ -73,6 +93,9 @@ inline State& getState() {
                     false};
   return s;
 }
+
+/** ZUPT (Zero-Velocity Update) — counters ticks of stillness to freeze heading drift. */
+static uint8_t s_zuptStillTicks = 0;  // consecutive ticks with |dThetaEnc| < threshold
 
 // Chuẩn hóa góc về [-π, π]
 inline float wrapPi(float a) {
@@ -224,20 +247,102 @@ inline float step(float gyroZRad, float dt, int leftPct, int rightPct) {
 #if IMU_FUSION_ENABLE
   State& s = getState();
 
-  // 1) Predict với gyro
+  const float dThetaPWM = ((float)rightPct - (float)leftPct) * LOC_PWM_TO_MPS / WHEEL_BASE_M * dt;
+
+  // ZUPT settle-first: đợi đủ ticks đứng yên trước khi freeze
+  if (fabsf(dThetaPWM) <= IMU_FUSION_ZUPT_MAX_DTHETA) {
+    s_zuptStillTicks++;
+    if (s_zuptStillTicks >= IMU_FUSION_ZUPT_SETTLE_TICKS) {
+      // Settled: freeze heading + nudge bias về 0
+      s.bias -= IMU_FUSION_ZUPT_RATE * s.bias;
+      if (fabsf(s.bias) < IMU_FUSION_BIAS_CLAMP * 0.01f) s.bias = 0.f;
+      s.P11 *= 0.95f;
+      return s.heading;  // heading frozen
+    }
+  } else {
+    s_zuptStillTicks = 0;
+  }
+
+  // Predict (chỉ khi chưa settled)
   predict(gyroZRad, dt);
 
-  // 2) Update wheel nếu robot đang xoay đáng kể
+  // Update wheel nếu đang xoay đáng kể
   if (fabsf((float)leftPct - (float)rightPct) >= IMU_FUSION_WHEEL_MIN_DIFF) {
-    // dθ_wheel = (rightPct - leftPct) × LOC_PWM_TO_MPS / WHEEL_BASE_M × dt
-    const float dThetaWheel =
-        ((float)rightPct - (float)leftPct) * LOC_PWM_TO_MPS / WHEEL_BASE_M * dt;
-    updateWheel(gyroZRad, dThetaWheel, dt);
+    updateWheel(gyroZRad, dThetaPWM, dt);
   }
 
   return s.heading;
 #else
   // Fallback: trả về heading cũ
+  return g_pose.headingRad;
+#endif
+}
+
+/**
+ * EKF step overload: dùng encoder thực (g_dThetaEnc) thay vì PWM-derived dθ.
+ *
+ * Gọi từ taskControl mỗi SAFE_LOOP_MS (50ms). g_dThetaEnc được set bởi
+ * odomUpdate() mỗi ODOM_PERIOD_MS (100ms) — dùng chung giá trị trong 100ms.
+ *
+ * @param gyroZRad  Vận tốc góc Z (rad/s, đã trừ bias, đã IMU_YAW_INVERTED)
+ * @param dt        Bước thời gian (giây)
+ * @return heading đã fusion (rad, [0, 2π))
+ */
+inline float step(float gyroZRad, float dt) {
+#if IMU_FUSION_ENABLE
+  State& s = getState();
+
+  // ZUPT — Zero-Velocity Update: freeze heading khi robot đứng yên.
+  // Phát hiện chuyển động bằng 2 nguồn:
+  //   1) Encoder dTheta (g_dThetaEnc) — chính xác khi motor quay.
+  //   2) Gyro thô (gyroZRad) — nhạy hơn khi bị đẩy tay (motor brake).
+  // Cần CẢ 2 điều kiện đều yên mới kích hoạt (OR để reset, AND để settle).
+  const bool encoderStill = (fabsf(g_dThetaEnc) <= IMU_FUSION_ZUPT_MAX_DTHETA);
+  const bool gyroStill    = (fabsf(gyroZRad)      <= IMU_FUSION_ZUPT_GYRO_THRESH);
+  const bool robotMoving  = !encoderStill || !gyroStill;
+
+  if (robotMoving) {
+    s_zuptStillTicks = 0;  // Reset counter khi robot chuyển động
+  } else {
+    s_zuptStillTicks++;
+    if (s_zuptStillTicks >= IMU_FUSION_ZUPT_SETTLE_TICKS) {
+      // Settled: freeze hoàn toàn — không predict, không update.
+      // Bias vẫn nudge về 0 để khi chuyển động lại, bias ≈ 0.
+      s.bias -= IMU_FUSION_ZUPT_RATE * s.bias;
+      if (fabsf(s.bias) < IMU_FUSION_BIAS_CLAMP * 0.01f) s.bias = 0.f;
+      s.P11 *= 0.95f;
+
+#if IMU_FUSION_DEBUG
+      static uint8_t s_debugTick = 0;
+      if (++s_debugTick >= 20) {
+        s_debugTick = 0;
+        Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d FROZEN\n",
+                      s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS);
+      }
+#endif
+      return s.heading;
+    }
+  }
+
+  // Predict với gyro (chỉ khi robot đang chuyển động)
+  predict(gyroZRad, dt);
+
+  // Update wheel bằng dTheta từ encoder thật.
+  if (fabsf(g_dThetaEnc) > IMU_FUSION_ZUPT_MAX_DTHETA) {
+    updateWheel(gyroZRad, g_dThetaEnc, dt);
+  }
+
+#if IMU_FUSION_DEBUG
+  static uint8_t s_debugTick = 0;
+  if (++s_debugTick >= 20) {
+    s_debugTick = 0;
+    Serial.printf("[EKF] h=%.3f bias=%.6f zupt=%u/%d\n",
+                  s.heading, s.bias, s_zuptStillTicks, IMU_FUSION_ZUPT_SETTLE_TICKS);
+  }
+#endif
+
+  return s.heading;
+#else
   return g_pose.headingRad;
 #endif
 }
@@ -255,7 +360,7 @@ inline void applySlamPose(float headingAbsRad) {
 inline void debugPrint(const char* tag = "EKF") {
 #if IMU_FUSION_ENABLE
   State& s = getState();
-  Serial.printf("[%s] h=%.3f bias=%.4f P00=%.4f P11=%.6f\n",
+    Serial.printf("[%s] h=%.3f bias=%.6f P00=%.4f P11=%.6f\n",
                 tag, s.heading, s.bias, s.P00, s.P11);
 #endif
 }

@@ -442,25 +442,23 @@ static void taskControl(void *pvParams) {
         gyroZRaw = 0.f;  // mất IMU → gyro=0, chỉ encoder dẫn heading
       }
 
-      // 4) updateWheel dựa trên encoder thật — dθ_wheel = (dsR - dsL)/WHEEL_BASE_M.
-      //    imuFusion::step() sẽ tự tính dθ_wheel từ leftPct/rightPct (PWM) → chưa tận dụng encoder.
-      //    Nâng cấp: ép leftPct/rightPct = virtual PWM tương ứng với ds encoder để step() dùng đúng.
-      //    Tuy nhiên cách này vẫn ước lượng. Cách tốt hơn: truyền thẳng dθ_wheel vào predict.
-      //    → Tạm thời vẫn dùng cách cũ (locGetDriveCmd) cho đến khi ImuFusion.h update signature.
-      int16_t leftPct = 0, rightPct = 0;
-      locGetDriveCmd(leftPct, rightPct);
+      // 4) updateWheel: imuFusion::step() dùng g_dThetaEnc (encoder thật)
+      //    được compute mỗi ODOM_PERIOD_MS (100ms) bởi odomUpdate().
+      //    Không cần gọi locGetDriveCmd nữa cho heading fusion.
 
-      // EKF step (predict + optional wheel update)
-      float fusedHeading = imuFusion::step(gyroZRaw, dt, (int)leftPct, (int)rightPct);
+      // EKF step: predict từ gyro + update từ encoder thật
+      float fusedHeading = imuFusion::step(gyroZRaw, dt);
 
-      // Rate limiter — chống single-tick SPIKE từ IMU noise / EKF divergence.
-      // Cap thấp (~1.5°/tick @ 20Hz = 30°/s) đủ để bám rotation thật (robot quay
-      // max ~1 rad/s = 57°/s) mà không khoá chuyển động hợp lệ.
+      // Rate limiter — bảo vệ EKF heading khỏi single-tick SPIKE (IMU spike, EKF divergence).
+      // Cap ở mức ~5.7°/tick (≈114°/s) — đủ cho mọi rotation hợp lệ của robot
+      // (tốc độ quay tối đa ~1.5 rad/s = 86°/s khi dùng motor 12V).
+      // EKF đã có IMU_FUSION_Q_GYRO process noise lọc noise ở layer riêng;
+      // rate limiter này chỉ cắt spike cực lớn (>5σ IMU noise).
       static float s_prevFused = 0.f;
       static bool  s_firstFused = true;
       if (!s_firstFused) {
         float dHeading = wpNormalizeAngle(fusedHeading - s_prevFused);
-        const float MAX_DHEADING = 0.026f;  // ~1.5°
+        const float MAX_DHEADING = 0.10f;  // ~5.7°
         if (fabsf(dHeading) > MAX_DHEADING) {
           float clamped = s_prevFused + copysignf(MAX_DHEADING, dHeading);
           fusedHeading = wpNormalizeAngle(clamped);

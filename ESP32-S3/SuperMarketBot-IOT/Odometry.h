@@ -30,11 +30,15 @@
 #include "SensorLayout.h"
 #include "Motors.h"           // v2.4: cần MotorId (MID_FL/FR) + g_motorDir[] cho encoder sign
 #include "Localization.h"
+#include "ImuFusion.h"        // v2.5: cần g_dThetaEnc cho EKF updateWheel
 
 #define ODOM_PERIOD_MS 100
 
 /** Tổng quãng đường (m) cho từng bánh (slot logic LF/LR/RF/RR). */
 float g_distFL = 0, g_distRL = 0, g_distFR = 0, g_distRR = 0;
+
+/** Encoder-derived dTheta (rad) — consumed by imuFusion::step() every SAFE_LOOP_MS. */
+float g_dThetaEnc = 0.f;
 
 /* ============== Encoder thật (ISR-safe) ===============================
  *
@@ -194,7 +198,13 @@ inline void odomUpdate() {
   g_state.distFR = g_distFR;
   g_state.distRR = g_distRR;
 
-  // ---- 6) Localization: truyền pose delta thật (x,y,heading) ----
+  // ---- 6) v2.5: g_dThetaEnc cho EKF heading fusion ----
+  //   dTheta = (dsR - dsL) / WHEEL_BASE_M — same formula as locUpdate but
+  //   exposed here so imuFusion::step() (called every 50ms) can consume it.
+  //   Replaced the old PWM→dθ approximation that drifted under voltage sag.
+  g_dThetaEnc = (dsR - dsL) / WHEEL_BASE_M;
+
+  // ---- 7) Localization: truyền pose delta thật (x,y,heading) ----
   //   locUpdate encoder-aware: ds/dθ từ encoder, KHÔNG dùng LOC_PWM_TO_MPS.
   locUpdate(dsL, dsR, dt);
   (void)s_lastUpdateMs;  // suppress unused-warning
@@ -246,6 +256,7 @@ inline void odomUpdate() {
 inline void odomResetDistance() {
   g_distFL = g_distRL = g_distFR = g_distRR = 0;
   g_state.distFL = g_state.distRL = g_state.distFR = g_state.distRR = 0;
+  g_dThetaEnc = 0.f;
 #if USE_ENCODER_HARDWARE
   odomResetTicks();
 #endif
