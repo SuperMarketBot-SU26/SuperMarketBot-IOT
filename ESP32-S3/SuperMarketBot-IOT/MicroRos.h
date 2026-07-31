@@ -307,6 +307,20 @@ static void fill_imu_msg() {
     g_imu_msg.angular_velocity.x = 0.0f;
     g_imu_msg.angular_velocity.y = 0.0f;
     g_imu_msg.angular_velocity.z = gyroOk ? gyroZ : 0.0f;
+
+    // Debug: log IMU publish data every 5s
+    static uint32_t s_lastImuPubLog = 0;
+    const uint32_t nowMs = millis();
+    if (nowMs - s_lastImuPubLog >= 5000) {
+        s_lastImuPubLog = nowMs;
+        if (!gyroOk) {
+            Serial.println("[uROS-IMU] gyroOk=0 — MPU6050 read FAILED, angular_velocity.z = 0");
+        } else {
+            Serial.printf("[uROS-IMU] gyroOk=1 gyroZ=%.6f rad/s headingRad=%.3f\n",
+                          gyroZ, pose.headingRad);
+        }
+    }
+
     g_imu_msg.linear_acceleration.x = 0.0f;
     g_imu_msg.linear_acceleration.y = 0.0f;
     g_imu_msg.linear_acceleration.z = 9.81f;
@@ -329,7 +343,6 @@ static void fill_imu_msg() {
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
-    const uint32_t nowMs = millis();
     g_imu_msg.header.stamp.sec = nowMs / 1000;
     g_imu_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
 }
@@ -364,6 +377,10 @@ inline bool init() {
 
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
 
+    // Publish /scan as RELIABLE (default). 
+    // A 1500-byte LaserScan requires XRCE-DDS fragmentation (default MTU 512). 
+    // Micro-XRCE-DDS only supports fragmentation on the Reliable stream.
+    // If published as BEST_EFFORT, the message is silently dropped.
     rclc_publisher_init_default(
         &g_scan_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
@@ -437,7 +454,10 @@ inline void spin() {
         rmw_uros_sync_session(100);  // 100ms timeout for ping
     }
 
-    if (now - g_last_scan_ms >= 100) {
+    // Publish scan at 5 Hz (200ms) instead of 10 Hz. The YDLidar X3 default
+    // motor speed is ~5 Hz. Publishing at 10 Hz just sends duplicate/empty data
+    // and wastes crucial WiFi UDP bandwidth.
+    if (now - g_last_scan_ms >= 200) {
         g_last_scan_ms = now;
         fill_scan_msg();
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);

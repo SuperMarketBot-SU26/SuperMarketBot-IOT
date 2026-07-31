@@ -62,10 +62,12 @@ inline void imuMpu6050Init() {
   Wire.endTransmission();
   delay(10);
 
-  // Cấu hình Bộ lọc thông thấp kỹ thuật số (DLPF = 42Hz) để lọc nhiễu rung cơ học từ motor
+  // Cấu hình Bộ lọc thông thấp kỹ thuật số (DLPF = 6 -> 5Hz) để lọc nhiễu rung cơ học
+  // cực mạnh từ motor và LiDAR. Với các chassis robot nhỏ, rung động từ motor
+  // gây sai lệch gyroscope (vibration aliasing) khiến IMU tự trôi khi động cơ chạy.
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(MPU6050_CONFIG);
-  Wire.write(3); // DLPF_CFG = 3 -> Gyro 42Hz, Delay 4.8ms (Lọc sạch rung nhiễu)
+  Wire.write(6); // DLPF_CFG = 6 -> Gyro 5Hz, Delay 19ms (Lọc tối đa)
   Wire.endTransmission();
   delay(10);
 
@@ -172,6 +174,19 @@ inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
 #if IMU_YAW_INVERTED
   gyroZRadOut = -gyroZRadOut;
 #endif
+
+  // Áp dụng hệ số bù góc từ WebUI (rất quan trọng với MPU6050 clone)
+  gyroZRadOut *= g_state.imuYawScale;
+
+  // Debug: log raw gyro every 2s so we can see what the MPU6050 actually returns
+  static uint32_t s_lastGyroLog = 0;
+  const uint32_t nowMs = millis();
+  if (nowMs - s_lastGyroLog >= 2000) {
+    s_lastGyroLog = nowMs;
+    Serial.printf("[IMU-DBG] rawZ=%d biasZ=%.2f gyroZ_deg=%.4f gyroZ_rad=%.5f\n",
+                  rawZ, s_gyroBiasZ, gyroZ, gyroZRadOut);
+  }
+
   return true;
 }
 

@@ -287,8 +287,9 @@ inline uint16_t x3DrainUart() {
     if (sampleCount > 0 && sampleCount <= 200) {
       float angleStep = (sampleCount > 1) ? (diffAngle / (sampleCount - 1)) : 0.0f;
       for (uint8_t i = 0; i < sampleCount; i++) {
+        // X3 protocol: LSB-first uint16. Distance in mm — /4 confirmed correct.
         uint16_t rawDist = s_buf[10 + i * 2] | (s_buf[11 + i * 2] << 8);
-        uint16_t distMm = rawDist / 4;
+        uint16_t distMm = rawDist / 4;               // DO NOT CHANGE
         float angleDeg = startAngle + (angleStep * i);
         if (angleDeg >= 360.0f) angleDeg -= 360.0f;
         float angleRad = angleDeg * (float)M_PI / 180.0f;
@@ -304,7 +305,7 @@ inline uint16_t x3DrainUart() {
       g_x3Diag.packetsRejected++;
     }
 
-    // 6) Trượt phần còn lại lên đầu
+    // 6) Trượt phần còn lên đầu
     if (s_bufLen >= packageLen) {
       memmove(s_buf, s_buf + packageLen, s_bufLen - packageLen);
       s_bufLen -= packageLen;

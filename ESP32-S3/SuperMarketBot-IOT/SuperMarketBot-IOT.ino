@@ -380,10 +380,12 @@ static void taskMicroRos(void *pvParams) {
     // /odom @ 30 Hz, /imu/data @ 30 Hz. It must stay inside the if
     // (g_initialized) guard so it never runs before micro-ROS is ready.
     microRos::tick();
-    // No vTaskDelay — rclc_executor_spin_some() is the yield point.
-    // The executor's internal RCL_MS_TO_NS(5) timeout means it blocks for
-    // at most 5 ms before returning, giving taskControl plenty of chances
-    // to preempt on its 50 ms tick.
+    // Small yield (1ms) prevents this task from hogging Core 1 when
+    // micro-ROS work is light. Without it, the tight spin loop starves
+    // other Core-1 tasks (WiFi stack, MQTT) and causes publish jitter.
+    // The rclc_executor_spin_some() 5ms timeout already yields during
+    // idle DDS RX windows; this vTaskDelay handles the busy path.
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
   // Unreachable — loop forever. The task is deleted by FreeRTOS only on
   // a catastrophic panic, in which case the hardware watchdog fires first.
@@ -504,12 +506,12 @@ static void taskControl(void *pvParams) {
         gyroZRaw = 0.f;  // mất IMU → gyro=0, chỉ encoder dẫn heading
       }
 
-      // 4) updateWheel: imuFusion::step() dùng g_dThetaEnc (encoder thật)
+      // 4) updateWheel: imuFusion::step() dùng g_dThetaEncRate (encoder thật)
       //    được compute mỗi ODOM_PERIOD_MS (100ms) bởi odomUpdate().
       //    Không cần gọi locGetDriveCmd nữa cho heading fusion.
 
       // EKF step: predict từ gyro + update từ encoder thật
-      float fusedHeading = imuFusion::step(gyroZRaw, dt);
+      float fusedHeading = imuFusion::step(gyroZRaw, dt, gyroOk);
 
       // Rate limiter — bảo vệ EKF heading khỏi single-tick SPIKE (IMU spike, EKF divergence).
       // Cap ở mức ~5.7°/tick (≈114°/s) — đủ cho mọi rotation hợp lệ của robot

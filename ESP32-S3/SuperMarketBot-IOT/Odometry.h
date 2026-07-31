@@ -37,8 +37,8 @@
 /** Tổng quãng đường (m) cho từng bánh (slot logic LF/LR/RF/RR). */
 float g_distFL = 0, g_distRL = 0, g_distFR = 0, g_distRR = 0;
 
-/** Encoder-derived dTheta (rad) — consumed by imuFusion::step() every SAFE_LOOP_MS. */
-float g_dThetaEnc = 0.f;
+/** Encoder-derived dTheta (rad/s) — consumed by imuFusion::step() every SAFE_LOOP_MS. */
+float g_dThetaEncRate = 0.f;
 
 /* ============== Encoder thật (ISR-safe) ===============================
  *
@@ -149,36 +149,23 @@ inline void odomUpdate() {
   // → nghĩ robot đang TIẾN với vận tốc 2×1 bánh, gây teleport pose 5-15 m
   // khi chỉ xoay 6s lệnh 0.4 rad/s (user-observed 2026-07-28).
   //
-  // Fix: LẤY DẤU từ motor direction (g_motorDir[]). Mỗi bánh:
-  //   - Số xung = magnitude (encoder đo)
-  //   - Dấu     = motor command direction (hệ thống điều khiển biết)
-  // Khi 2 bánh quay ngược chiều nhau, ds tự triệt tiêu → ds = 0 cho rotation.
-  //
-  // Cẩn thận: g_motorDir[motorId] đã bao gồm motor inversion (g_motInv[])
-  // và motor scale (g_motorScale[]). Khi lastMotorSpeed[motorId] = 0 (stop),
-  // ta giữ ds sign = 0 để không tích phân.
+  extern uint8_t g_mapMotSlot[4];
+  extern uint8_t g_motInv[4];
+  uint8_t pL = g_mapMotSlot[0] > 3 ? 0 : g_mapMotSlot[0];
+  uint8_t pR = g_mapMotSlot[2] > 3 ? 2 : g_mapMotSlot[2];
+  float rawDirL = (float)g_motorDir[pL];
+  float rawDirR = (float)g_motorDir[pR];
+  const float dirL = g_motInv[0] ? -rawDirL : rawDirL;
+  const float dirR = g_motInv[2] ? -rawDirR : rawDirR;
   const float mPerTick = WHEEL_CIRC_M / ENC_PPR;
-  // Encoder FL / FR dùng chung xung với left/right (Config.h:151-154):
-  //   FL=RL=ENC_L, FR=RR=ENC_R.
-  // Ta lấy direction từ motor FL (slot 0) cho bên trái, motor FR (slot 2) cho bên phải.
-  // BẢO THỦ: chỉ đổi dấu khi motor đã chạy đủ lâu (>200ms) để tránh trạng thái
-  // chuyển tiếp gây dấu sai. Nếu motor command gần 0 (brake/coast) → giữ ds=0.
-  const float dirL = (float)g_motorDir[MID_FL];   // -1 / 0 / +1
-  const float dirR = (float)g_motorDir[MID_FR];
   const float dsL = (dirL == 0.f) ? 0.f : dirL * ((float)dTicksL * mPerTick);
   const float dsR = (dirR == 0.f) ? 0.f : dirR * ((float)dTicksR * mPerTick);
-  const float ds  = (dsL + dsR) * 0.5f;           // translation trung bình (đã signed)
+  const float ds  = (dsL + dsR) * 0.5f;
 
   // ---- 3) RPM thật ----
-  // RPM = (xung/100ms) × (60s/100ms) / PPR = (xung × 600) / PPR
-  // v2.4: sign theo motor direction (cùng logic với dsL/dsR ở trên).
-  // Trước đây rpm_unsigned → RPM thường +6000 (cộng 2 bánh ngược dấu)
-  // → twist.twist.linear.x = 32 m/s khi xoay tại chỗ.
   const float rpmL = dirL * ((float)dTicksL / dt) * 60.0f / ENC_PPR;
   const float rpmR = dirR * ((float)dTicksR / dt) * 60.0f / ENC_PPR;
 
-  // Lưu RPM vật lý (slot 0..3 = FL, RL, FR, RR).
-  // Vì 4 bánh trái/phải dùng chung xung → set RPM cho cả 2 bánh cùng bên.
   const float rpmPhy[4] = { rpmL, rpmL, rpmR, rpmR };
   const float distPhy[4] = { dsL, dsL, dsR, dsR };
 
@@ -198,18 +185,14 @@ inline void odomUpdate() {
   g_state.distFR = g_distFR;
   g_state.distRR = g_distRR;
 
-  // ---- 6) v2.5: g_dThetaEnc cho EKF heading fusion ----
-  //   dTheta = (dsR - dsL) / WHEEL_BASE_M — same formula as locUpdate but
-  //   exposed here so imuFusion::step() (called every 50ms) can consume it.
-  //   Replaced the old PWM→dθ approximation that drifted under voltage sag.
-  g_dThetaEnc = (dsR - dsL) / WHEEL_BASE_M;
+  // ---- 6) g_dThetaEncRate cho EKF heading fusion ----
+  g_dThetaEncRate = ((dsR - dsL) / WHEEL_BASE_M) / (dt > 0.001f ? dt : 0.1f);
 
-  // ---- 7) Localization: truyền pose delta thật (x,y,heading) ----
-  //   locUpdate encoder-aware: ds/dθ từ encoder, KHÔNG dùng LOC_PWM_TO_MPS.
+  // ---- 7) Localization ----
   locUpdate(dsL, dsR, dt);
-  (void)s_lastUpdateMs;  // suppress unused-warning
+  (void)s_lastUpdateMs;
 #else
-  // Fallback: PWM simulation (giữ để debug nếu cần tắt encoder)
+  // Fallback: PWM simulation
   constexpr float MAX_TICKS_PER_TICK = (200.0f * (float)ODOM_PERIOD_MS / 60000.0f) * 20.0f;
   static float s_accTicks[4] = {0, 0, 0, 0};
 
@@ -247,8 +230,9 @@ inline void odomUpdate() {
   g_state.distRL = g_distRL;
   g_state.distFR = g_distFR;
   g_state.distRR = g_distRR;
+  g_dThetaEncRate = 0.f;
 
-  locUpdate(0, 0, 0);  // No encoder data — Localization falls back to PWM
+  locUpdate(0, 0, 0);
 #endif
 }
 
@@ -256,7 +240,7 @@ inline void odomUpdate() {
 inline void odomResetDistance() {
   g_distFL = g_distRL = g_distFR = g_distRR = 0;
   g_state.distFL = g_state.distRL = g_state.distFR = g_state.distRR = 0;
-  g_dThetaEnc = 0.f;
+  g_dThetaEncRate = 0.f;
 #if USE_ENCODER_HARDWARE
   odomResetTicks();
 #endif
