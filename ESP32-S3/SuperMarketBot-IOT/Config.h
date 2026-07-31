@@ -127,7 +127,9 @@
  #define ENC_RR        ENC_R // Bánh sau phải dùng chung xung bên Phải
  
  // Số xung trên 1 vòng bánh xe (tuỳ đĩa encoder - thường 20 khe chữ U)
- #define ENC_PPR       20.0f
+ // Bánh xe dùng động cơ vàng TT (tỉ số truyền 1:48) -> 1 vòng bánh = 48 vòng motor.
+ // Số xung 1 vòng bánh = 20 * 48 = 960
+ #define ENC_PPR       960.0f
  // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm
  #define WHEEL_DIAM_M  0.065f
  #define WHEEL_CIRC_M  (PI * WHEEL_DIAM_M)
