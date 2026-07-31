@@ -104,13 +104,13 @@ static void cmd_vel_callback(const void *msgin) {
         Serial.printf("[uROS-cb] lin=%.3f ang=%.3f → teleopActive\n", lin, ang);
     }
 
-    constexpr float ROS2_ANG_MIN = 0.05f;
+    constexpr float ROS2_ANG_MIN = 0.005f;
     constexpr float ROS2_ANG_MAX_ROT = 4.00f;
     constexpr float ROS2_ANG_MAX_FWD = 1.00f;
-    constexpr float ROS2_LIN_MIN = 0.05f;
-    constexpr float ROS2_LIN_MAX = 0.65f;
-    constexpr int32_t ROS2_PWM_MIN = 800;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 800;
+    constexpr float ROS2_LIN_MIN = 0.005f;
+    constexpr float ROS2_LIN_MAX = 0.40f;
+    constexpr int32_t ROS2_PWM_MIN = 300;
+    constexpr int32_t ROS2_PWM_MIN_ROT = 350;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < ROS2_LIN_MIN) {
