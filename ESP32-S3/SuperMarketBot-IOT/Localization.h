@@ -46,7 +46,7 @@ namespace imuFusion {
 #endif
 
 #ifndef WHEEL_BASE_M
-#define WHEEL_BASE_M    0.365f  // khoảng cách tâm 2 bên bánh (m) — dùng cho dTheta khi lách
+#define WHEEL_BASE_M    0.125f  // physical wheel base (m). Wheel slip will cause massive rotation errors, but EKF will ignore them.
 #endif
 
 #ifndef LOC_PWM_TO_MPS

@@ -108,11 +108,12 @@
  #endif // USE_HC_SR04_HARDWARE
  
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
-#define USE_IMU_MPU6050  1    // Bật cảm biến góc nghiêng IMU MPU6050
+#define USE_IMU_MPU6050  1    // Bật IMU (Sử dụng gyro để chống trôi góc)
+#define IMU_FUSION_ENABLE 1   // Bật EKF (Hợp nhất Gyro + Bỏ qua Encoder nhờ variance cực lớn)
 #define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17 — U2TXD, không xung đột YDLIDAR)
 #define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18 — U2RXD, không xung đột YDLIDAR)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
-#define IMU_FUSION_DEBUG 1    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
+#define IMU_FUSION_DEBUG 0    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
  
  /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
  #define USE_ENCODER_HARDWARE  1 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
@@ -127,9 +128,11 @@
  #define ENC_RR        ENC_R // Bánh sau phải dùng chung xung bên Phải
  
  // Số xung trên 1 vòng bánh xe (tuỳ đĩa encoder - thường 20 khe chữ U)
- // Bánh xe dùng động cơ vàng TT (tỉ số truyền 1:48) -> 1 vòng bánh = 48 vòng motor.
- // Số xung 1 vòng bánh = 20 * 48 = 960
- #define ENC_PPR       960.0f
+ // Đĩa encoder được gắn trực tiếp trên bánh xe, nên 1 vòng bánh = 20 xung.
+ #ifndef ENC_PPR
+ #define ENC_PPR       20.0f
+ #endif
+ 
  // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm
  #define WHEEL_DIAM_M  0.065f
  #define WHEEL_CIRC_M  (PI * WHEEL_DIAM_M)

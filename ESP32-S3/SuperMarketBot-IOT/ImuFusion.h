@@ -49,7 +49,7 @@ extern float g_dThetaEncRate;
 
 // --- Measurement noise ---
 #ifndef IMU_FUSION_R_WHEEL
-#define IMU_FUSION_R_WHEEL      0.04f    // (rad^2) wheel-derived dθ — variance mỗi bước 100ms
+#define IMU_FUSION_R_WHEEL      9999.0f  // Force EKF to ignore wheel-derived dθ completely (due to massive skid-steer slip)
 #endif
 #ifndef IMU_FUSION_R_SLAM
 #define IMU_FUSION_R_SLAM       0.0025f  // (rad^2) SLAM heading (≈3° sai số 1-sigma)
@@ -74,7 +74,7 @@ extern float g_dThetaEncRate;
 #define IMU_FUSION_ZUPT_MAX_DTHETA 0.002f  // rad/tick: ngưỡng để coi là "đứng yên" (0.11°/tick)
 #endif
 #ifndef IMU_FUSION_ZUPT_GYRO_THRESH
-#define IMU_FUSION_ZUPT_GYRO_THRESH 0.015f  // rad/s — tăng lên 0.015 (~0.8 deg/s) để đóng băng hoàn toàn khi đứng yên
+#define IMU_FUSION_ZUPT_GYRO_THRESH 0.050f  // rad/s — tăng lên 0.05 (~2.8 deg/s) do nhiễu cao hơn ở thang đo 2000 deg/s
 #endif
 #ifndef IMU_FUSION_ZUPT_SETTLE_TICKS
 #define IMU_FUSION_ZUPT_SETTLE_TICKS 10    // ticks đứng yên trước khi kích hoạt ZUPT (10×50ms = 0.5s)
@@ -187,6 +187,11 @@ inline void predict(float gyroZRad, float dt) {
  * Gọi TỪ step() (50ms) với rate (rad/s) từ Odometry (cập nhật mỗi 100ms).
  */
 inline void updateWheel(float gyroZRad, float wheelRate, float dt) {
+  // DISABLE completely for skid-steer robots. Wheel slip causes massive 
+  // rotational errors that will corrupt the EKF heading and gyro bias.
+  // We rely entirely on the Gyro (short-term) and SLAM (long-term).
+  return;
+
   State& s = getState();
   if (!s.initialized) return;
 
@@ -333,8 +338,10 @@ inline float step(float gyroZRad, float dt, bool gyroOk) {
     }
 #endif
     if (s_zuptStillTicks >= IMU_FUSION_ZUPT_SETTLE_TICKS) {
-      s.bias -= IMU_FUSION_ZUPT_RATE * s.bias;
-      if (fabsf(s.bias) < IMU_FUSION_BIAS_CLAMP * 0.01f) s.bias = 0.f;
+      // Khi robot đang đứng im, true_omega = 0.
+      // Mà omega = gyroZRad - s.bias = 0 => s.bias lý tưởng phải bằng gyroZRad.
+      // Kéo s.bias về phía gyroZRad để liên tục auto-calibrate bù trừ nhiễu tĩnh.
+      s.bias += IMU_FUSION_ZUPT_RATE * (gyroZRad - s.bias);
       s.P11 *= 0.95f;
 
 #if IMU_FUSION_DEBUG

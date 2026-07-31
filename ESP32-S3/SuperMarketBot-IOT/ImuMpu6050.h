@@ -71,10 +71,11 @@ inline void imuMpu6050Init() {
   Wire.endTransmission();
   delay(10);
 
-  // Cấu hình Gyro full scale range +/- 250 deg/s (Độ nhạy cao nhất: 131 LSB / (deg/s))
+  // Cấu hình Gyro full scale range +/- 2000 deg/s (Độ nhạy: 16.4 LSB / (deg/s))
+  // Chống overflow khi user cầm tay xoay robot nhanh.
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(MPU6050_GYRO_CONFIG);
-  Wire.write(0); 
+  Wire.write(0x18); // FS_SEL=3 (+/- 2000 deg/s)
   Wire.endTransmission();
   delay(10);
 
@@ -126,8 +127,8 @@ inline bool imuMpu6050Update(float &headingRad) {
   }
   s_lastImuTimeMs = now; // Chỉ cập nhật mốc thời gian khi đọc thành công
 
-  // Tính tốc độ góc Z (deg/s): Chia độ nhạy 131 LSB/(deg/s)
-  float gyroZ = (float)(rawZ - s_gyroBiasZ) / 131.0f;
+  // Tính tốc độ góc Z (deg/s): Chia độ nhạy 16.4 LSB/(deg/s) (Full scale 2000 deg/s)
+  float gyroZ = (float)(rawZ - s_gyroBiasZ) / 16.4f;
 
   // Chuyển sang rad/s
   float gyroZRad = gyroZ * (float)M_PI / 180.0f;
@@ -169,7 +170,8 @@ inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
   if (!mpu6050Read16(MPU6050_GYRO_ZOUT_H, rawZ)) return false;
 
   // Đã trừ bias (calibrated lúc init) + đổi deg/s → rad/s + IMU_YAW_INVERTED.
-  const float gyroZ = (float)(rawZ - s_gyroBiasZ) / 131.0f;
+  // Full scale 2000 deg/s -> 16.4 LSB/(deg/s)
+  const float gyroZ = (float)(rawZ - s_gyroBiasZ) / 16.4f;
   gyroZRadOut = gyroZ * (float)M_PI / 180.0f;
 #if IMU_YAW_INVERTED
   gyroZRadOut = -gyroZRadOut;
