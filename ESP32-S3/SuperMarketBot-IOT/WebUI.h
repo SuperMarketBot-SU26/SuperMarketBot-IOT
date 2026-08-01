@@ -1162,19 +1162,35 @@ function applyTelemetry(d){
 }
 const zone=document.getElementById('jsZone');
 const knob=document.getElementById('jsKnob');
-let drag=false, gStrafe=0;
+let drag=false, gStrafe=0, lastJx=0, lastJy=0, jInt=null, lastSend=0;
 function jUp(cx,cy){
   const r=zone.getBoundingClientRect();
   const R=Math.max(24, Math.min(r.width,r.height)/2 - 10);
   let ox=cx-r.left-r.width/2, oy=cy-r.top-r.height/2;
   const dist=Math.sqrt(ox*ox+oy*oy);
   if(dist>R){ ox=ox*R/dist; oy=oy*R/dist; }
-  const jX=Math.round(ox/R*100), jY=Math.round(-oy/R*100);
+  lastJx=Math.round(ox/R*100); lastJy=Math.round(-oy/R*100);
   knob.style.left=(r.width/2+ox)+'px';
   knob.style.top=(r.height/2+oy)+'px';
-  wsS({t:'joy',x:jX,y:jY,s:gStrafe});
+  const now=Date.now();
+  if(now-lastSend>=50){ lastSend=now; wsS({t:'joy',x:lastJx,y:lastJy,s:gStrafe}); }
 }
-function jRel(){ drag=false; knob.style.left='50%'; knob.style.top='50%'; wsS({t:'joy',x:0,y:0,s:gStrafe}); }
+function jStart(x,y){
+  drag=true;
+  if(jInt) clearInterval(jInt);
+  jInt=setInterval(()=>{ if(drag) wsS({t:'joy',x:lastJx,y:lastJy,s:gStrafe}); }, 100);
+  jUp(x,y);
+}
+function jRel(){
+  if(!drag) return;
+  drag=false;
+  if(jInt){ clearInterval(jInt); jInt=null; }
+  lastJx=0; lastJy=0;
+  knob.style.left='50%'; knob.style.top='50%';
+  wsS({t:'joy',x:0,y:0,s:gStrafe});
+  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:gStrafe}), 60);
+  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:gStrafe}), 120);
+}
 function sendStrafe(v){
   gStrafe=Math.round((parseInt(v,10)-50)/50*100);
   document.getElementById('strVal').textContent=v+'%';
@@ -1299,13 +1315,14 @@ function initSecNav(){
     });
   });
 }
-zone.addEventListener('mousedown',e=>{drag=true; jUp(e.clientX,e.clientY);});
+zone.addEventListener('mousedown',e=>{jStart(e.clientX,e.clientY);});
 zone.addEventListener('mousemove',e=>{if(drag) jUp(e.clientX,e.clientY);});
-zone.addEventListener('mouseup',jRel);
+window.addEventListener('mouseup',jRel);
 zone.addEventListener('mouseleave',jRel);
-zone.addEventListener('touchstart',e=>{e.preventDefault(); drag=true; jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+zone.addEventListener('touchstart',e=>{e.preventDefault(); jStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 zone.addEventListener('touchmove',e=>{e.preventDefault(); if(drag) jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-zone.addEventListener('touchend',jRel);
+window.addEventListener('touchend',jRel);
+window.addEventListener('touchcancel',jRel);
 initSecNav();
 buildLayoutGrid();
 buildMotorGrid();

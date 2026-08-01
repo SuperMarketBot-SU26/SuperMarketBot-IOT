@@ -94,9 +94,18 @@ static void cmd_vel_callback(const void *msgin) {
         return;
     }
 
+    constexpr float ROS2_ANG_MIN = 0.02f;
+    constexpr float ROS2_ANG_MAX_ROT = 4.00f;
+    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
+    constexpr float ROS2_LIN_MIN = 0.01f;
+    constexpr float ROS2_LIN_MAX = 0.40f;
+    constexpr int32_t ROS2_PWM_MIN = 350;
+    constexpr int32_t ROS2_PWM_MIN_ROT = 410;
+    constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
+
     g_state.cmd_velLastMs = nowMs;
-    // Set moving flag: true if this cmd_vel has actual motion, false if stop
-    g_state.cmd_velMoving = (fabs(lin) > 0.05f || fabs(ang) > 0.05f);
+    // Set moving flag: true if this cmd_vel is above deadzone minimums
+    g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
     // Debug: log each incoming cmd_vel (throttled)
     static uint32_t s_lastLog = 0;
     if (nowMs - s_lastLog > 500u) {
@@ -104,17 +113,8 @@ static void cmd_vel_callback(const void *msgin) {
         Serial.printf("[uROS-cb] lin=%.3f ang=%.3f → teleopActive\n", lin, ang);
     }
 
-    constexpr float ROS2_ANG_MIN = 0.005f;
-    constexpr float ROS2_ANG_MAX_ROT = 4.00f;
-    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
-    constexpr float ROS2_LIN_MIN = 0.005f;
-    constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr int32_t ROS2_PWM_MIN = 300;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 350;
-    constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
-
-    if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < ROS2_LIN_MIN) {
-        // ── Xoay tại chỗ (linear map) ─────────────────────────────
+    if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < 0.005f) {
+        // ── Xoay tại chỗ (chỉ khi linear thực sự bằng 0) ─────────────
         const float angMag = fabsf(ang);
         int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
                                  (ROS2_ANG_MAX_ROT - ROS2_ANG_MIN)) *
@@ -123,8 +123,8 @@ static void cmd_vel_callback(const void *msgin) {
         if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
         if (ang > 0) ::botRotateCCW((uint16_t)pwm);
         else         ::botRotateCW((uint16_t)pwm);
-    } else if (fabs(lin) > ROS2_LIN_MIN) {
-        // ── Đi thẳng / rẽ (linear map) ─────────────────────────────
+    } else if (fabs(lin) >= 0.005f || fabs(ang) > ROS2_ANG_MIN) {
+        // ── Đi thẳng / rẽ / cong (Arcade Mix) ─────────────────────────
         // ── Đi thẳng / rẽ (Arcade Mix với Deadband Mapping) ────────────────
         float normFwd = lin / ROS2_LIN_MAX;
         float normRot = ang / ROS2_ANG_MAX_FWD;
@@ -462,10 +462,8 @@ inline void spin() {
         rmw_uros_sync_session(100);  // 100ms timeout for ping
     }
 
-    // Publish scan at 5 Hz (200ms) instead of 10 Hz. The YDLidar X3 default
-    // motor speed is ~5 Hz. Publishing at 10 Hz just sends duplicate/empty data
-    // and wastes crucial WiFi UDP bandwidth.
-    if (now - g_last_scan_ms >= 200) {
+    // Publish scan at 10 Hz (100ms).
+    if (now - g_last_scan_ms >= 100) {
         g_last_scan_ms = now;
         fill_scan_msg();
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);

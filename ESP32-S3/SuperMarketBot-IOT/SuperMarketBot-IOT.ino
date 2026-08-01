@@ -593,6 +593,18 @@ static void taskControl(void *pvParams) {
                 g_state.cmdX, g_state.cmdY, teleopActive, (unsigned)cvAgeMs);
         }
 
+        // [Safety Watchdog] Nếu joystick WebUI quá lâu (> 500ms) không gởi cập nhật, tự động về 0
+        if (g_state.joyLastMs != 0 && (nowMs - g_state.joyLastMs > 500u)) {
+          if (g_state.cmdX != 0 || g_state.cmdY != 0 || g_state.cmdStrafe != 0) {
+            if (g_stateMutex != NULL) xSemaphoreTake(g_stateMutex, portMAX_DELAY);
+            g_state.cmdX = 0;
+            g_state.cmdY = 0;
+            g_state.cmdStrafe = 0;
+            if (g_stateMutex != NULL) xSemaphoreGive(g_stateMutex);
+            Serial.println(F("[Safety Watchdog] WebUI joystick timeout (>500ms) -> STOP"));
+          }
+        }
+
         if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
           if (!teleopActive) botStop();
         } else if (!teleopActive) {
