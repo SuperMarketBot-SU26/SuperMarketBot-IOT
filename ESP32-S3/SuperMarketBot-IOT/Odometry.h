@@ -160,7 +160,7 @@ inline void odomUpdate() {
   const float mPerTick = WHEEL_CIRC_M / ENC_PPR;
   const float dsL = (dirL == 0.f) ? 0.f : dirL * ((float)dTicksL * mPerTick);
   const float dsR = (dirR == 0.f) ? 0.f : dirR * ((float)dTicksR * mPerTick);
-  const float ds  = (dsL + dsR) * 0.5f;
+  const float ds  = ((dirL * dirR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
 
   // ---- 3) RPM thật ----
   const float rpmL = dirL * ((float)dTicksL / dt) * 60.0f / ENC_PPR;

@@ -97,10 +97,10 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_ANG_MIN = 0.02f;
     constexpr float ROS2_ANG_MAX_ROT = 4.00f;
     constexpr float ROS2_ANG_MAX_FWD = 1.00f;
-    constexpr float ROS2_LIN_MIN = 0.01f;
+    constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr int32_t ROS2_PWM_MIN = 350;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 410;
+    constexpr int32_t ROS2_PWM_MIN = 280;
+    constexpr int32_t ROS2_PWM_MIN_ROT = 300;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -166,6 +166,22 @@ static void cmd_vel_callback(const void *msgin) {
 }
 
 // ============================================================
+// TIMESTAMP HELPER: Dùng epoch wall-clock đã sync từ agent
+// ============================================================
+static void set_synced_stamp(int32_t &sec, uint32_t &nanosec, int32_t offset_ms = 0) {
+    int64_t epoch_ms = rmw_uros_epoch_millis() + offset_ms;
+    if (epoch_ms > 1000000000LL) {
+        sec = (int32_t)(epoch_ms / 1000);
+        nanosec = (uint32_t)((epoch_ms % 1000) * 1000000UL);
+    } else {
+        const int64_t nowMs = (int64_t)millis() + offset_ms;
+        const uint32_t posMs = (nowMs > 0) ? (uint32_t)nowMs : 0;
+        sec = (int32_t)(posMs / 1000);
+        nanosec = (posMs % 1000) * 1000000UL;
+    }
+}
+
+// ============================================================
 // FILL LaserScan message từ g_x3Scan
 // ============================================================
 static void fill_scan_msg() {
@@ -173,13 +189,12 @@ static void fill_scan_msg() {
     g_scan_msg.header.frame_id.data = (char*)"laser_frame";
     g_scan_msg.header.frame_id.size = 11;
     g_scan_msg.header.frame_id.capacity = 12;
-    const uint32_t nowMs = millis();
-    g_scan_msg.header.stamp.sec = nowMs / 1000;
-    g_scan_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
+    // Align scan timestamps directly with real-time odometry instantly so point clouds do not lag behind the robot in RViz
+    set_synced_stamp(g_scan_msg.header.stamp.sec, g_scan_msg.header.stamp.nanosec, 0);
 
     g_scan_msg.angle_min = 0.0f;
     g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;
+    g_scan_msg.angle_increment = (2.0f * M_PI) / 300.0f;
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;
     g_scan_msg.range_min = 0.12f;
@@ -187,16 +202,16 @@ static void fill_scan_msg() {
 
     // Init ranges array — capacity fields REQUIRED for CDR deserialization
     if (g_scan_msg.ranges.data == NULL) {
-        g_scan_msg.ranges.data = (float*)malloc(360 * sizeof(float));
-        g_scan_msg.ranges.size = 360;
-        g_scan_msg.ranges.capacity = 360;
+        g_scan_msg.ranges.data = (float*)malloc(300 * sizeof(float));
+        g_scan_msg.ranges.size = 300;
+        g_scan_msg.ranges.capacity = 300;
         if (g_scan_msg.ranges.data == NULL) {
             Serial.println("[scan] malloc FAILED");
             return;
         }
     }
 
-    for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
+    for (size_t i = 0; i < 300; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
     // intensities — explicitly zero-length to avoid garbage in CDR payload.
     // The YDLIDAR X3 does not return intensity values; leaving the struct
@@ -243,8 +258,7 @@ static void fill_odom_msg() {
     g_odom_msg.child_frame_id.size = 10;
     g_odom_msg.child_frame_id.capacity = 11;
     const uint32_t nowMs = millis();
-    g_odom_msg.header.stamp.sec = nowMs / 1000;
-    g_odom_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
+    set_synced_stamp(g_odom_msg.header.stamp.sec, g_odom_msg.header.stamp.nanosec);
 
     g_odom_msg.pose.pose.position.x = pose.x;
     g_odom_msg.pose.pose.position.y = pose.y;
@@ -256,7 +270,7 @@ static void fill_odom_msg() {
     g_odom_msg.pose.pose.orientation.z = sinf(h);
     g_odom_msg.pose.pose.orientation.w  = cosf(h);
 
-    const float wheelRps = ((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f;
+    const float wheelRps = ((g_state.rpmFL * g_state.rpmFR) < 0.f) ? 0.f : (((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f);
     const float linearMps = wheelRps * (float)WHEEL_CIRC_M;
     g_odom_msg.twist.twist.linear.x = linearMps;
     g_odom_msg.twist.twist.linear.y = 0.0f;
@@ -351,8 +365,7 @@ static void fill_imu_msg() {
     g_imu_msg.header.frame_id.data = (char*)"imu_link";
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
-    g_imu_msg.header.stamp.sec = nowMs / 1000;
-    g_imu_msg.header.stamp.nanosec = (nowMs % 1000) * 1000000UL;
+    set_synced_stamp(g_imu_msg.header.stamp.sec, g_imu_msg.header.stamp.nanosec);
 }
 
 // ============================================================
@@ -462,9 +475,11 @@ inline void spin() {
         rmw_uros_sync_session(100);  // 100ms timeout for ping
     }
 
-    // Publish scan at 10 Hz (100ms).
-    if (now - g_last_scan_ms >= 100) {
+    // Publish scan ONLY when a brand new 360° rotation has completed (scanReady==true).
+    // Prevents redundant broadcasting of stale LiDAR buffers over micro-ROS.
+    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 80)) {
         g_last_scan_ms = now;
+        g_x3Scan.scanReady = false; // consume fresh scan
         fill_scan_msg();
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
     }

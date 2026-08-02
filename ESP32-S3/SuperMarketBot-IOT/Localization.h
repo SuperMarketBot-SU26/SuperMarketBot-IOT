@@ -185,9 +185,11 @@ inline void locUpdate(float dsL, float dsR, float dt) {
   }
 
   // Translation trung bình từ 2 encoder (đã signed: dương = tiến, âm = lùi).
-  // Bảo thủ: dùng ngưỡng rất nhỏ (0.5mm/100ms) để loại bỏ tick noise khi đứng yên,
-  // vì encoder 1-channel khi motor brake vẫn có thể tạo 1-2 tick / 100ms do rung.
-  const float dsRaw = (dsL + dsR) * 0.5f;
+  // Bảo thủ: dùng ngưỡng rất nhỏ (0.5mm/100ms) để loại bỏ tick noise khi đứng yên.
+  // v2.6 (Aug 2026): Khi 2 bánh xoay ngược chiều ((dsL * dsR) < 0), robot đang xoay
+  // tại chỗ (skid-steer in-place turn). Chênh lệch số xung giữa 2 bánh lúc này là do
+  // trượt bánh (tire scrubbing). Khóa ds = 0 để tránh bay tọa độ odom trong RViz!
+  const float dsRaw = ((dsL * dsR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
   const float ds = (fabsf(dsRaw) < 0.0005f) ? 0.f : dsRaw;
 
   // dTheta từ chênh lệch 2 bánh (rad).

@@ -93,9 +93,8 @@
  /**
   * 1 = 4× HC-SR04 (né vật theo 4 góc). TF-Luna đã bỏ.
   */
- #define USE_HC_SR04_HARDWARE  1
+ #define USE_HC_SR04_HARDWARE  0
  
- #if USE_HC_SR04_HARDWARE
  /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
  #define US_STOP_CM            35
  /** Bắt đầu lách trước khi chạm vùng dừng. */
@@ -105,7 +104,6 @@
  #define OA_DETECT_CM          US_OA_DETECT_CM
  #define PATH_CLEAR_MIN_CM     US_PATH_CLEAR_CM
  #define OA_PATH_CLEAR_STREAK  18
- #endif // USE_HC_SR04_HARDWARE
  
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
 #define USE_IMU_MPU6050  1    // Bật IMU (Sử dụng gyro để chống trôi góc)
@@ -341,8 +339,8 @@
  /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
  /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
   *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
- #define STA_SSID               "Khkh"     // Ưu tiên 1 - WiFi trường FPT
- #define STA_PASS               "khoa101042"
+ #define STA_SSID               "2K2L"     // Ưu tiên 1 - WiFi trường FPT
+ #define STA_PASS               "01010804"
  #define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
  #define STA_PASS_2             "asksnuggie"
  #define STA_SSID_3             "Khkh"    // Dự phòng / quán cafe (ưu tiên 3)
@@ -389,7 +387,7 @@
   *    - Nhà (WiFi nhà):      "192.168.1.241"
   *    - Trường (WiFi trường): "192.168.x.x"   ← xem IP laptop trên mạng trường
   *    - Điểm khác: `ip addr show` trên laptop rồi điền vào đây */
- #define MICRO_ROS_AGENT_IP      "192.168.154.120"
+ #define MICRO_ROS_AGENT_IP      "192.168.1.241"
  #define MICRO_ROS_AGENT_PORT    8888
  
  /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
