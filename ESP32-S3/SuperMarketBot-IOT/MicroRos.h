@@ -100,7 +100,7 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
     constexpr int32_t ROS2_PWM_MIN = 280;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 460;  // Raised to 460 (~45% duty cycle): authoritative starting torque to overcome localized floor resistance and grout lines
+    constexpr int32_t ROS2_PWM_MIN_ROT = 500;  // Raised to 500 (~49% duty cycle): reliable starting torque to power through skid-steer floor scrubbing resistance
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
