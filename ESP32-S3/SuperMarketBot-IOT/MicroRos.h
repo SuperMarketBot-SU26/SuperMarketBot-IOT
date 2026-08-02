@@ -100,7 +100,7 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
     constexpr int32_t ROS2_PWM_MIN = 280;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 300;
+    constexpr int32_t ROS2_PWM_MIN_ROT = 460;  // Raised to 460 (~45% duty cycle): authoritative starting torque to overcome localized floor resistance and grout lines
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -113,8 +113,23 @@ static void cmd_vel_callback(const void *msgin) {
         Serial.printf("[uROS-cb] lin=%.3f ang=%.3f → teleopActive\n", lin, ang);
     }
 
+    static bool s_wasMovingLinear = false;
+    static uint32_t s_rotDelayStartMs = 0;
+
     if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < 0.005f) {
         // ── Xoay tại chỗ (chỉ khi linear thực sự bằng 0) ─────────────
+        if (s_wasMovingLinear) {
+            if (s_rotDelayStartMs == 0) {
+                s_rotDelayStartMs = nowMs;
+            }
+            if (nowMs - s_rotDelayStartMs < 500u) {
+                // Pause 500ms before initiating turning rotation so forward kinetic momentum settles cleanly
+                ::botStop();
+                return;
+            }
+            s_wasMovingLinear = false;
+            s_rotDelayStartMs = 0;
+        }
         const float angMag = fabsf(ang);
         int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
                                  (ROS2_ANG_MAX_ROT - ROS2_ANG_MIN)) *
@@ -125,6 +140,8 @@ static void cmd_vel_callback(const void *msgin) {
         else         ::botRotateCW((uint16_t)pwm);
     } else if (fabs(lin) >= 0.005f || fabs(ang) > ROS2_ANG_MIN) {
         // ── Đi thẳng / rẽ / cong (Arcade Mix) ─────────────────────────
+        s_wasMovingLinear = (fabs(lin) >= 0.005f);
+        s_rotDelayStartMs = 0;
         // ── Đi thẳng / rẽ (Arcade Mix với Deadband Mapping) ────────────────
         float normFwd = lin / ROS2_LIN_MAX;
         float normRot = ang / ROS2_ANG_MAX_FWD;
@@ -161,6 +178,8 @@ static void cmd_vel_callback(const void *msgin) {
     } else {
         // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
         // lần tới di chuyển có target tươi.
+        s_wasMovingLinear = false;
+        s_rotDelayStartMs = 0;
         ::botStop();
     }
 }
