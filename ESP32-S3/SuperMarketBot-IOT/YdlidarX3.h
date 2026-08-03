@@ -314,40 +314,15 @@ inline uint16_t x3DrainUart() {
     }
   }
 
-  // === Rate-limited diagnostic log (chỉ in khi có vấn đề) ===
+  // === Diagnostic counter maintenance ===
   if (nowMs - s_dbgLastMs > 1000) {
     s_dbgLastMs = nowMs;
-    bool hasIssue = (g_x3Diag.bytesDropped > 0) ||
-                    (g_x3Diag.syncLosses > 5) ||
-                    (g_x3Diag.checksumErrors > 0) ||
-                    (g_x3Diag.scansPublished == 0);  // critical: no scans = bug
-    if (hasIssue) {
-      Serial.printf("[X3-DIAG] read=%u drop=%u sync=%u parsed=%u zero=%u scan=%u avail=%d\n",
-                    (unsigned)g_x3Diag.bytesRead,
-                    (unsigned)g_x3Diag.bytesDropped,
-                    (unsigned)g_x3Diag.syncLosses,
-                    (unsigned)g_x3Diag.packetsParsed,
-                    (unsigned)g_x3Diag.zeroSamplePkts,
-                    (unsigned)g_x3Diag.scansPublished,
-                    Serial1.available());
-
-      // Hex dump 22 byte đầu của s_buf để debug protocol (chỉ khi scan=0
-      // — happy path không cần dump). Format như debug cũ để dễ compare.
-      static uint32_t s_dumpLastMs = 0;
-      if (g_x3Diag.scansPublished == 0 && (nowMs - s_dumpLastMs) > 5000) {
-        s_dumpLastMs = nowMs;
-        Serial.printf("[X3-HEX] first22=");
-        uint16_t n = (s_bufLen < 22) ? s_bufLen : 22;
-        for (uint16_t i = 0; i < n; i++) Serial.printf("%02X ", s_buf[i]);
-        Serial.println();
-      }
-
-      // Reset counters để lần sau chỉ log delta mới (tránh spam)
-      g_x3Diag.bytesDropped = 0;
-      g_x3Diag.syncLosses = 0;
-      g_x3Diag.checksumErrors = 0;
-      g_x3Diag.packetsRejected = 0;
-    }
+    // Suppressed repetitive serial console outputs ([X3-DIAG] & [X3-HEX]) to avoid blocking UART bandwidth during operation.
+    // Regularly reset diagnostic counters to maintain accurate delta tracking.
+    g_x3Diag.bytesDropped = 0;
+    g_x3Diag.syncLosses = 0;
+    g_x3Diag.checksumErrors = 0;
+    g_x3Diag.packetsRejected = 0;
   }
 
   return got;

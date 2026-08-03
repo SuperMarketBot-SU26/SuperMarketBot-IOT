@@ -409,17 +409,7 @@ static void taskControl(void *pvParams) {
 
     s_lastLoopMs = loopStartMs;
 
-    // DEBUG: periodic diagnostics (every 5s)
-    {
-      static uint32_t s_lastDiag = 0;
-      if (loopStartMs - s_lastDiag > 5000) {
-        s_lastDiag = loopStartMs;
-        Serial.printf("[DIAG] dtMs=%lu dt_s=%.4f freeheap=%u wifi=%s\n",
-            (unsigned long)dtMs, (double)dt_s,
-            (unsigned)esp_get_free_heap_size(),
-            WiFi.status() == WL_CONNECTED ? "conn" : "DISC");
-      }
-    }
+    // Suppressed 5s recurring [DIAG] output during active driving to minimize serial interruption
 
     // Feed hardware watchdog — catches cases where taskControl is delayed
     // (e.g., rclc_executor_spin_some blocking in micro-ROS task) for >5 s.
@@ -581,13 +571,7 @@ static void taskControl(void *pvParams) {
         // after 500ms. When teleop sends a stop command while still alive, cmd_velMoving
         // becomes false immediately → botStop() fires right away.
         const bool teleopActive = g_state.cmd_velMoving && (cvAgeMs < 500u);
-        // Debug: log control task decision every 500ms
-        static uint32_t s_lastCtrlLog = 0;
-        if (nowMs - s_lastCtrlLog > 500u) {
-            s_lastCtrlLog = nowMs;
-            Serial.printf("[Ctrl-MANUAL] cmdX=%d cmdY=%d teleopActive=%d cvAgeMs=%u\n",
-                g_state.cmdX, g_state.cmdY, teleopActive, (unsigned)cvAgeMs);
-        }
+        // Removed recurring 500ms Ctrl-MANUAL console output to eliminate UART blocking during motion execution
 
         // [Safety Watchdog] Nếu joystick WebUI quá lâu (> 500ms) không gởi cập nhật, tự động về 0
         if (g_state.joyLastMs != 0 && (nowMs - g_state.joyLastMs > 500u)) {

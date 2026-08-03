@@ -107,15 +107,12 @@ static void cmd_vel_callback(const void *msgin) {
     g_state.cmd_velLastMs = nowMs;
     // Set moving flag: true if this cmd_vel is above deadzone minimums
     g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
-    // Debug: log each incoming cmd_vel (throttled)
-    static uint32_t s_lastLog = 0;
-    if (nowMs - s_lastLog > 500u) {
-        s_lastLog = nowMs;
-        Serial.printf("[uROS-cb] lin=%.3f ang=%.3f → teleopActive\n", lin, ang);
-    }
+    // Removed repetitive cmd_vel serial logging to conserve CPU cycles and prevent UART buffer stalling
 
-    static bool s_wasMovingLinear = false;
-    static uint32_t s_rotDelayStartMs = 0;
+    enum class MotionMode : uint8_t { STOPPED, LINEAR, ANGULAR };
+    static MotionMode s_lastMotionMode = MotionMode::STOPPED;
+    static uint32_t s_transitionStartMs = 0;
+    static uint32_t s_stoppedStartMs = 0;
     static uint32_t s_stepCycleStartMs = 0;
     // Stepwise linear driving tracking variables
     static float s_linStartX = 0.0f;
@@ -127,18 +124,19 @@ static void cmd_vel_callback(const void *msgin) {
         // ── Xoay tại chỗ (chỉ khi linear thực sự bằng 0) ─────────────
         s_linTracking = false;
         s_linPauseStartMs = 0;
-        if (s_wasMovingLinear) {
-            if (s_rotDelayStartMs == 0) {
-                s_rotDelayStartMs = nowMs;
+        s_stoppedStartMs = 0;
+        if (s_lastMotionMode == MotionMode::LINEAR) {
+            if (s_transitionStartMs == 0) {
+                s_transitionStartMs = nowMs;
             }
-            if (nowMs - s_rotDelayStartMs < 500u) {
-                // Pause 500ms before initiating turning rotation so forward kinetic momentum settles cleanly
+            if (nowMs - s_transitionStartMs < 800u) {
+                // Pause 800ms when transitioning from linear driving to rotation so kinetic momentum settles and SLAM stabilizes
                 ::botStop();
                 return;
             }
-            s_wasMovingLinear = false;
-            s_rotDelayStartMs = 0;
+            s_transitionStartMs = 0;
         }
+        s_lastMotionMode = MotionMode::ANGULAR;
 
         // ── Stepwise "Pulse-and-Wait" Turning Controller ─────────────
         // Overcomes skid-steer static friction via short torque pulses while
@@ -165,9 +163,20 @@ static void cmd_vel_callback(const void *msgin) {
         else         ::botRotateCW((uint16_t)pwm);
     } else if (fabs(lin) >= 0.005f || fabs(ang) > ROS2_ANG_MIN) {
         // ── Đi thẳng / rẽ / cong (Arcade Mix) ─────────────────────────
-        s_wasMovingLinear = (fabs(lin) >= 0.005f);
-        s_rotDelayStartMs = 0;
         s_stepCycleStartMs = 0;
+        s_stoppedStartMs = 0;
+        if (s_lastMotionMode == MotionMode::ANGULAR) {
+            if (s_transitionStartMs == 0) {
+                s_transitionStartMs = nowMs;
+            }
+            if (nowMs - s_transitionStartMs < 800u) {
+                // Pause 800ms when transitioning from rotation to linear advancement so SLAM locks final heading transform
+                ::botStop();
+                return;
+            }
+            s_transitionStartMs = 0;
+        }
+        s_lastMotionMode = MotionMode::LINEAR;
 
         // ── Stepwise "Pulse-and-Wait" Linear Driving Controller ────────
         // Halts the robot after every 35cm (0.35m) of linear travel for a 350ms pause.
@@ -236,11 +245,15 @@ static void cmd_vel_callback(const void *msgin) {
     } else {
         // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
         // lần tới di chuyển có target tươi.
-        s_wasMovingLinear = false;
-        s_rotDelayStartMs = 0;
+        if (s_stoppedStartMs == 0) s_stoppedStartMs = nowMs;
+        if (nowMs - s_stoppedStartMs >= 800u) {
+            // Once stationary for 800ms+, reset motion mode so future initial driving commands start immediately without extra transition delay
+            s_lastMotionMode = MotionMode::STOPPED;
+        }
         s_stepCycleStartMs = 0;
         s_linTracking = false;
         s_linPauseStartMs = 0;
+        s_transitionStartMs = 0;
         ::botStop();
     }
 }
@@ -274,7 +287,7 @@ static void fill_scan_msg() {
 
     g_scan_msg.angle_min = 0.0f;
     g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;
+    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;  // Restored to 360 beams (1.0 deg/beam) to prevent WiFi UDP fragmentation
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;
     g_scan_msg.range_min = 0.12f;
@@ -423,16 +436,13 @@ static void fill_imu_msg() {
     g_imu_msg.angular_velocity.y = 0.0f;
     g_imu_msg.angular_velocity.z = gyroOk ? gyroZ : 0.0f;
 
-    // Debug: log IMU publish data every 5s
+    // Only log hardware sensor errors; suppress periodic status output during normal operation to preserve throughput
     static uint32_t s_lastImuPubLog = 0;
     const uint32_t nowMs = millis();
     if (nowMs - s_lastImuPubLog >= 5000) {
         s_lastImuPubLog = nowMs;
         if (!gyroOk) {
             Serial.println("[uROS-IMU] gyroOk=0 — MPU6050 read FAILED, angular_velocity.z = 0");
-        } else {
-            Serial.printf("[uROS-IMU] gyroOk=1 gyroZ=%.6f rad/s headingRad=%.3f\n",
-                          gyroZ, pose.headingRad);
         }
     }
 
@@ -573,9 +583,8 @@ inline void spin() {
         rmw_uros_sync_session(100);  // 100ms timeout for ping
     }
 
-    // Publish scan ONLY when a brand new 360° rotation has completed (scanReady==true).
-    // Prevents redundant broadcasting of stale LiDAR buffers over micro-ROS.
-    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 50)) {
+    // Publish scan when a brand new 360° rotation finishes, throttled to 120ms (~8 Hz) to match physical sensor RPM without flooding Wi-Fi UDP buffers
+    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 120)) {
         g_last_scan_ms = now;
         g_x3Scan.scanReady = false; // consume fresh scan
         fill_scan_msg();

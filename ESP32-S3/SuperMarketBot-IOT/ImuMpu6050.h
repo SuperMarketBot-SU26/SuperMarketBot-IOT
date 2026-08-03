@@ -180,15 +180,7 @@ inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
   // Áp dụng hệ số bù góc từ WebUI (rất quan trọng với MPU6050 clone)
   gyroZRadOut *= g_state.imuYawScale;
 
-  // Debug: log raw gyro every 2s so we can see what the MPU6050 actually returns
-  static uint32_t s_lastGyroLog = 0;
-  const uint32_t nowMs = millis();
-  if (nowMs - s_lastGyroLog >= 2000) {
-    s_lastGyroLog = nowMs;
-    Serial.printf("[IMU-DBG] rawZ=%d biasZ=%.2f gyroZ_deg=%.4f gyroZ_rad=%.5f\n",
-                  rawZ, s_gyroBiasZ, gyroZ, gyroZRadOut);
-  }
-
+  // Suppressed periodic raw gyro debug logging to avoid unnecessary UART overhead
   return true;
 }
 
