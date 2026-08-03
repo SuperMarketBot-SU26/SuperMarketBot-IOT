@@ -95,12 +95,13 @@ static void cmd_vel_callback(const void *msgin) {
     }
 
     constexpr float ROS2_ANG_MIN = 0.02f;
-    constexpr float ROS2_ANG_MAX_ROT = 4.00f;
+    constexpr float ROS2_ANG_MAX_ROT = 1.50f;  // Aligned with Nav2 operational turning profile (was 4.00)
     constexpr float ROS2_ANG_MAX_FWD = 1.00f;
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr int32_t ROS2_PWM_MIN = 280;
-    constexpr int32_t ROS2_PWM_MIN_ROT = 500;  // Raised to 500 (~49% duty cycle): reliable starting torque to power through skid-steer floor scrubbing resistance
+    constexpr int32_t ROS2_PWM_MIN = 320;  // Raised from 280 to 320: increase linear driving power for crisper and faster movement responsiveness
+    constexpr int32_t ROS2_PWM_MIN_ROT = 560;  // 560 (~55% power): robust initial pulse torque to overcome skid-steer static floor friction
+    constexpr int32_t ROS2_PWM_MAX_ROT = 700;  // 700 (~68% power): controlled burst momentum during stepwise rotation pulses
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -115,9 +116,17 @@ static void cmd_vel_callback(const void *msgin) {
 
     static bool s_wasMovingLinear = false;
     static uint32_t s_rotDelayStartMs = 0;
+    static uint32_t s_stepCycleStartMs = 0;
+    // Stepwise linear driving tracking variables
+    static float s_linStartX = 0.0f;
+    static float s_linStartY = 0.0f;
+    static bool s_linTracking = false;
+    static uint32_t s_linPauseStartMs = 0;
 
     if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < 0.005f) {
         // ── Xoay tại chỗ (chỉ khi linear thực sự bằng 0) ─────────────
+        s_linTracking = false;
+        s_linPauseStartMs = 0;
         if (s_wasMovingLinear) {
             if (s_rotDelayStartMs == 0) {
                 s_rotDelayStartMs = nowMs;
@@ -130,21 +139,68 @@ static void cmd_vel_callback(const void *msgin) {
             s_wasMovingLinear = false;
             s_rotDelayStartMs = 0;
         }
+
+        // ── Stepwise "Pulse-and-Wait" Turning Controller ─────────────
+        // Overcomes skid-steer static friction via short torque pulses while
+        // inserting zero-velocity pauses between steps. During stationary intervals,
+        // LiDAR scans remain unblurred so Ceres scan matching reliably aligns orientation in RViz.
+        if (s_stepCycleStartMs == 0 || (nowMs - s_stepCycleStartMs > 850u)) {
+            s_stepCycleStartMs = nowMs;
+        }
+        const uint32_t elapsed = nowMs - s_stepCycleStartMs;
+        if (elapsed >= 210u) {
+            // Pause phase (210ms .. 850ms): hold completely still for 640ms so LiDAR mirror completes
+            // four clean stationary 360° sweeps and Ceres solver firmly snaps scan orientation onto the map.
+            ::botStop();
+            return;
+        }
+
         const float angMag = fabsf(ang);
         int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
                                  (ROS2_ANG_MAX_ROT - ROS2_ANG_MIN)) *
-                                (ROS2_PWM_MAX - ROS2_PWM_MIN_ROT) + ROS2_PWM_MIN_ROT);
+                                (ROS2_PWM_MAX_ROT - ROS2_PWM_MIN_ROT) + ROS2_PWM_MIN_ROT);
         if (pwm < ROS2_PWM_MIN_ROT) pwm = ROS2_PWM_MIN_ROT;
-        if (pwm > ROS2_PWM_MAX) pwm = ROS2_PWM_MAX;
+        if (pwm > ROS2_PWM_MAX_ROT) pwm = ROS2_PWM_MAX_ROT;
         if (ang > 0) ::botRotateCCW((uint16_t)pwm);
         else         ::botRotateCW((uint16_t)pwm);
     } else if (fabs(lin) >= 0.005f || fabs(ang) > ROS2_ANG_MIN) {
         // ── Đi thẳng / rẽ / cong (Arcade Mix) ─────────────────────────
         s_wasMovingLinear = (fabs(lin) >= 0.005f);
         s_rotDelayStartMs = 0;
+        s_stepCycleStartMs = 0;
+
+        // ── Stepwise "Pulse-and-Wait" Linear Driving Controller ────────
+        // Halts the robot after every 35cm (0.35m) of linear travel for a 350ms pause.
+        // During stationary settling, kinetic damping finishes immediately and SLAM Toolbox
+        // captures clean, zero-speed LiDAR sweeps to maintain pinpoint map alignment.
+        if (s_linPauseStartMs > 0) {
+            if (nowMs - s_linPauseStartMs < 350u) {
+                // Hold completely still for 350ms so LiDAR scans snap onto map walls
+                ::botStop();
+                return;
+            }
+            // Pause window completed: reset position tracking for next 35cm movement step
+            s_linPauseStartMs = 0;
+            s_linTracking = false;
+        }
+
+        if (!s_linTracking) {
+            s_linStartX = g_pose.x;
+            s_linStartY = g_pose.y;
+            s_linTracking = true;
+        } else {
+            float distTraveled = hypotf(g_pose.x - s_linStartX, g_pose.y - s_linStartY);
+            if (distTraveled >= 0.35f) {
+                // Reached 35cm target: initiate stationary scan pause
+                s_linPauseStartMs = nowMs;
+                ::botStop();
+                return;
+            }
+        }
+
         // ── Đi thẳng / rẽ (Arcade Mix với Deadband Mapping) ────────────────
         float normFwd = lin / ROS2_LIN_MAX;
-        float normRot = ang / ROS2_ANG_MAX_FWD;
+        float normRot = (ang / ROS2_ANG_MAX_FWD) * 1.25f;  // Apply 1.25x rotational torque gain to ensure smooth cornering against floor friction
 
         // Trong ROS, ang > 0 là xoay TRÁI (CCW).
         // Xoay trái -> Bánh phải phải quay nhanh hơn bánh trái.
@@ -157,10 +213,12 @@ static void cmd_vel_callback(const void *msgin) {
             normRight /= maxNorm;
         }
 
-        // Map the normalized speed to physical PWM, ensuring it bypasses the deadzone
+        // Map the normalized speed to physical PWM, ensuring it bypasses static gear/carpet resistance during curves
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
-            int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - ROS2_PWM_MIN) + ROS2_PWM_MIN);
+            // Balanced starting voltage during turning curves (460 vs 280) to maintain momentum without wheel slippage
+            int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 460 : ROS2_PWM_MIN;
+            int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
             if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
             return (norm >= 0) ? p : -p;
         };
@@ -180,6 +238,9 @@ static void cmd_vel_callback(const void *msgin) {
         // lần tới di chuyển có target tươi.
         s_wasMovingLinear = false;
         s_rotDelayStartMs = 0;
+        s_stepCycleStartMs = 0;
+        s_linTracking = false;
+        s_linPauseStartMs = 0;
         ::botStop();
     }
 }
@@ -213,7 +274,7 @@ static void fill_scan_msg() {
 
     g_scan_msg.angle_min = 0.0f;
     g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 300.0f;
+    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;
     g_scan_msg.time_increment = 0.0f;
     g_scan_msg.scan_time = 0.1f;
     g_scan_msg.range_min = 0.12f;
@@ -221,16 +282,16 @@ static void fill_scan_msg() {
 
     // Init ranges array — capacity fields REQUIRED for CDR deserialization
     if (g_scan_msg.ranges.data == NULL) {
-        g_scan_msg.ranges.data = (float*)malloc(300 * sizeof(float));
-        g_scan_msg.ranges.size = 300;
-        g_scan_msg.ranges.capacity = 300;
+        g_scan_msg.ranges.data = (float*)malloc(360 * sizeof(float));
+        g_scan_msg.ranges.size = 360;
+        g_scan_msg.ranges.capacity = 360;
         if (g_scan_msg.ranges.data == NULL) {
             Serial.println("[scan] malloc FAILED");
             return;
         }
     }
 
-    for (size_t i = 0; i < 300; i++) g_scan_msg.ranges.data[i] = 0.0f;
+    for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
 
     // intensities — explicitly zero-length to avoid garbage in CDR payload.
     // The YDLIDAR X3 does not return intensity values; leaving the struct
@@ -289,7 +350,20 @@ static void fill_odom_msg() {
     g_odom_msg.pose.pose.orientation.z = sinf(h);
     g_odom_msg.pose.pose.orientation.w  = cosf(h);
 
-    const float wheelRps = ((g_state.rpmFL * g_state.rpmFR) < 0.f) ? 0.f : (((g_state.rpmFL + g_state.rpmFR) * 0.5f) / 60.0f);
+    // Kinematic Slip Guard: prevent single-channel encoder scrubbing during turns from spiking forward twist velocity in RViz
+    float avgRpm = 0.f;
+    if ((g_state.rpmFL * g_state.rpmFR) < 0.f) {
+        avgRpm = 0.f;
+    } else {
+        const float diffRpm = fabsf(g_state.rpmFR - g_state.rpmFL);
+        const float meanRpm = (g_state.rpmFL + g_state.rpmFR) * 0.5f;
+        if (diffRpm > fabsf(meanRpm) && diffRpm > 5.0f) {
+            avgRpm = (fabsf(g_state.rpmFL) < fabsf(g_state.rpmFR)) ? g_state.rpmFL : g_state.rpmFR;
+        } else {
+            avgRpm = meanRpm;
+        }
+    }
+    const float wheelRps = avgRpm / 60.0f;
     const float linearMps = wheelRps * (float)WHEEL_CIRC_M;
     g_odom_msg.twist.twist.linear.x = linearMps;
     g_odom_msg.twist.twist.linear.y = 0.0f;
@@ -391,6 +465,8 @@ static void fill_imu_msg() {
 // INIT: Khởi tạo micro-ROS node
 // ============================================================
 inline bool init() {
+    if (g_initialized) return true;
+
     set_microros_wifi_transports(
         (char*)WiFi.SSID().c_str(),
         (char*)WiFi.psk().c_str(),
@@ -398,22 +474,25 @@ inline bool init() {
         (uint16_t)g_agent_port
     );
 
-    // BLOCKING: sync ESP32 clock with agent clock. Without this, message
-    // timestamps (scan, odom) use ESP32 millis() while TF uses agent wall-clock,
-    // causing ~50ms/second drift → map drag, odom jump, SLAM desync.
-    // Timeout 2s so a failed sync doesn't hang boot; on failure we proceed
-    // with unsynced timestamps which is still better than nothing.
-    const int SYNC_TIMEOUT_MS = 2000;
-    if (!rmw_uros_sync_session(SYNC_TIMEOUT_MS)) {
-        Serial.printf("[micro-ROS] WARNING: clock sync failed (agent=%s:%d). "
-                      "Map drag may occur.\n",
-                      g_agent_ip.c_str(), g_agent_port);
-    } else {
-        Serial.printf("[micro-ROS] Clock synced with agent.\n");
+    // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
+    if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {
+        return false;
     }
 
     g_allocator = rcl_get_default_allocator();
-    rclc_support_init(&g_support, 0, NULL, &g_allocator);
+    if (rclc_support_init(&g_support, 0, NULL, &g_allocator) != RCL_RET_OK) {
+        Serial.println(F("[micro-ROS] rclc_support_init failed"));
+        return false;
+    }
+
+    // Synchronize clock timestamps after establishing active XRCE-DDS connection
+    const int SYNC_TIMEOUT_MS = 1000;
+    if (!rmw_uros_sync_session(SYNC_TIMEOUT_MS)) {
+        Serial.printf("[micro-ROS] WARNING: clock sync failed (agent=%s:%d). Map drag may occur.\n",
+                      g_agent_ip.c_str(), g_agent_port);
+    } else {
+        Serial.println(F("[micro-ROS] Clock synced with agent."));
+    }
 
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
 
@@ -496,20 +575,20 @@ inline void spin() {
 
     // Publish scan ONLY when a brand new 360° rotation has completed (scanReady==true).
     // Prevents redundant broadcasting of stale LiDAR buffers over micro-ROS.
-    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 80)) {
+    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 50)) {
         g_last_scan_ms = now;
         g_x3Scan.scanReady = false; // consume fresh scan
         fill_scan_msg();
         rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
     }
 
-    if (now - g_last_odom_ms >= 33) {
+    if (now - g_last_odom_ms >= 20) {
         g_last_odom_ms = now;
         fill_odom_msg();
         rcl_publish(&g_odom_pub, &g_odom_msg, NULL);
     }
 
-    if (now - g_last_imu_ms >= 33) {
+    if (now - g_last_imu_ms >= 20) {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
@@ -517,6 +596,7 @@ inline void spin() {
 }
 
 inline void tick() { spin(); }
+inline bool isInitialized() { return g_initialized; }
 
 }  // namespace microRos
 #else
@@ -524,6 +604,7 @@ namespace microRos {
   inline bool init() { return false; }
   inline void spin() {}
   inline void tick() {}
+  inline bool isInitialized() { return false; }
 }
 #endif
 

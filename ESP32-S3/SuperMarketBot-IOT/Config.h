@@ -370,13 +370,15 @@
   *    Robot lái được ngay sau ~2s boot. micro-ROS kết nối khi WiFi ready. */
  #define WIFI_STA_ASYNC          1
  /** 0 = Tắt hẳn kết nối MQTT (tránh treo khi chạy offline/local). 1 = Bật MQTT. */
- #define MQTT_ENABLE             1
- 
+ #define MQTT_ENABLE             0
+ /** 0 = Tắt stream LiDAR sang tablet (tiết kiệm RAM & băng thông khi chạy ROS2). 1 = Bật. */
+ #define LIDAR_STREAM_ENABLE     0
+
  /* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
  /** 0 = Dùng Rosbridge WebSocket.
   *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
  #define USE_MICRO_ROS           1
- /** 0 = Tắt WebUI + MQTT tasks (ROS2-only diagnostics mode).
+/** 0 = Tắt WebUI + MQTT tasks (ROS2-only diagnostics mode).
   *  1 = Bật WebIO + MQTT tasks song song với micro-ROS.
   *  Khi tắt, CtrlJson.h vẫn compile nhưng không ai gọi đến → không có race
   *  giữa WebUI joystick / MQTT EStop và ROS2 /cmd_vel + 500 ms watchdog. */

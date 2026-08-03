@@ -105,21 +105,14 @@ static void taskWifiConnect(void *pvParams) {
   // WiFi ready — now init micro-ROS. This takes ~1-3s (UDP + DDS handshake).
   // If agent isn't running yet, it will retry each spin_some() call.
 #if USE_MICRO_ROS
-  Serial.println(F("[taskWifiConnect] Initializing micro-ROS..."));
-  if (microRos::init()) {
-    Serial.println(F("[taskWifiConnect] micro-ROS OK!"));
-    BaseType_t mr = xTaskCreatePinnedToCore(
-        taskMicroRos, "MicroRos",
-        8192, nullptr, 4,
-        nullptr, 1
-    );
-    Serial.printf("[taskWifiConnect] taskMicroRos %s on Core 1.\n",
-                  (mr == pdPASS) ? "created" : "FAILED");
-  } else {
-    Serial.println(F("[taskWifiConnect] micro-ROS FAILED — will retry in spin."));
-    // Don't create taskMicroRos here. It will retry on next boot.
-    // taskMicroRos already polls g_initialized, so no special retry needed.
-  }
+  Serial.println(F("[taskWifiConnect] Spawning micro-ROS task (will connect in background)..."));
+  BaseType_t mr = xTaskCreatePinnedToCore(
+      taskMicroRos, "MicroRos",
+      8192, nullptr, 4,
+      nullptr, 1
+  );
+  Serial.printf("[taskWifiConnect] taskMicroRos %s on Core 1.\n",
+                (mr == pdPASS) ? "created" : "FAILED");
 #endif
 
   vTaskDelete(nullptr);  // Task done — WiFi stays connected via ESP32 WiFi driver
@@ -375,20 +368,23 @@ static void taskMicroRos(void *pvParams) {
   Serial.println(F("[taskMicroRos] Started on Core 1"));
 
   while (true) {
+    if (!microRos::isInitialized()) {
+      if (microRos::init()) {
+        Serial.println(F("[taskMicroRos] micro-ROS successfully connected & initialized!"));
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(2000));  // Retry background connection every 2s without blocking Core 1
+        continue;
+      }
+    }
     // microRos::tick() calls rclc_executor_spin_some() (5 ms timeout),
-    // then runs the 500 ms /cmd_vel watchdog, then publishes /scan @ 10 Hz,
-    // /odom @ 30 Hz, /imu/data @ 30 Hz. It must stay inside the if
-    // (g_initialized) guard so it never runs before micro-ROS is ready.
+    // then runs the 500 ms /cmd_vel watchdog, then publishes /scan @ 20 Hz,
+    // /odom @ 50 Hz, /imu/data @ 50 Hz.
     microRos::tick();
     // Small yield (1ms) prevents this task from hogging Core 1 when
     // micro-ROS work is light. Without it, the tight spin loop starves
     // other Core-1 tasks (WiFi stack, MQTT) and causes publish jitter.
-    // The rclc_executor_spin_some() 5ms timeout already yields during
-    // idle DDS RX windows; this vTaskDelay handles the busy path.
     vTaskDelay(pdMS_TO_TICKS(1));
   }
-  // Unreachable — loop forever. The task is deleted by FreeRTOS only on
-  // a catastrophic panic, in which case the hardware watchdog fires first.
 }
 
 static void taskControl(void *pvParams) {
@@ -879,19 +875,14 @@ void setup() {
 #elif WIFI_STA_ENABLE
   if (WiFi.status() == WL_CONNECTED) {
 #if USE_MICRO_ROS
-    Serial.println(F("[Boot] Initializing micro-ROS..."));
-    if (microRos::init()) {
-      Serial.println(F("[Boot] micro-ROS initialized SUCCESS."));
-      BaseType_t mr = xTaskCreatePinnedToCore(
-          taskMicroRos, "MicroRos",
-          8192, nullptr, 4,
-          nullptr, 1
-      );
-      Serial.printf(F("[Boot] taskMicroRos %s on Core 1.\n"),
-          (mr == pdPASS) ? "created" : "FAILED");
-    } else {
-      Serial.println(F("[Boot] micro-ROS FAILED."));
-    }
+    Serial.println(F("[Boot] Spawning micro-ROS task..."));
+    BaseType_t mr = xTaskCreatePinnedToCore(
+        taskMicroRos, "MicroRos",
+        8192, nullptr, 4,
+        nullptr, 1
+    );
+    Serial.printf(F("[Boot] taskMicroRos %s on Core 1.\n"),
+        (mr == pdPASS) ? "created" : "FAILED");
 #endif
   }
 #endif

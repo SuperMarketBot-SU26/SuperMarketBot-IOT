@@ -46,7 +46,7 @@ namespace imuFusion {
 #endif
 
 #ifndef WHEEL_BASE_M
-#define WHEEL_BASE_M    0.125f  // physical wheel base (m). Wheel slip will cause massive rotation errors, but EKF will ignore them.
+#define WHEEL_BASE_M    0.22f   // Synchronized with ROS 2 URDF (0.22m track width) to prevent rotational overshooting during steering
 #endif
 
 #ifndef LOC_PWM_TO_MPS
@@ -186,10 +186,23 @@ inline void locUpdate(float dsL, float dsR, float dt) {
 
   // Translation trung bình từ 2 encoder (đã signed: dương = tiến, âm = lùi).
   // Bảo thủ: dùng ngưỡng rất nhỏ (0.5mm/100ms) để loại bỏ tick noise khi đứng yên.
-  // v2.6 (Aug 2026): Khi 2 bánh xoay ngược chiều ((dsL * dsR) < 0), robot đang xoay
-  // tại chỗ (skid-steer in-place turn). Chênh lệch số xung giữa 2 bánh lúc này là do
-  // trượt bánh (tire scrubbing). Khóa ds = 0 để tránh bay tọa độ odom trong RViz!
-  const float dsRaw = ((dsL * dsR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
+  // v2.7 (Aug 2026): Kinematic Slip Guard - Khi xoay tại chỗ hoặc xoay góc gắt trong lúc rẽ (arcade turn),
+  // bánh xe skid-steer bị trượt (tire scrubbing) khiến xung encoder 1 kênh không phân biệt chiều tăng cao đột ngột.
+  // Nếu chênh lệch 2 bánh vượt quá dịch chuyển tịnh tiến trung bình, khóa ds về tốc độ bánh chậm hơn (inside wheel)
+  // hoặc 0 để tuyệt đối không cho phép tọa độ nhảy vọt về phía trước (forward jump) trong RViz!
+  float dsRaw = 0.f;
+  if ((dsL * dsR) < 0.f) {
+    dsRaw = 0.f;  // Xoay tại chỗ (opposite polarity) → không di chuyển tịnh tiến
+  } else {
+    const float diff = fabsf(dsR - dsL);
+    const float avg  = (dsL + dsR) * 0.5f;
+    if (diff > fabsf(avg) && diff > 0.002f) {
+      // Đang rẽ gắt hoặc trượt góc → giới hạn tịnh tiến theo bánh chậm hơn để không nhảy ảo
+      dsRaw = (fabsf(dsL) < fabsf(dsR)) ? dsL : dsR;
+    } else {
+      dsRaw = avg;
+    }
+  }
   const float ds = (fabsf(dsRaw) < 0.0005f) ? 0.f : dsRaw;
 
   // dTheta từ chênh lệch 2 bánh (rad).

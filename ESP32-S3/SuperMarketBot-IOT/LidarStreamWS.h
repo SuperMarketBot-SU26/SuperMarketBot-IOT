@@ -48,6 +48,11 @@
 // Phase 2: Nếu gắn thêm LiDAR quay (RPLIDAR/YDLidar), thay đổi phần này
 #define LIDAR_STREAM_NUM_POINTS 2
 
+#ifndef LIDAR_STREAM_ENABLE
+  #define LIDAR_STREAM_ENABLE 1
+#endif
+
+#if LIDAR_STREAM_ENABLE
 /* ─── WebSocket Server riêng cho Lidar Stream ──────────────────── */
 static WebSocketsServer g_wsLidarServer(WS_LIDAR_PORT);
 static bool             g_lidarStreamActive = false;
@@ -202,5 +207,12 @@ inline void lidarStreamRegisterHttpEndpoint(WebServer &httpServer) {
 
   Serial.println(F("[LidarStream] HTTP /lidar_info đăng ký thành công."));
 }
+#else
+inline void lidarStreamInit() {
+  Serial.println(F("[LidarStream] Disabled (LIDAR_STREAM_ENABLE = 0)"));
+}
+inline void lidarStreamLoop() { }
+inline void lidarStreamRegisterHttpEndpoint(WebServer &httpServer) { (void)httpServer; }
+#endif
 
 #endif // LIDAR_STREAM_WS_H
