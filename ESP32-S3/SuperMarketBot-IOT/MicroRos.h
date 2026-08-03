@@ -100,8 +100,8 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
     constexpr int32_t ROS2_PWM_MIN = 320;  // Raised from 280 to 320: increase linear driving power for crisper and faster movement responsiveness
-    constexpr int32_t ROS2_PWM_MIN_ROT = 560;  // 560 (~55% power): robust initial pulse torque to overcome skid-steer static floor friction
-    constexpr int32_t ROS2_PWM_MAX_ROT = 700;  // 700 (~68% power): controlled burst momentum during stepwise rotation pulses
+    constexpr int32_t ROS2_PWM_MIN_ROT = 720;  // 720 (~70% power): boosted minimum pulse torque to aggressively power through carpet/floor friction
+    constexpr int32_t ROS2_PWM_MAX_ROT = 880;  // 880 (~86% power): strong burst rotational momentum during stepwise turn pulses
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -139,16 +139,16 @@ static void cmd_vel_callback(const void *msgin) {
         s_lastMotionMode = MotionMode::ANGULAR;
 
         // ── Stepwise "Pulse-and-Wait" Turning Controller ─────────────
-        // Overcomes skid-steer static friction via short torque pulses while
+        // Overcomes skid-steer static friction via torque pulses while
         // inserting zero-velocity pauses between steps. During stationary intervals,
         // LiDAR scans remain unblurred so Ceres scan matching reliably aligns orientation in RViz.
-        if (s_stepCycleStartMs == 0 || (nowMs - s_stepCycleStartMs > 850u)) {
+        if (s_stepCycleStartMs == 0 || (nowMs - s_stepCycleStartMs > 1200u)) {
             s_stepCycleStartMs = nowMs;
         }
         const uint32_t elapsed = nowMs - s_stepCycleStartMs;
-        if (elapsed >= 210u) {
-            // Pause phase (210ms .. 850ms): hold completely still for 640ms so LiDAR mirror completes
-            // four clean stationary 360° sweeps and Ceres solver firmly snaps scan orientation onto the map.
+        if (elapsed >= 400u) {
+            // Pause phase (400ms .. 1200ms): hold completely still for 800ms so LiDAR mirror completes
+            // four clean stationary 360° sweeps after energetic torque rotation and SLAM firmly locks heading.
             ::botStop();
             return;
         }
@@ -179,7 +179,7 @@ static void cmd_vel_callback(const void *msgin) {
         s_lastMotionMode = MotionMode::LINEAR;
 
         // ── Stepwise "Pulse-and-Wait" Linear Driving Controller ────────
-        // Halts the robot after every 35cm (0.35m) of linear travel for a 350ms pause.
+        // Halts the robot after every 60cm (0.60m) of linear travel for a 350ms pause.
         // During stationary settling, kinetic damping finishes immediately and SLAM Toolbox
         // captures clean, zero-speed LiDAR sweeps to maintain pinpoint map alignment.
         if (s_linPauseStartMs > 0) {
@@ -188,7 +188,7 @@ static void cmd_vel_callback(const void *msgin) {
                 ::botStop();
                 return;
             }
-            // Pause window completed: reset position tracking for next 35cm movement step
+            // Pause window completed: reset position tracking for next 60cm movement step
             s_linPauseStartMs = 0;
             s_linTracking = false;
         }
@@ -199,8 +199,8 @@ static void cmd_vel_callback(const void *msgin) {
             s_linTracking = true;
         } else {
             float distTraveled = hypotf(g_pose.x - s_linStartX, g_pose.y - s_linStartY);
-            if (distTraveled >= 0.35f) {
-                // Reached 35cm target: initiate stationary scan pause
+            if (distTraveled >= 0.60f) {
+                // Reached 60cm target: initiate stationary scan pause
                 s_linPauseStartMs = nowMs;
                 ::botStop();
                 return;
