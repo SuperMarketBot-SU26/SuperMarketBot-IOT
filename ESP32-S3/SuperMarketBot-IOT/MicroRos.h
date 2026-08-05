@@ -631,13 +631,12 @@ inline void spin() {
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
     }
 
-    // 2. Publish scan when a brand new 360° rotation finishes (~10 Hz matching physical sensor RPM)
+    // 2. Publish scan when a brand new 360° rotation finishes (~6.6 Hz - 10 Hz matching physical sensor RPM)
     if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 100)) {
         g_last_scan_ms = now;
         g_x3Scan.scanReady = false; // consume fresh scan
-        // [TESTING BENCHMARK]: Temporarily disabled LiDAR publishing over USB serial to eliminate packet fragmentation and test unblocked 50Hz Odometry/IMU rates!
-        // fill_scan_msg();
-        // rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
+        fill_scan_msg();
+        rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
     }
 
     // 3. Re-sync every 10 seconds to prevent clock drift
