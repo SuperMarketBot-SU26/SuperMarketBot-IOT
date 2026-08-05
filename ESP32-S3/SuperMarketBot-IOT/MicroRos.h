@@ -471,18 +471,60 @@ static void fill_imu_msg() {
     set_synced_stamp(g_imu_msg.header.stamp.sec, g_imu_msg.header.stamp.nanosec);
 }
 
+#if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+extern "C" {
+    bool arduino_transport_open(struct uxrCustomTransport * transport) {
+        (void)transport;
+        Serial0.begin(921600); // 921600 baud for ultra-fast low-latency sensor streaming!
+        return true;
+    }
+    bool arduino_transport_close(struct uxrCustomTransport * transport) {
+        (void)transport;
+        Serial0.end();
+        return true;
+    }
+    size_t arduino_transport_write(struct uxrCustomTransport* transport, const uint8_t * buf, size_t len, uint8_t * err) {
+        (void)transport;
+        (void)err;
+        return Serial0.write(buf, len);
+    }
+    size_t arduino_transport_read(struct uxrCustomTransport* transport, uint8_t* buf, size_t len, int timeout, uint8_t* err) {
+        (void)transport;
+        (void)err;
+        uint32_t start = millis();
+        size_t read_bytes = 0;
+        // Cap maximum blocking read timeout to 2ms so XRCE-DDS polling never delays our 50Hz control & telemetry loop!
+        uint32_t max_wait = (timeout > 2) ? 2 : (uint32_t)timeout;
+        while (read_bytes < len) {
+            if (Serial0.available() > 0) {
+                buf[read_bytes++] = Serial0.read();
+            } else {
+                if (read_bytes > 0 || (millis() - start) >= max_wait) break; // Instant return once available bytes are consumed
+                delayMicroseconds(50);
+            }
+        }
+        return read_bytes;
+    }
+}
+#endif
+
 // ============================================================
 // INIT: Khởi tạo micro-ROS node
 // ============================================================
 inline bool init() {
     if (g_initialized) return true;
 
+#if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+    logger.muteRealSerial = true; // Ngắt ASCII log lên cáp USB để nhường đường cho XRCE-DDS
+    set_microros_transports();    // Kích hoạt giao thức XRCE-DDS qua Serial0 phần cứng!
+#else
     set_microros_wifi_transports(
         (char*)WiFi.SSID().c_str(),
         (char*)WiFi.psk().c_str(),
         (char*)g_agent_ip.c_str(),
         (uint16_t)g_agent_port
     );
+#endif
 
     // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
     if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {
@@ -515,12 +557,15 @@ inline bool init() {
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
         "/scan"
     );
+    // /odom is 736 bytes (due to two 36-double covariance matrices), exceeding the default 512-byte
+    // MTU. Micro-XRCE-DDS silently drops fragmented messages on BEST_EFFORT, so it MUST be RELIABLE!
     rclc_publisher_init_default(
         &g_odom_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
         "/odom"
     );
-    rclc_publisher_init_default(
+    // /imu/data is 328 bytes (<512 bytes MTU), fits inside a single packet, and runs at 50Hz BEST_EFFORT!
+    rclc_publisher_init_best_effort(
         &g_imu_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
         "/imu/data"
@@ -571,26 +616,9 @@ inline bool init() {
 inline void spin() {
     if (!g_initialized) return;
 
-    rclc_executor_spin_some(&g_executor, RCL_MS_TO_NS(5));
-
-    // Re-sync every 10 seconds to prevent clock drift (ESP32 vs agent clocks
-    // can diverge ~10-50ms/minute depending on WiFi jitter). A short ping
-    // keeps timestamps aligned without blocking the control loop.
-    static uint32_t s_last_sync_ms = 0;
     uint32_t now = millis();
-    if (now - s_last_sync_ms >= 10000) {
-        s_last_sync_ms = now;
-        rmw_uros_sync_session(100);  // 100ms timeout for ping
-    }
 
-    // Publish scan when a brand new 360° rotation finishes, throttled to 120ms (~8 Hz) to match physical sensor RPM without flooding Wi-Fi UDP buffers
-    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 120)) {
-        g_last_scan_ms = now;
-        g_x3Scan.scanReady = false; // consume fresh scan
-        fill_scan_msg();
-        rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
-    }
-
+    // 1. Publish 50 Hz real-time telemetry FIRST before any incoming executor polling!
     if (now - g_last_odom_ms >= 20) {
         g_last_odom_ms = now;
         fill_odom_msg();
@@ -601,6 +629,29 @@ inline void spin() {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
+    }
+
+    // 2. Publish scan when a brand new 360° rotation finishes (~10 Hz matching physical sensor RPM)
+    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 100)) {
+        g_last_scan_ms = now;
+        g_x3Scan.scanReady = false; // consume fresh scan
+        // [TESTING BENCHMARK]: Temporarily disabled LiDAR publishing over USB serial to eliminate packet fragmentation and test unblocked 50Hz Odometry/IMU rates!
+        // fill_scan_msg();
+        // rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
+    }
+
+    // 3. Re-sync every 10 seconds to prevent clock drift
+    static uint32_t s_last_sync_ms = 0;
+    if (now - s_last_sync_ms >= 10000) {
+        s_last_sync_ms = now;
+        rmw_uros_sync_session(100);  // 100ms timeout for ping
+    }
+
+    // 4. Poll incoming subscriptions with 0ns timeout so XRCE-DDS never blocks telemetry!
+    static uint32_t s_last_spin_some_ms = 0;
+    if (now - s_last_spin_some_ms >= 20) {
+        s_last_spin_some_ms = now;
+        rclc_executor_spin_some(&g_executor, 0);
     }
 }
 

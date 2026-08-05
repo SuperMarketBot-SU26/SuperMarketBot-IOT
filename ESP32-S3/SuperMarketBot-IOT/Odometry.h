@@ -32,7 +32,7 @@
 #include "Localization.h"
 #include "ImuFusion.h"        // v2.5: cần g_dThetaEnc cho EKF updateWheel
 
-#define ODOM_PERIOD_MS 100  // Tuned to 100 ms (10 Hz): alternates with SAFE_LOOP_MS (50 ms) to guarantee CPU idle cycles for unbroken Wi-Fi UDP networking
+#define ODOM_PERIOD_MS 20   // Upgraded to 20 ms (50 Hz): High-frequency real-time odometry updates over USB Serial!
 
 /** Tổng quãng đường (m) cho từng bánh (slot logic LF/LR/RF/RR). */
 float g_distFL = 0, g_distRL = 0, g_distFR = 0, g_distRR = 0;

@@ -48,6 +48,8 @@ private:
     }
 
 public:
+    bool muteRealSerial = false;
+
     LoggerSerial(HardwareSerial& real) : _realSerial(real) {}
 
     void begin(unsigned long baud) {
@@ -55,17 +57,19 @@ public:
     }
 
     size_t write(uint8_t c) override {
-        size_t r = _realSerial.write(c);
+        size_t r = 0;
+        if (!muteRealSerial) r = _realSerial.write(c);
         bufferChar((char)c);
-        return r;
+        return r != 0 ? r : 1;
     }
 
     size_t write(const uint8_t *buffer, size_t size) override {
-        size_t r = _realSerial.write(buffer, size);
+        size_t r = 0;
+        if (!muteRealSerial) r = _realSerial.write(buffer, size);
         for (size_t i = 0; i < size; i++) {
             bufferChar((char)buffer[i]);
         }
-        return r;
+        return r != 0 ? r : size;
     }
 };
 

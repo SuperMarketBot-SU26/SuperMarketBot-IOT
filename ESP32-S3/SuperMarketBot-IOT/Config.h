@@ -252,7 +252,7 @@
  
  /** Đọc LiDAR dưới ngưỡng này (cm) coi là nhiễu / sàn / ngoài tầm tin cậy TF-Luna (~20cm min). */
  #define LIDAR_MIN_VALID_CM      18
- #define SAFE_LOOP_MS    50    // Chu kỳ vòng an toàn (ms) — 30→50ms để WebIO có CPU thở
+ #define SAFE_LOOP_MS    20    // Upgraded to 20ms (50 Hz) for high-speed control & Odometry telemetry over USB Serial!
  /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
  #define SAFE_SIDE_AVOID_CM  30
  
@@ -374,10 +374,13 @@
  /** 0 = Tắt stream LiDAR sang tablet (tiết kiệm RAM & băng thông khi chạy ROS2). 1 = Bật. */
  #define LIDAR_STREAM_ENABLE     0
 
- /* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
- /** 0 = Dùng Rosbridge WebSocket.
-  *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
- #define USE_MICRO_ROS           1
+/* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
+/** 0 = Dùng Rosbridge WebSocket.
+ *  1 = Bật Micro-ROS. */
+#define USE_MICRO_ROS           1
+/** 0 = Dùng Wi-Fi UDP.
+ *  1 = Dùng USB Serial cắm thẳng vào Raspberry Pi 5 (zero-latency, không phụ thuộc mạng). */
+#define MICRO_ROS_USE_SERIAL    1
 /** 0 = Tắt WebUI + MQTT tasks (ROS2-only diagnostics mode).
   *  1 = Bật WebIO + MQTT tasks song song với micro-ROS.
   *  Khi tắt, CtrlJson.h vẫn compile nhưng không ai gọi đến → không có race

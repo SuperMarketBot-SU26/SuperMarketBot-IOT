@@ -102,10 +102,10 @@ static void taskWifiConnect(void *pvParams) {
     Serial.println(F("[WiFi] All SSIDs failed — AP-only mode."));
   }
 
-  // WiFi ready — now init micro-ROS. This takes ~1-3s (UDP + DDS handshake).
-  // If agent isn't running yet, it will retry each spin_some() call.
 #if USE_MICRO_ROS
-  Serial.println(F("[taskWifiConnect] Spawning micro-ROS task (will connect in background)..."));
+#if !defined(MICRO_ROS_USE_SERIAL) || (MICRO_ROS_USE_SERIAL == 0)
+  // WiFi ready — now init micro-ROS via UDP.
+  Serial.println(F("[taskWifiConnect] Spawning micro-ROS task (WiFi UDP in background)..."));
   BaseType_t mr = xTaskCreatePinnedToCore(
       taskMicroRos, "MicroRos",
       8192, nullptr, 4,
@@ -113,6 +113,7 @@ static void taskWifiConnect(void *pvParams) {
   );
   Serial.printf("[taskWifiConnect] taskMicroRos %s on Core 1.\n",
                 (mr == pdPASS) ? "created" : "FAILED");
+#endif
 #endif
 
   vTaskDelete(nullptr);  // Task done — WiFi stays connected via ESP32 WiFi driver
@@ -853,22 +854,21 @@ void setup() {
   Serial.println(F("[Boot] taskControl created on Core 1."));
 
 #if WIFI_STA_ASYNC
-  // WiFi STA + micro-ROS init chạy background — robot lái được ngay sau ~2s boot.
+  // WiFi STA chạy background
   xTaskCreatePinnedToCore(taskWifiConnect, "WiFiConnect", 8192, nullptr, 1, nullptr, 1);
   Serial.println(F("[Boot] taskWifiConnect spawned (non-blocking)."));
-#elif WIFI_STA_ENABLE
-  if (WiFi.status() == WL_CONNECTED) {
-#if USE_MICRO_ROS
-    Serial.println(F("[Boot] Spawning micro-ROS task..."));
-    BaseType_t mr = xTaskCreatePinnedToCore(
-        taskMicroRos, "MicroRos",
-        8192, nullptr, 4,
-        nullptr, 1
-    );
-    Serial.printf(F("[Boot] taskMicroRos %s on Core 1.\n"),
-        (mr == pdPASS) ? "created" : "FAILED");
 #endif
+
+#if USE_MICRO_ROS
+#if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+  Serial.println(F("[Boot] Spawning micro-ROS over USB Serial directly..."));
+  xTaskCreatePinnedToCore(taskMicroRos, "MicroRos", 8192, nullptr, 4, nullptr, 1);
+#elif !WIFI_STA_ASYNC && WIFI_STA_ENABLE
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(F("[Boot] Spawning micro-ROS task..."));
+    xTaskCreatePinnedToCore(taskMicroRos, "MicroRos", 8192, nullptr, 4, nullptr, 1);
   }
+#endif
 #endif
   printMemInfo();
 }
