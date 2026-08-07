@@ -67,7 +67,7 @@ inline void imuMpu6050Init() {
   // gây sai lệch gyroscope (vibration aliasing) khiến IMU tự trôi khi động cơ chạy.
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(MPU6050_CONFIG);
-  Wire.write(6); // DLPF_CFG = 6 -> Gyro 5Hz, Delay 19ms (Lọc tối đa)
+  Wire.write(3); // DLPF_CFG = 3 -> Gyro 42Hz, Delay 4.8ms (Giảm delay để theo kịp tốc độ xoay, tránh bị trượt Odometry so với LiDAR)
   Wire.endTransmission();
   delay(10);
 

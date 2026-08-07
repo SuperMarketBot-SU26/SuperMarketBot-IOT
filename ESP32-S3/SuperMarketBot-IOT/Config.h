@@ -51,7 +51,7 @@
  #define LIDAR_MAX_CM  800
  
  /* -------------------- YDLIDAR X3 (360°, 30m, SLAM) ------------------ */
- #define USE_YDLIDAR_X3          1   // Bật YDLIDAR X3
+ #define USE_YDLIDAR_X3          0   // Tắt YDLIDAR (đã cắm trực tiếp vào Pi 5)
  #define YDLIDAR_X3_TX           44  // ESP32 RX (GPIO 44) -> TX của YDLIDAR
  #define YDLIDAR_X3_RX           1   // ESP32 TX (GPIO 1) -> RX của YDLIDAR
  #define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
@@ -110,7 +110,7 @@
 #define IMU_FUSION_ENABLE 1   // Bật EKF (Hợp nhất Gyro + Bỏ qua Encoder nhờ variance cực lớn)
 #define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17 — U2TXD, không xung đột YDLIDAR)
 #define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18 — U2RXD, không xung đột YDLIDAR)
-#define IMU_YAW_INVERTED 0     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
+#define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 #define IMU_FUSION_DEBUG 0    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
  
  /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */

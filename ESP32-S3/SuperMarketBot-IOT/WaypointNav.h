@@ -97,8 +97,6 @@ extern volatile uint32_t   s_wpT0;          // Millis khi bắt đầu waypoint 
 extern volatile uint32_t   s_wpObstHoldStart;
 extern OaContext           s_wpOa;
 
-/* Settle delay sau khi OA xong — tránh lao ngay vào hướng mới */
-extern volatile uint32_t   s_wpSettleUntilMs;
 
 /* Status string cho MQTT telemetry */
 char g_wpStatus[32] = "idle";
@@ -306,7 +304,6 @@ inline void wpNavTick() {
       OaTickResult r = oaTick(s_wpOa, fCm, now);
       if (r == OA_RES_DONE) {
         s_wpT0 = now;
-        s_wpSettleUntilMs = now + 450;  // Pause 450ms để filter sensor ổn định
         usFilterReset();
         pidSpeedReset();
         pidYawReset();
@@ -438,17 +435,6 @@ inline void wpNavTick() {
       return;
     }
 
-    /* ── Settle delay sau OA: dừng chờ filter sensor ổn định ──── */
-    if (s_wpSettleUntilMs > 0) {
-      if (now < s_wpSettleUntilMs) {
-        botStop();
-        pidSpeedReset();
-        return;
-      } else {
-        s_wpSettleUntilMs = 0;
-        Serial.println(F("[WP] Settle done — tiep tuc Pure Pursuit."));
-      }
-    }
 
     /* ── Differential Drive: Lái hướng về Waypoint ────────────────
      *
@@ -607,9 +593,8 @@ inline void wpNavTick() {
     if (pathClear) {
       oaReset(s_wpOa);
       usFilterReset();
-      s_wpSettleUntilMs = now + 450;  // Settle trước khi đi tiếp
       wpSetState(WP_NAVIGATING, now, "navigating");
-      Serial.println(F("[WP] Duong truoc du xa — settle 450ms roi resume."));
+      Serial.println(F("[WP] Duong truoc du xa — resume."));
       return;
     }
 

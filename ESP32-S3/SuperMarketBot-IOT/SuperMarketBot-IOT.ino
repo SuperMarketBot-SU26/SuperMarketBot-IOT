@@ -152,7 +152,7 @@ volatile WpFsmState s_wpFsm   = WP_IDLE;
 volatile uint32_t   s_wpT0    = 0;
 volatile uint32_t   s_wpObstHoldStart = 0;
 OaContext            s_wpOa;
-volatile uint32_t   s_wpSettleUntilMs = 0;
+
 
 RobotState g_state = {
   .usFront = LIDAR_MAX_CM, .usBack = LIDAR_MAX_CM, .usLeft = LIDAR_MAX_CM, .usRight = LIDAR_MAX_CM,

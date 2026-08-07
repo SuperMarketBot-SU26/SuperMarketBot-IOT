@@ -29,18 +29,13 @@
 #include <rmw_microros/rmw_microros.h>  // v2.1: rmw_uros_sync_session + epoch_millis
 
 // Message types
-#include <sensor_msgs/msg/laser_scan.h>
 #include <nav_msgs/msg/odometry.h>
 #include <geometry_msgs/msg/twist.h>
 #include <sensor_msgs/msg/imu.h>
 
-// WiFi transport (UDP)
-#include <WiFi.h>
-
 // Forward declarations — actual types defined in YdlidarX3.h / Localization.h
 // Placed at GLOBAL scope (NOT inside microRos namespace) so the linker
 // correctly finds the definitions in YdlidarX3.h / Localization.h.
-extern struct X3Scan g_x3Scan;
 extern struct Pose2D g_pose;
 
 namespace microRos {
@@ -52,7 +47,6 @@ static rclc_support_t   g_support;
 static rclc_executor_t  g_executor;
 
 // Publishers
-static rcl_publisher_t  g_scan_pub;
 static rcl_publisher_t  g_odom_pub;
 static rcl_publisher_t  g_imu_pub;
 
@@ -60,7 +54,6 @@ static rcl_publisher_t  g_imu_pub;
 static rcl_subscription_t g_cmd_vel_sub;
 
 // Messages
-static sensor_msgs__msg__LaserScan  g_scan_msg;
 static nav_msgs__msg__Odometry      g_odom_msg;
 static sensor_msgs__msg__Imu        g_imu_msg;
 static geometry_msgs__msg__Twist    g_cmd_vel_msg;
@@ -86,7 +79,6 @@ static void cmd_vel_callback(const void *msgin) {
     float ang = msg->angular.z;
 
     // Gate: WebUI joystick còn tươi → bỏ qua /cmd_vel từ ROS2.
-    // Threshold 300ms phù hợp với WebUI publish joystick ở ~10Hz.
     const uint32_t nowMs = millis();
     const uint32_t joyAgeMs = (g_state.joyLastMs != 0)
         ? (nowMs - g_state.joyLastMs) : 0xFFFFFFFFu;
@@ -95,124 +87,20 @@ static void cmd_vel_callback(const void *msgin) {
     }
 
     constexpr float ROS2_ANG_MIN = 0.02f;
-    constexpr float ROS2_ANG_MAX_ROT = 1.50f;  // Aligned with Nav2 operational turning profile (was 4.00)
-    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr int32_t ROS2_PWM_MIN = 320;  // Raised from 280 to 320: increase linear driving power for crisper and faster movement responsiveness
-    constexpr int32_t ROS2_PWM_MIN_ROT = 720;  // 720 (~70% power): boosted minimum pulse torque to aggressively power through carpet/floor friction
-    constexpr int32_t ROS2_PWM_MAX_ROT = 880;  // 880 (~86% power): strong burst rotational momentum during stepwise turn pulses
+    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
+    constexpr int32_t ROS2_PWM_MIN = 320;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
-    // Set moving flag: true if this cmd_vel is above deadzone minimums
     g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
-    // Removed repetitive cmd_vel serial logging to conserve CPU cycles and prevent UART buffer stalling
 
-    enum class MotionMode : uint8_t { STOPPED, LINEAR, ANGULAR };
-    static MotionMode s_lastMotionMode = MotionMode::STOPPED;
-    static uint32_t s_transitionStartMs = 0;
-    static uint32_t s_stoppedStartMs = 0;
-    static uint32_t s_stepCycleStartMs = 0;
-    // Stepwise linear driving tracking variables
-    static float s_linStartX = 0.0f;
-    static float s_linStartY = 0.0f;
-    static bool s_linTracking = false;
-    static uint32_t s_linPauseStartMs = 0;
-
-    if (fabs(ang) > ROS2_ANG_MIN && fabs(lin) < 0.005f) {
-        // ── Xoay tại chỗ (chỉ khi linear thực sự bằng 0) ─────────────
-        s_linTracking = false;
-        s_linPauseStartMs = 0;
-        s_stoppedStartMs = 0;
-        if (s_lastMotionMode == MotionMode::LINEAR) {
-            if (s_transitionStartMs == 0) {
-                s_transitionStartMs = nowMs;
-            }
-            if (nowMs - s_transitionStartMs < 800u) {
-                // Pause 800ms when transitioning from linear driving to rotation so kinetic momentum settles and SLAM stabilizes
-                ::botStop();
-                return;
-            }
-            s_transitionStartMs = 0;
-        }
-        s_lastMotionMode = MotionMode::ANGULAR;
-
-        // ── Stepwise "Pulse-and-Wait" Turning Controller ─────────────
-        // Overcomes skid-steer static friction via torque pulses while
-        // inserting zero-velocity pauses between steps. During stationary intervals,
-        // LiDAR scans remain unblurred so Ceres scan matching reliably aligns orientation in RViz.
-        if (s_stepCycleStartMs == 0 || (nowMs - s_stepCycleStartMs > 1200u)) {
-            s_stepCycleStartMs = nowMs;
-        }
-        const uint32_t elapsed = nowMs - s_stepCycleStartMs;
-        if (elapsed >= 400u) {
-            // Pause phase (400ms .. 1200ms): hold completely still for 800ms so LiDAR mirror completes
-            // four clean stationary 360° sweeps after energetic torque rotation and SLAM firmly locks heading.
-            ::botStop();
-            return;
-        }
-
-        const float angMag = fabsf(ang);
-        int32_t pwm = (int32_t)(((angMag - ROS2_ANG_MIN) /
-                                 (ROS2_ANG_MAX_ROT - ROS2_ANG_MIN)) *
-                                (ROS2_PWM_MAX_ROT - ROS2_PWM_MIN_ROT) + ROS2_PWM_MIN_ROT);
-        if (pwm < ROS2_PWM_MIN_ROT) pwm = ROS2_PWM_MIN_ROT;
-        if (pwm > ROS2_PWM_MAX_ROT) pwm = ROS2_PWM_MAX_ROT;
-        if (ang > 0) ::botRotateCCW((uint16_t)pwm);
-        else         ::botRotateCW((uint16_t)pwm);
-    } else if (fabs(lin) >= 0.005f || fabs(ang) > ROS2_ANG_MIN) {
-        // ── Đi thẳng / rẽ / cong (Arcade Mix) ─────────────────────────
-        s_stepCycleStartMs = 0;
-        s_stoppedStartMs = 0;
-        if (s_lastMotionMode == MotionMode::ANGULAR) {
-            if (s_transitionStartMs == 0) {
-                s_transitionStartMs = nowMs;
-            }
-            if (nowMs - s_transitionStartMs < 800u) {
-                // Pause 800ms when transitioning from rotation to linear advancement so SLAM locks final heading transform
-                ::botStop();
-                return;
-            }
-            s_transitionStartMs = 0;
-        }
-        s_lastMotionMode = MotionMode::LINEAR;
-
-        // ── Stepwise "Pulse-and-Wait" Linear Driving Controller ────────
-        // Halts the robot after every 60cm (0.60m) of linear travel for a 350ms pause.
-        // During stationary settling, kinetic damping finishes immediately and SLAM Toolbox
-        // captures clean, zero-speed LiDAR sweeps to maintain pinpoint map alignment.
-        if (s_linPauseStartMs > 0) {
-            if (nowMs - s_linPauseStartMs < 350u) {
-                // Hold completely still for 350ms so LiDAR scans snap onto map walls
-                ::botStop();
-                return;
-            }
-            // Pause window completed: reset position tracking for next 60cm movement step
-            s_linPauseStartMs = 0;
-            s_linTracking = false;
-        }
-
-        if (!s_linTracking) {
-            s_linStartX = g_pose.x;
-            s_linStartY = g_pose.y;
-            s_linTracking = true;
-        } else {
-            float distTraveled = hypotf(g_pose.x - s_linStartX, g_pose.y - s_linStartY);
-            if (distTraveled >= 0.60f) {
-                // Reached 60cm target: initiate stationary scan pause
-                s_linPauseStartMs = nowMs;
-                ::botStop();
-                return;
-            }
-        }
-
-        // ── Đi thẳng / rẽ (Arcade Mix với Deadband Mapping) ────────────────
+    if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
+        // Continuous Arcade Drive (No stepping/pausing needed for USB Serial)
         float normFwd = lin / ROS2_LIN_MAX;
-        float normRot = (ang / ROS2_ANG_MAX_FWD) * 1.25f;  // Apply 1.25x rotational torque gain to ensure smooth cornering against floor friction
+        float normRot = (ang / ROS2_ANG_MAX_FWD) * 1.25f;
 
-        // Trong ROS, ang > 0 là xoay TRÁI (CCW).
-        // Xoay trái -> Bánh phải phải quay nhanh hơn bánh trái.
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
 
@@ -222,10 +110,8 @@ static void cmd_vel_callback(const void *msgin) {
             normRight /= maxNorm;
         }
 
-        // Map the normalized speed to physical PWM, ensuring it bypasses static gear/carpet resistance during curves
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
-            // Balanced starting voltage during turning curves (460 vs 280) to maintain momentum without wheel slippage
             int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 460 : ROS2_PWM_MIN;
             int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
             if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
@@ -237,23 +123,10 @@ static void cmd_vel_callback(const void *msgin) {
         locSetDriveCmd(
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
+        
         const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
-        // ROS2 đã thực sự điều khiển motor → đánh dấu để controlTask
-        // MODE_MANUAL bỏ qua (xem SuperMarketBot-IOT.ino case MODE_MANUAL).
-        g_state.cmd_velLastMs = nowMs;
         ::motorApplyLayout(sp);
     } else {
-        // lin quá nhỏ và ang quá nhỏ → không lái. Reset heading lock để
-        // lần tới di chuyển có target tươi.
-        if (s_stoppedStartMs == 0) s_stoppedStartMs = nowMs;
-        if (nowMs - s_stoppedStartMs >= 800u) {
-            // Once stationary for 800ms+, reset motion mode so future initial driving commands start immediately without extra transition delay
-            s_lastMotionMode = MotionMode::STOPPED;
-        }
-        s_stepCycleStartMs = 0;
-        s_linTracking = false;
-        s_linPauseStartMs = 0;
-        s_transitionStartMs = 0;
         ::botStop();
     }
 }
@@ -271,69 +144,6 @@ static void set_synced_stamp(int32_t &sec, uint32_t &nanosec, int32_t offset_ms 
         const uint32_t posMs = (nowMs > 0) ? (uint32_t)nowMs : 0;
         sec = (int32_t)(posMs / 1000);
         nanosec = (posMs % 1000) * 1000000UL;
-    }
-}
-
-// ============================================================
-// FILL LaserScan message từ g_x3Scan
-// ============================================================
-static void fill_scan_msg() {
-    // Update header string fields on every publish
-    g_scan_msg.header.frame_id.data = (char*)"laser_frame";
-    g_scan_msg.header.frame_id.size = 11;
-    g_scan_msg.header.frame_id.capacity = 12;
-    // Align scan timestamps directly with real-time odometry instantly so point clouds do not lag behind the robot in RViz
-    set_synced_stamp(g_scan_msg.header.stamp.sec, g_scan_msg.header.stamp.nanosec, 0);
-
-    g_scan_msg.angle_min = 0.0f;
-    g_scan_msg.angle_max = 2.0f * M_PI;
-    g_scan_msg.angle_increment = (2.0f * M_PI) / 360.0f;  // Restored to 360 beams (1.0 deg/beam) to prevent WiFi UDP fragmentation
-    g_scan_msg.time_increment = 0.0f;
-    g_scan_msg.scan_time = 0.1f;
-    g_scan_msg.range_min = 0.12f;
-    g_scan_msg.range_max = 8.0f;
-
-    // Init ranges array — capacity fields REQUIRED for CDR deserialization
-    if (g_scan_msg.ranges.data == NULL) {
-        g_scan_msg.ranges.data = (float*)malloc(360 * sizeof(float));
-        g_scan_msg.ranges.size = 360;
-        g_scan_msg.ranges.capacity = 360;
-        if (g_scan_msg.ranges.data == NULL) {
-            Serial.println("[scan] malloc FAILED");
-            return;
-        }
-    }
-
-    for (size_t i = 0; i < 360; i++) g_scan_msg.ranges.data[i] = 0.0f;
-
-    // intensities — explicitly zero-length to avoid garbage in CDR payload.
-    // The YDLIDAR X3 does not return intensity values; leaving the struct
-    // fields at their zero-initialized values is safe because micro-ROS
-    // CDR serializes the size/capacity fields.  Explicitly setting them
-    // avoids any ambiguity between library versions on how to handle an
-    // uninitialized sequence.
-    g_scan_msg.intensities.data     = NULL;
-    g_scan_msg.intensities.size     = 0;
-    g_scan_msg.intensities.capacity = 0;
-
-    for (uint16_t i = 0; i < g_x3Scan.count; i++) {
-        const LidarPoint &p = g_x3Scan.points[i];
-        if (p.distanceMm < 120 || p.distanceMm > 8000) continue;
-        if (p.quality < 10) continue;
-
-        // YDLidar X3 spins clockwise, but ROS expects counter-clockwise.
-        // If we don't invert, physical right appears on RViz left!
-        float ros_angle = (2.0f * (float)M_PI) - p.angleRad;
-        if (ros_angle < 0.0f) ros_angle += 2.0f * (float)M_PI;
-        if (ros_angle >= 2.0f * (float)M_PI) ros_angle -= 2.0f * (float)M_PI;
-
-        int idx = (int)(ros_angle / (2.0f * M_PI) * (float)g_scan_msg.ranges.size);
-        if (idx < 0) idx += g_scan_msg.ranges.size;
-        if (idx >= (int)g_scan_msg.ranges.size) idx = g_scan_msg.ranges.size - 1;
-
-        float dist_m = (float)p.distanceMm / 1000.0f;
-        float &slot = g_scan_msg.ranges.data[idx];
-        if (slot == 0.0f || dist_m < slot) slot = dist_m;
     }
 }
 
@@ -514,17 +324,8 @@ extern "C" {
 inline bool init() {
     if (g_initialized) return true;
 
-#if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
     logger.muteRealSerial = true; // Ngắt ASCII log lên cáp USB để nhường đường cho XRCE-DDS
     set_microros_transports();    // Kích hoạt giao thức XRCE-DDS qua Serial0 phần cứng!
-#else
-    set_microros_wifi_transports(
-        (char*)WiFi.SSID().c_str(),
-        (char*)WiFi.psk().c_str(),
-        (char*)g_agent_ip.c_str(),
-        (uint16_t)g_agent_port
-    );
-#endif
 
     // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
     if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {
@@ -548,15 +349,6 @@ inline bool init() {
 
     rclc_node_init_default(&g_node, "supermarketbot_esp32", "", &g_support);
 
-    // Publish /scan as RELIABLE (default). 
-    // A 1500-byte LaserScan requires XRCE-DDS fragmentation (default MTU 512). 
-    // Micro-XRCE-DDS only supports fragmentation on the Reliable stream.
-    // If published as BEST_EFFORT, the message is silently dropped.
-    rclc_publisher_init_default(
-        &g_scan_pub, &g_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
-        "/scan"
-    );
     // /odom is 736 bytes (due to two 36-double covariance matrices), exceeding the default 512-byte
     // MTU. Micro-XRCE-DDS silently drops fragmented messages on BEST_EFFORT, so it MUST be RELIABLE!
     rclc_publisher_init_default(
@@ -589,9 +381,6 @@ inline bool init() {
     );
 
     // Init messages — capacity fields REQUIRED for CDR deserialization
-    g_scan_msg.header.frame_id.data = (char*)"laser_frame";
-    g_scan_msg.header.frame_id.size = 11;
-    g_scan_msg.header.frame_id.capacity = 12;
 
     g_odom_msg.header.frame_id.data = (char*)"odom";
     g_odom_msg.header.frame_id.size = 4;
@@ -631,19 +420,18 @@ inline void spin() {
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
     }
 
-    // 2. Publish scan when a brand new 360° rotation finishes (~6.6 Hz - 10 Hz matching physical sensor RPM)
-    if (g_x3Scan.scanReady && (now - g_last_scan_ms >= 100)) {
-        g_last_scan_ms = now;
-        g_x3Scan.scanReady = false; // consume fresh scan
-        fill_scan_msg();
-        rcl_publish(&g_scan_pub, &g_scan_msg, NULL);
-    }
-
-    // 3. Re-sync every 10 seconds to prevent clock drift
+    // 3. Ping agent and re-sync every 2 seconds to detect if agent was restarted (Ctrl+C on Pi)
     static uint32_t s_last_sync_ms = 0;
-    if (now - s_last_sync_ms >= 10000) {
+    if (now - s_last_sync_ms >= 2000) {
         s_last_sync_ms = now;
-        rmw_uros_sync_session(100);  // 100ms timeout for ping
+        rmw_uros_sync_session(100);  // 100ms timeout for time sync
+        
+        // If the ROS 2 agent is killed (Ctrl+C), ping will fail. We must reboot to clear the old session ID.
+        if (rmw_uros_ping_agent(100, 2) != RMW_RET_OK) {
+            Serial.println(F("[micro-ROS] Agent disconnected! Auto-rebooting to reset session..."));
+            delay(100);
+            ESP.restart();
+        }
     }
 
     // 4. Poll incoming subscriptions with 0ns timeout so XRCE-DDS never blocks telemetry!
