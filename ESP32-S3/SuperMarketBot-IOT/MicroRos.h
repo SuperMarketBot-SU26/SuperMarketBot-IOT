@@ -90,8 +90,8 @@ static void cmd_vel_callback(const void *msgin) {
     }
 
     if (fabs(ang) > 0.05f || fabs(lin) > 0.05f) {
-        constexpr float ROS2_LIN_MAX = 1.20f;
-        constexpr float ROS2_ANG_MAX = 5.00f;
+        constexpr float ROS2_LIN_MAX = 0.50f;
+        constexpr float ROS2_ANG_MAX = 1.50f;
         
         int16_t fwdPct = (int16_t)constrain((int)(lin / ROS2_LIN_MAX * 100.0f), -100, 100);
         // CRITICAL FIX: ROS 2 angular.z > 0 means CCW (Left). 
