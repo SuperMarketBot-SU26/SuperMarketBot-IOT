@@ -99,7 +99,8 @@ static void cmd_vel_callback(const void *msgin) {
         // We MUST invert `ang`!
         int16_t turnPct = (int16_t)constrain((int)(-ang / ROS2_ANG_MAX * 100.0f), -100, 100);
         
-        botDriveSmoothNormal(turnPct, fwdPct, PWM_MAX, true);
+        // Use botDriveROS2 to get velocity smoothing WITHOUT cubic joystick suppression
+        botDriveROS2(turnPct, fwdPct, PWM_MAX);
         
         // Cập nhật localization để EKF biết bánh xe đang quay
         locSetDriveCmd(

@@ -4,6 +4,7 @@
  *  v2.0 — 2026-07-27 (Root-Cause fix)
  *    - Kích hoạt đọc 2 encoder bánh trước (ENC_L=GPIO35, ENC_R=GPIO36) qua
  *      ngắt ngoài (ISR) — KHÔNG còn mô phỏng PWM ảo.
+ *    ⚠️ GPIO 35/36 là input-only trên ESP32-S3 N16R8 (PSRAM chiếm).
  *    - Tính RPM + distance thật từ số xung tích lũy + ENC_PPR + WHEEL_CIRC_M.
  *    - Pose thật: ds = (sL + sR)/2 × dt ; dθ = (sR - sL)/WHEEL_BASE_M × dt.
  *    - Localization.h giờ nhận được odom thật (delta x, y, heading) thay vì
@@ -49,17 +50,38 @@ static volatile int32_t s_encTicksR = 0;   // Encoder bên phải
 static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 
 // ISR — gọi trong ngắt ngoài, cần IRAM_ATTR + portENTER_CRITICAL_ISR.
+// v2.5 (2026-07-29): ADD 2ms SOFTWARE DEBOUNCE.
+//
+// Cheap single-channel Hall/slot encoders (the 20-slot disc on this robot)
+// can double-count on contact bounce or edge ringing — visible as random RPM
+// spikes and distance-integral drift. Reject any pulse that arrives within
+// ENC_DEBOUNCE_MS of the previous pulse on the same edge. With max realistic
+// wheel speed ~1 m/s and WHEEL_CIRC_M ≈ 0.25 m, max pulse rate ≈ 80/s
+// (≈12.5 ms period) — 2 ms leaves an 8× margin and won't drop legitimate
+// edges at any practical speed.
+static constexpr uint32_t ENC_DEBOUNCE_MS = 2;
+static volatile uint32_t s_encLastPulseMsL = 0;
+static volatile uint32_t s_encLastPulseMsR = 0;
+
 static inline void IRAM_ATTR isr_enc_left() {
+  const uint32_t now = (uint32_t)millis();
   portENTER_CRITICAL_ISR(&s_encMux);
-  s_encTicksL++;
-  g_encPhyLastPulseMs[0] = (uint32_t)millis();  // mark "left encoder pulse seen at this ms" cho RobotTelemetry.jEnOn[]
+  if ((now - s_encLastPulseMsL) >= ENC_DEBOUNCE_MS) {
+    s_encTicksL++;
+    g_encPhyLastPulseMs[0] = now;
+    s_encLastPulseMsL = now;
+  }
   portEXIT_CRITICAL_ISR(&s_encMux);
 }
 
 static inline void IRAM_ATTR isr_enc_right() {
+  const uint32_t now = (uint32_t)millis();
   portENTER_CRITICAL_ISR(&s_encMux);
-  s_encTicksR++;
-  g_encPhyLastPulseMs[1] = (uint32_t)millis();  // mark "right encoder pulse seen at this ms"
+  if ((now - s_encLastPulseMsR) >= ENC_DEBOUNCE_MS) {
+    s_encTicksR++;
+    g_encPhyLastPulseMs[1] = now;
+    s_encLastPulseMsR = now;
+  }
   portEXIT_CRITICAL_ISR(&s_encMux);
 }
 
@@ -83,6 +105,11 @@ static inline void odomResetTicks() {
   portENTER_CRITICAL(&s_encMux);
   s_encTicksL = 0;
   s_encTicksR = 0;
+  // Clear debounce baselines too — otherwise the first pulse after reset
+  // could be falsely rejected as "too close to the previous pulse" (which
+  // was actually a long time ago in real terms but persisted in the static).
+  s_encLastPulseMsL = 0;
+  s_encLastPulseMsR = 0;
   portEXIT_CRITICAL(&s_encMux);
 }
 #else
@@ -114,14 +141,29 @@ inline void odomInit() {
 #endif
 }
 
+// Sticky last-non-zero direction per side. Used to sign coast-phase encoder
+// ticks (motor command == 0 but wheel still rolling from momentum). The encoder
+// is single-channel so it can't tell forward from backward on its own; we fall
+// back to the last commanded direction with a short TTL — past TTL we drop the
+// ticks (wheel is genuinely stopped).
+static int8_t s_lastNonZeroDirL = 0;
+static int8_t s_lastNonZeroDirR = 0;
+static uint32_t s_lastNonZeroDirL_ms = 0;
+static uint32_t s_lastNonZeroDirR_ms = 0;
+static constexpr uint32_t COAST_DIR_TTL_MS = 300;  // past this, treat as stopped
+
+// Delta baselines live at file scope (not inside odomUpdate()) so
+// odomResetDistance() can zero them. Previously they were function-local
+// statics — that left the baselines stale after a reset, and the very next
+// odomUpdate() integrated `0 - lastAccumulatedTicks` as a phantom reverse step.
+static int32_t s_lastTicksL = 0;
+static int32_t s_lastTicksR = 0;
+static uint32_t s_lastUpdateMs = 0;
+
 /** Cập nhật mỗi ODOM_PERIOD_MS (100ms). */
 inline void odomUpdate() {
 #if USE_ENCODER_HARDWARE
-  // ---- 1) Đọc delta xung trong 100ms qua ----
-  static int32_t s_lastTicksL = 0;
-  static int32_t s_lastTicksR = 0;
-  static uint32_t s_lastUpdateMs = 0;
-
+  // ---- 1) Đọc delta xung trong khoảng vừa qua ----
   const uint32_t nowMs = millis();
   const int32_t ticksL_now = odomGetTicksL();
   const int32_t ticksR_now = odomGetTicksR();
@@ -130,8 +172,24 @@ inline void odomUpdate() {
   s_lastTicksL = ticksL_now;
   s_lastTicksR = ticksR_now;
 
-  // dt = 100ms (mặc định). Nếu taskControl bị delay (rare), clamp.
-  const float dt = (float)ODOM_PERIOD_MS / 1000.0f;
+  // Real dt from millis(), clamped to a sane range. Falls back to
+  // ODOM_PERIOD_MS for the very first call after boot when s_lastUpdateMs
+  // is still 0, or after a Reset Odom. The clamp absorbs FreeRTOS scheduler
+  // hiccups so RPM/ds don't blow up on a delayed tick.
+  float dt;
+  if (s_lastUpdateMs == 0) {
+    dt = (float)ODOM_PERIOD_MS / 1000.0f;
+  } else {
+    uint32_t elapsedMs = (nowMs >= s_lastUpdateMs) ? (nowMs - s_lastUpdateMs) : 0;
+    if (elapsedMs == 0 || elapsedMs > 1000u) {
+      // 0 = two ticks in same ms (shouldn't happen but defensive); >1000ms =
+      // taskControl stalled badly; clamp to ODOM_PERIOD_MS so RPM/ds stay sane.
+      dt = (float)ODOM_PERIOD_MS / 1000.0f;
+    } else {
+      dt = (float)elapsedMs / 1000.0f;
+    }
+  }
+  s_lastUpdateMs = nowMs;
 
   // ---- 2) Quãng đường mỗi bên (m) ----
   // v2.4 (2026-07-28): FIX direction-blind encoder.
@@ -159,8 +217,24 @@ inline void odomUpdate() {
   // Ta lấy direction từ motor FL (slot 0) cho bên trái, motor FR (slot 2) cho bên phải.
   // BẢO THỦ: chỉ đổi dấu khi motor đã chạy đủ lâu (>200ms) để tránh trạng thái
   // chuyển tiếp gây dấu sai. Nếu motor command gần 0 (brake/coast) → giữ ds=0.
-  const float dirL = (float)g_motorDir[MID_FL];   // -1 / 0 / +1
-  const float dirR = (float)g_motorDir[MID_FR];
+  //
+  // v2.5 (2026-07-29): COAST-PHASE TICK PRESERVATION.
+  // Bug trước: motor command = 0 (coast/brake) nhưng bánh vẫn quay do quán
+  // tính. Encoder vẫn đếm xung nhưng dsL = 0 → mất tích phân pose vĩnh viễn.
+  // Fix: nếu motor dir == 0 nhưng có xung mới và vẫn còn trong COAST_DIR_TTL_MS
+  // kể từ lệnh nonzero cuối, dùng sticky last-direction. Sau TTL → drop.
+  const int8_t dirL_raw = g_motorDir[MID_FL];
+  const int8_t dirR_raw = g_motorDir[MID_FR];
+  if (dirL_raw != 0) { s_lastNonZeroDirL = dirL_raw; s_lastNonZeroDirL_ms = nowMs; }
+  if (dirR_raw != 0) { s_lastNonZeroDirR = dirR_raw; s_lastNonZeroDirR_ms = nowMs; }
+  const bool leftCoast  = (dirL_raw == 0) && (dTicksL > 0)
+                          && ((nowMs - s_lastNonZeroDirL_ms) <= COAST_DIR_TTL_MS)
+                          && (s_lastNonZeroDirL != 0);
+  const bool rightCoast = (dirR_raw == 0) && (dTicksR > 0)
+                          && ((nowMs - s_lastNonZeroDirR_ms) <= COAST_DIR_TTL_MS)
+                          && (s_lastNonZeroDirR != 0);
+  const float dirL = leftCoast  ? (float)s_lastNonZeroDirL : (float)dirL_raw;
+  const float dirR = rightCoast ? (float)s_lastNonZeroDirR : (float)dirR_raw;
   const float dsL = (dirL == 0.f) ? 0.f : dirL * ((float)dTicksL * mPerTick);
   const float dsR = (dirR == 0.f) ? 0.f : dirR * ((float)dTicksR * mPerTick);
   const float ds  = (dsL + dsR) * 0.5f;           // translation trung bình (đã signed)
@@ -197,7 +271,6 @@ inline void odomUpdate() {
   // ---- 6) Localization: truyền pose delta thật (x,y,heading) ----
   //   locUpdate encoder-aware: ds/dθ từ encoder, KHÔNG dùng LOC_PWM_TO_MPS.
   locUpdate(dsL, dsR, dt);
-  (void)s_lastUpdateMs;  // suppress unused-warning
 #else
   // Fallback: PWM simulation (giữ để debug nếu cần tắt encoder)
   constexpr float MAX_TICKS_PER_TICK = (200.0f * (float)ODOM_PERIOD_MS / 60000.0f) * 20.0f;
@@ -249,6 +322,13 @@ inline void odomResetDistance() {
 #if USE_ENCODER_HARDWARE
   odomResetTicks();
 #endif
+  // Critical: reset the file-scope delta baselines too. Otherwise the next
+  // odomUpdate() integrates `0 - s_lastTicksL` as a large phantom reverse
+  // step (issue surfaced when WebUI "Reset Odom" caused a pose teleport).
+  s_lastTicksL = s_lastTicksR = 0;
+  s_lastUpdateMs = 0;       // dt falls back to ODOM_PERIOD_MS for next tick
+  s_lastNonZeroDirL = s_lastNonZeroDirR = 0;
+  s_lastNonZeroDirL_ms = s_lastNonZeroDirR_ms = 0;
   locResetPose();
 }
 

@@ -36,7 +36,6 @@
 #include "Config.h"
 #include "Localization.h"
 #include "Motors.h"
-#include "MotorControlPro.h"  // [Bước 3 - 2026-07-27] botDriveSmoothNormal()
 #include "ObstacleSensors.h"
 #include "YdlidarX3.h"
 #include "PidController.h"
@@ -273,13 +272,11 @@ inline void tick() {
   }
 
   /* --- Kiểm tra điều kiện kết thúc --- */
-  // Chỉ cho phép hoàn thành do coverage sau ít nhất 30 giây chạy thực tế (tránh nảy 100% ở phòng hẹp ngay giây đầu)
-  if (durMs >= 30000u && s.coveragePct >= AUTO_EXPLORE_TARGET_COVERAGE_PCT) {
-    Serial.println(F("[AUTO-EXPLORE] ✅ Đã quét đạt target coverage — hoàn thành"));
+  if (s.coveragePct >= AUTO_EXPLORE_TARGET_COVERAGE_PCT) {
     s.fsm = ST_DONE;
   }
   if (durMs >= AUTO_EXPLORE_MAX_DURATION_MS) {
-    Serial.println(F("[AUTO-EXPLORE] ⚠ Timeout max duration — dừng"));
+    Serial.println(F("[AUTO-EXPLORE] ⚠ Timeout 10 phút — dừng"));
     s.fsm = ST_DONE;
   }
 
@@ -314,29 +311,25 @@ inline void tick() {
 
       // 3) Bám tường: nếu quá gần → rẽ phải nhẹ, nếu quá xa → rẽ trái nhẹ
       float wallErr = (float)rightMm - (float)AUTO_EXPLORE_MIN_WALL_DIST_MM;
-      // wallErr > 0: quá xa (rẽ trái → steer âm với wall ở bên phải)
-      // wallErr < 0: quá gần (rẽ phải → steer dương)
+      // wallErr > 0: quá xa (rẽ trái)
+      // wallErr < 0: quá gần (rẽ phải)
       float steer = -wallErr / 100.0f;        // scale: 100mm = 1.0 steer
       steer = constrain(steer, -40.0f, 40.0f);
 
       uint16_t spd = g_state.waypointBaseSpeed;
       if (spd == 0) spd = g_state.autoBaseSpeed;
-      if (spd == 0) spd = g_state.baseSpeed;
-      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
+      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 60 / 100);
 
-      // Đi thẳng + bẻ lái MƯỢT (giống manual) — qua botDriveSmoothNormal.
-      botDriveSmoothNormal((int16_t)steer, 100, spd);
+      botDrive((int16_t)steer, 100, spd);
       break;
     }
 
     case ST_SPIN_DETECT: {
-      uint16_t spd = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : g_state.baseSpeed;
-      if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 55 / 100);
-
       // Xoay 360° thu thập LIDAR, tìm hướng trống xa nhất
+      // Chia thành 2 phase: thu thập (xoay 1 vòng) + quay về target
       if (!s.hasSpinTarget) {
         // Phase 1: xoay liên tục, đợi đủ 1 vòng LIDAR (~500ms)
-        botDriveSmoothNormal(40, 0, spd);
+        botRotateCW(40);
         if (now - s.stateEnterMs >= 700) {
           float hDeg; uint16_t maxMm;
           findOpenHeading(hDeg, maxMm);
@@ -359,7 +352,7 @@ inline void tick() {
           Serial.println(F("[AUTO-EXPLORE] → CRUISE (đã xoay đến hướng trống)"));
         } else {
           int sign = (dh > 0) ? 1 : -1;
-          botDriveSmoothNormal((int16_t)(sign * 50), 0, spd);
+          botRotateCW((uint16_t)(sign * 50));
         }
         // Timeout phase 2: 5s
         if (now - s.stateEnterMs >= 5000) {
@@ -373,7 +366,7 @@ inline void tick() {
     }
 
     case ST_AVOID_US: {
-      // Lùi thẳng giữ heading 500ms (MƯỢT), sau đó SPIN_DETECT
+      // Lùi thẳng giữ heading 500ms, sau đó SPIN_DETECT
       static float s_backHeading = 0.f;
       static bool  s_backHave = false;
       if (!s_backHave) {
@@ -386,9 +379,7 @@ inline void tick() {
       steer = constrain(steer, -70.0f, 70.0f);
       uint16_t spd = g_state.swerveBaseSpeed;
       if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 40 / 100);
-
-      // Lùi mượt — giữ heading, không giật.
-      botDriveSmoothNormal((int16_t)steer, -100, spd);
+      botDrive((int16_t)steer, -100, spd);
 
       if (now - s.stateEnterMs >= 600) {
         s_backHave = false;

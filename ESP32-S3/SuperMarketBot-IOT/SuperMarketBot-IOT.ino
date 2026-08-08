@@ -473,10 +473,7 @@ static void taskControl(void *pvParams) {
     }
 #endif
 
-    /* ── 2) Sensors: LiDAR + US ───────────────────────────────────── */
-#if USE_LIDAR_HARDWARE
-    sensorsPollLidar();
-#endif
+    /* ── 2) Sensors: US ─────────────────────────────────────────── */
 #if USE_YDLIDAR_X3
     // NOTE: LiDAR drain đã chuyển sang taskX3 riêng (xem setup()).
     // Task chạy priority 6, period 5ms — drain UART không block control loop.
@@ -501,17 +498,6 @@ static void taskControl(void *pvParams) {
     /* ── 5) Mode dispatch ─────────────────────────────────────────── */
     switch (g_state.mode) {
       case MODE_MANUAL: {
-        // Gate ROS2 ownership: nếu ROS2 cmd_vel vừa mới điều khiển motor (≤300ms)
-        // thì KHÔNG can thiệp — để cmd_vel_callback hoàn toàn sở hữu motor.
-        // Không có gate này, controlTask 20Hz sẽ xen vào giữa các tick cmd_vel
-        // 10Hz với botStop()/botDrive() — gây jitter PWM 0↔lệnh mỗi 50-100ms
-        // (WebManager joystick = 0 ở giữa là đường nặng nề nhất).
-        const uint32_t cvAgeMs = (g_state.cmd_velLastMs != 0)
-            ? (millis() - g_state.cmd_velLastMs)
-            : 0xFFFFFFFFu;
-        if (cvAgeMs < 300u) {
-            break;
-        }
         if (g_state.cmdX == 0 && g_state.cmdY == 0 && g_state.cmdStrafe == 0) {
           botStop();
         } else {
@@ -724,7 +710,13 @@ void setup() {
   g_mqttMutex = xSemaphoreCreateMutex();
 
   // ── Tạo FreeRTOS tasks ───────────────────────────────────────────
+#if ENABLE_WEBUI_TASK
   // Core 0: Web IO — stack 10KB, priority 2 (tăng để WiFi/WS được xử lý kịp)
+  // v2.5 (2026-07-29): DISABLED by default for ROS2-only diagnostics.
+  // WebUI's CtrlJson.h can call robotForceManualStop()/set estop/change mode
+  // from a separate code path, racing with /cmd_vel and the 500 ms watchdog.
+  // To re-enable: set ENABLE_WEBUI_TASK 1 in Config.h and re-add coordination
+  // logic so WebUI and ROS2 teleop don't fight for motor ownership.
   xTaskCreatePinnedToCore(
     taskWebIO, "WebIO",
     10240, nullptr, 2,
@@ -737,6 +729,7 @@ void setup() {
     8192, nullptr, 1,
     nullptr, 1
   );
+#endif // ENABLE_WEBUI_TASK
 
 #if USE_YDLIDAR_X3
   // Core 1: LiDAR X3 — priority 6 (cao nhất, real-time UART drain 5ms period)
@@ -779,25 +772,25 @@ void setup() {
   );
   Serial.println(F("[Boot] taskControl created on Core 1."));
 
-#if WIFI_STA_ENABLE
-  if (WiFi.status() == WL_CONNECTED) {
-    // ── micro-ROS init (after WiFi STA is up) ────────────────────────
 #if USE_MICRO_ROS
-    Serial.println(F("[Boot] Initializing micro-ROS..."));
+  // ── micro-ROS init ───────────────────────────────────────────────
+#if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+  Serial.println(F("[Boot] Initializing micro-ROS via USB Serial (muting ASCII logging on cable)..."));
+  logger.muteRealSerial = true; // Ngắt in ASCII lên dây USB để nhường đường 100% cho nhịp nhị phân XRCE-DDS!
+  if (microRos::init()) {
+    xTaskCreatePinnedToCore(taskMicroRos, "MicroRos", 8192, nullptr, 4, nullptr, 1);
+  }
+#else
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(F("[Boot] Initializing micro-ROS via WiFi UDP..."));
     if (microRos::init()) {
       Serial.println(F("[Boot] micro-ROS initialized SUCCESS."));
-      BaseType_t mr = xTaskCreatePinnedToCore(
-          taskMicroRos, "MicroRos",
-          8192, nullptr, 4,
-          nullptr, 1
-      );
-      Serial.printf(F("[Boot] taskMicroRos %s on Core 1.\n"),
-          (mr == pdPASS) ? "created" : "FAILED");
+      xTaskCreatePinnedToCore(taskMicroRos, "MicroRos", 8192, nullptr, 4, nullptr, 1);
     } else {
       Serial.println(F("[Boot] micro-ROS FAILED."));
     }
-#endif
   }
+#endif
 #endif
   printMemInfo();
 }

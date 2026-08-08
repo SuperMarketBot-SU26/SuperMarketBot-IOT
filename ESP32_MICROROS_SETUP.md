@@ -74,20 +74,16 @@ Lỗi thường gặp:
 
 Click Upload → đợi flash xong.
 
-## 5. Trên Ubuntu 26.04: chạy micro-ros-agent
+## 5. Trên Ubuntu: chạy micro-ros-agent
 
 ```bash
-# Mở terminal Ubuntu 26.04
-source /opt/ros/lyrical/setup.bash
-source ~/ros2_ws/install/setup.bash   # workspace dùng ROS2 lyrical
+# Mở terminal Ubuntu
+source /opt/ros/humble/setup.bash
+source ~/microros_ws/install/setup.bash
 
 # Chạy agent (UDP port 8888)
 ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
 ```
-
-> Lưu ý: workspace của dự án (`ros2_ws`) chạy ROS2 **lyrical** trên Ubuntu 26.04,
-> KHÔNG phải Humble. File `setup_ros2_slam.sh` cũ trong repo này cài Humble —
-> giờ đã có `setup_ros2_slam_lyrical.sh` cho Ubuntu 26.04.
 
 Bạn sẽ thấy:
 ```

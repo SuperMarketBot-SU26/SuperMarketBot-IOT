@@ -1,37 +1,22 @@
 /* =====================================================================
- *  YdlidarX3.h — Driver cho YDLIDAR X3 (UART, 115200 baud)
+ *  YdlidarX3.h — Driver skeleton cho YDLIDAR X3 (UART, 230400 baud)
  *
  *  Vai trò:
  *    1. Đọc scan 360° mỗi ~100ms (10 Hz) từ X3 qua Serial1.
  *    2. Lưu vào buffer `g_x3Scan[]` (mảng các điểm {angle, distance_mm, quality}).
  *    3. Cung cấp helper để:
  *       - Lấy khoảng cách min trong một cung góc (vd: trước xe, ±30°) → obstacle backup.
- *       - Lấy toàn bộ scan để gửi qua micro-ROS /scan topic.
+ *       - Lấy toàn bộ scan để gửi lên BE qua MQTT cho SLAM (Cartographer / Hector).
  *
- *  Protocol X3 (tham khảo X3 datasheet & YDLIDAR-SDK):
- *    0xAA 0x55 | CT(1) | LSN(1) | FSA(2) | LSA(2) | CS(1) | payload(LSN*2 bytes)
- *    - CT bit 0 == 1 → "rotation boundary" marker (LSN often == 0 cho marker packet)
- *    - FSA/LSA: First/Last Sample Angle (°) = uint16 LE / 64
- *    - payload: mỗi 2 bytes = 1 point sample (distance_mm = uint16 LE / 4).
+ *  Giao thức YDLidar X3 (tham khảo datasheet X3):
+ *    - Header 0xAA 0x55 (2 bytes)
+ *    - Length (1 byte, ct ngay sau header)
+ *    - Payload (Length bytes): mỗi point = 2 bytes distance + 1 byte angle_offset + 1 byte quality
+ *    - Nếu bit cao length = 1 → "two-byte" distance mode (X3 mặc định)
  *
- *  Quan trọng — TẠI SAO PTS BỊ TỤT KHI ROS2 LÊN:
- *    - Baud 115200 chỉ chứa ~11.5 KB/s. Ở 4 kHz sample rate → 20 KB/s KHÔNG vừa.
- *    - Code cũ drain TỪNG BYTE một lần, mỗi ~50ms → drain chậm hơn UART nhận.
- *    - Khi micro-ROS agent chạy, FreeRTOS scheduler ưu tiên agent → control loop
- *      bị delay thêm → UART FIFO 128 byte tràn → mất bytes → X3 reset packet sync.
- *
- *  FIX:
- *    - Drain TẤT CẢ bytes có sẵn mỗi poll (readBytesIntoBuf), không phải 1 byte/loop.
- *    - Tăng UART hardware FIFO: `Serial1.setRxBufferSize(2048)` (ESP32 max 2048).
- *    - Chạy `taskX3` ở priority 6 trên core 1, period 5ms — KHÔNG dựa vào control loop.
- *    - Diagnostic counters (droppedBytes, syncLosses, scanCount) + rate-limited log
- *      để phát hiện lỗi UART/mất đồng bộ ngay khi nó xảy ra, không spam log.
- *
- *  TEST/ASSERT (per project rule "tests, asserts, runtime logs"):
- *    - Static asserts ở compile time (X3_MAX_POINTS, baud, payload size).
- *    - Runtime asserts trong init (heap check, malloc non-null).
- *    - Rate-limited diagnostic log: 1 lần/giây, chỉ in khi có vấn đề (dropBytes>0,
- *      syncLoss>0, scanRate<5Hz) — KHÔNG spam happy-path log.
+ *  Lưu ý:
+ *    - Driver này viết skeleton; cần test với X3 thật để verify protocol byte order.
+ *    - YDLIDAR-SDK chính thức (ydlidar_driver) cũng có thể dùng thay thế skeleton này.
  * =====================================================================*/
 #ifndef YDLIDAR_X3_H
 #define YDLIDAR_X3_H
@@ -41,55 +26,31 @@
 
 #if USE_YDLIDAR_X3
 
-/* -------------------- Compile-time asserts ---------------------------- */
-// Baud phải đủ lớn cho payload X3 (mỗi packet ~80 byte @ 10 Hz = 800 B/s minimum;
-// ở 4kHz thực tế cần >=230400). Ở 115200 sẽ bottleneck — log sẽ cảnh báo lúc runtime.
-static_assert(YDLIDAR_X3_BAUD >= 115200,
-              "YDLIDAR_X3_BAUD < 115200 — X3 factory default là 115200, không thấp hơn được");
-static_assert(YDLIDAR_SCAN_BUFF_SIZE >= 1024,
-              "YDLIDAR_SCAN_BUFF_SIZE phải >= 1024 để chứa nhiều packet giữa các lần drain");
-static_assert(YDLIDAR_MAX_POINTS >= 360 && YDLIDAR_MAX_POINTS <= 8000,
-              "YDLIDAR_MAX_POINTS ngoài [360, 8000] — sai cấu hình");
-static_assert(sizeof(float) == 4, "YDLIDAR cần float 32-bit");
-
 /* -------------------- Cấu trúc dữ liệu scan ------------------------- */
 struct LidarPoint {
-  float angleRad;       // góc từ 0 đến 2π (0 = phía trước robot)
-  uint16_t distanceMm;  // mm (0 = invalid / out of range)
-  uint8_t quality;      // 0..255 (càng cao càng tốt)
+  float angleRad;    // góc từ 0 đến 2π (0 = phía trước robot)
+  uint16_t distanceMm; // mm (0 = invalid / out of range)
+  uint8_t quality;     // 0..255 (càng cao càng tốt)
 };
 
 constexpr uint16_t X3_MAX_POINTS = YDLIDAR_MAX_POINTS;
 
-/** Buffer scan mới nhất — được fill bởi taskX3, đọc bởi control loop / micro-ROS. */
+/** Buffer scan mới nhất — được fill bởi task riêng, đọc bởi control loop. */
 struct X3Scan {
   LidarPoint points[X3_MAX_POINTS];
-  uint16_t count;       // số điểm hợp lệ trong scan hiện tại
-  uint32_t scanSeq;     // sequence number (tăng mỗi scan mới)
-  uint32_t lastScanMs;  // millis lần cuối có scan hoàn chỉnh
-  bool scanReady;       // cờ báo có scan mới (set bởi parser, clear bởi reader)
-};
-
-/** Diagnostic counters — reset khi gọi x3ResetDiag(). */
-struct X3Diag {
-  uint32_t bytesRead;       // tổng bytes đã drain thành công từ UART
-  uint32_t bytesDropped;    // bytes bị mất do UART FIFO tràn (estimated)
-  uint32_t syncLosses;      // số lần phát hiện sai header 0xAA55 → phải resync
-  uint32_t checksumErrors;  // số packet sai checksum
-  uint32_t scansPublished;  // số scan đã publish thành công
-  uint32_t zeroSamplePkts;  // packet có sampleCount==0 (X3 CT indicator thường gửi 0)
-  uint32_t packetsParsed;   // packet đã parse thành công
-  uint32_t packetsRejected; // packet bị reject (sampleCount > 200, oversize, etc)
+  uint16_t count;          // số điểm hợp lệ trong scan hiện tại
+  uint32_t scanSeq;        // sequence number (tăng mỗi scan mới)
+  uint32_t lastScanMs;     // millis lần cuối có scan hoàn chỉnh
+  bool scanReady;          // cờ báo có scan mới (set bởi parser, clear bởi reader)
 };
 
 extern X3Scan g_x3Scan;
-extern X3Diag g_x3Diag;
 
 /* -------------------- API init / loop ------------------------------- */
 
 /**
- * Khởi tạo Serial1 cho X3, gửi lệnh start scan.
- * NOTE: X3 firmware này KHÔNG hỗ trợ command đổi baud (0xA5 0x0B) — không gửi.
+ * Khởi tạo Serial1 cho X3, gửi lệnh start scan (X3 cần start command sequence).
+ * X3 default protocol: 0xA5 0x60 (start scan) hoặc SCAN cmd tùy firmware version.
  */
 inline void x3Init() {
 #ifdef YDLIDAR_X3_M_CTR
@@ -98,29 +59,20 @@ inline void x3Init() {
     digitalWrite(YDLIDAR_X3_M_CTR, HIGH); // Bật động cơ quay LiDAR (M_CTR = HIGH)
   }
 #endif
-
-  // === Tăng UART hardware FIFO lên max (ESP32 hỗ trợ tới 2048 byte) ===
-  // FIFO lớn = buffer giữa các lần poll, giảm dropped bytes khi scheduler bận.
-  Serial1.setRxBufferSize(2048);
+  // === Khởi Serial1 ở baud X3 mặc định (115200) ===
+  // NOTE: X3 firmware này KHÔNG hỗ trợ command đổi baud (0xA5 0x0B) → KHÔNG gửi lệnh này
+  // nếu không ESP32 sẽ switch baud nhưng X3 vẫn ở 115200 → 0 pts.
   Serial1.begin(YDLIDAR_X3_BAUD, SERIAL_8N1, YDLIDAR_X3_RX, YDLIDAR_X3_TX);
   delay(100);
-
-  // === Runtime asserts ===
-  uint32_t largestBlock = ESP.getMaxAllocHeap();
-  if (largestBlock < 4096) {
-    Serial.printf("[X3] ❌ Heap largest block = %u B (cần >= 4KB) — LiDAR có thể fail\n",
-                  (unsigned)largestBlock);
-  } else {
-    Serial.printf("[X3] Heap OK: largest block = %u B\n", (unsigned)largestBlock);
-  }
 
   g_x3Scan.count = 0;
   g_x3Scan.scanSeq = 0;
   g_x3Scan.lastScanMs = 0;
   g_x3Scan.scanReady = false;
-  memset(&g_x3Diag, 0, sizeof(g_x3Diag));
 
   // === Tăng sample rate lên 4kHz (X3 firmware ≥ 1.4.0 hỗ trợ) ===
+  // Command: 0xA5 0x09 [sample_rate_hz_lo] [sample_rate_hz_hi]
+  // 0x0FA0 = 4000 Hz (max X3 hỗ trợ)
   uint8_t setSampleRateCmd[] = {0xA5, 0x09, 0xA0, 0x0F};
   Serial1.write(setSampleRateCmd, sizeof(setSampleRateCmd));
   delay(50);
@@ -130,103 +82,61 @@ inline void x3Init() {
   Serial1.write(startCmd, sizeof(startCmd));
   delay(50);
 
-  Serial.printf("[X3] Init done — UART @ %d baud, sample rate target ~4kHz\n",
-                YDLIDAR_X3_BAUD);
-  Serial.printf("[X3] NOTE: baud %d chỉ chứa ~%u pts/s. Nếu thấy <300 pts/scan → bottleneck UART.\n",
-                YDLIDAR_X3_BAUD, (unsigned)(YDLIDAR_X3_BAUD / 10 / 5));
+  Serial.printf("[X3] Init done — UART @ %d baud, sample rate target ~4kHz\n", YDLIDAR_X3_BAUD);
+  Serial.printf("[X3] NOTE: X3 firmware này không hỗ trợ đổi baud. Pts sẽ ổn định ~349/scan.\n");
 }
 
 /**
- * Reset diagnostic counters — gọi khi cần benchmark hoặc sau khi xử lý lỗi.
- */
-inline void x3ResetDiag() {
-  memset(&g_x3Diag, 0, sizeof(g_x3Diag));
-}
-
-/**
- * Drain TẤT CẢ bytes sẵn có từ Serial1 vào buffer parser, KHÔNG đọc từng byte.
- * Đây là điểm khác biệt quan trọng so với driver cũ — fix nguyên nhân chính gây
- * tụt pts khi ROS2 chạy (CPU bận → drain quá chậm → FIFO tràn).
+ * Gọi mỗi ~50ms từ vòng control hoặc task riêng.
+ * Đọc bytes sẵn có trên Serial1, parse frame X3, fill `g_x3Scan` nếu đủ 1 scan.
  *
- * CHỈ GỌI TỪ taskX3 — có static state riêng, KHÔNG thread-safe.
+ * X3 Frame format (cartographer mode):
+ *   0xAA 0x55 | length(1) | freq(2) | payload(length-3 bytes) | checksum(1)
+ *   - freq: 2 bytes little-endian, sampling frequency * 100
+ *   - payload: cứ 5 bytes = 1 point:
+ *       byte0..1: distance_mm (uint16_t little-endian, bit 15 = quality low bit)
+ *       byte2    : quality high bits (top 7) + bit0 = angle inversion flag
+ *       byte3    : angle_offset (độ * 64, relative to start_angle)
+ *       (5th byte = end of point)
  *
- * Trả về số bytes đã đọc (để g_x3Diag.bytesRead cộng dồn).
+ * Lưu ý: protocol cụ thể cần verify với X3 datasheet — đây là skeleton.
  */
-inline uint16_t x3DrainUart() {
+inline void x3Poll() {
+  // Buffer lớn 4096 byte (YDLIDAR_SCAN_BUFF_SIZE) để chứa nhiều packet liên tiếp
+  // khi sample rate cao (4kHz). X3 gửi ~80 byte/packet, 4096 chứa ~50 packets.
   static uint8_t  s_buf[YDLIDAR_SCAN_BUFF_SIZE];
   static uint16_t s_bufLen = 0;
   static uint32_t s_dbgLastMs = 0;
-  static LidarPoint s_accumPoints[X3_MAX_POINTS]; // BSS, không phải stack
-  static uint16_t   s_accumCount = 0;
-  static uint32_t   s_lastPacketMs = 0;
 
-  uint32_t nowMs = millis();
-  uint16_t got = 0;
+  while (Serial1.available() > 0) {
+    uint8_t b = Serial1.read();
+    if (s_bufLen >= sizeof(s_buf)) {
+      s_bufLen = 0;
+    }
+    s_buf[s_bufLen++] = b;
 
-  // Drain TẤT CẢ bytes có sẵn (không phải 1 byte/loop). Nếu FIFO có 500 bytes
-  // và poll chạy 5ms/lần, ta đọc hết trong 1 lần — không bao giờ tràn.
-  int avail = Serial1.available();
-  if (avail > 0) {
-    // Nếu buffer parser đã gần đầy, KHÔNG đọc thêm — flush accumulator trước.
-    if (s_bufLen + avail > sizeof(s_buf)) {
-      g_x3Diag.bytesDropped += (s_bufLen + avail) - sizeof(s_buf);
-      s_bufLen = 0; // reset để tránh vỡ sync (parser sẽ resync từ byte tiếp theo)
+    // DEBUG: in 16 byte đầu + baud rate mỗi 5s để verify parser
+    if (millis() - s_dbgLastMs > 5000) {
+      s_dbgLastMs = millis();
+      Serial.printf("[X3-DBG] baud=%d, avail=%d, bufLen=%d, first16=", YDLIDAR_X3_BAUD, Serial1.available(), s_bufLen);
+      for (int i = 0; i < 16 && i < s_bufLen; i++) Serial.printf("%02X ", s_buf[i]);
+      Serial.println();
     }
 
-    uint16_t wantRead = (uint16_t)min((int)(sizeof(s_buf) - s_bufLen), avail);
-    got = Serial1.readBytes(s_buf + s_bufLen, wantRead);
-    s_bufLen += got;
-    g_x3Diag.bytesRead += got;
-  }
-
-  // === Parse packets trong buffer ===
-  // (parser state machine — phải đảm bảo KHÔNG block, KHÔNG malloc trong poll)
-  while (s_bufLen >= 10) {
-    // 1) Sync: tìm header 0xAA 0x55
-    if (s_buf[0] != 0xAA || s_buf[1] != 0x55) {
-      // Shift trái 1 byte, đếm sync loss
-      memmove(s_buf, s_buf + 1, s_bufLen - 1);
-      s_bufLen -= 1;
-      g_x3Diag.syncLosses++;
-      continue;
+    if (s_bufLen >= 2) {
+      if (s_buf[0] != 0xAA || s_buf[1] != 0x55) {
+        s_buf[0] = s_buf[1];
+        s_bufLen = 1;
+        continue;
+      }
     }
 
-    uint8_t CT = s_buf[2];
+    if (s_bufLen < 10) continue;
     uint8_t sampleCount = s_buf[3];
     uint16_t packageLen = 10 + (sampleCount * 2);
 
-    // === X3 protocol quirks ===
-    // - CT bit 0 == 1 → "rotation boundary" packet (often sampleCount==0, just signals end-of-360°)
-    // - Trên firmware X3, packet "zero packet" (CT bit 0) thường được gửi NGAY TRƯỚC packet đầu
-    //   tiên của rotation mới. Vì vậy flush khi gặp nó.
-    bool isRotationBoundary = (CT & 0x01) != 0;
+    if (s_bufLen < packageLen) continue;
 
-    // Nếu sampleCount==0, không parse point data; coi như zero-packet (boundary marker)
-    if (sampleCount == 0) {
-      g_x3Diag.zeroSamplePkts++;
-      // Flush accumulator nếu có data
-      if (s_accumCount > 0) {
-        memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
-        g_x3Scan.count = s_accumCount;
-        g_x3Scan.scanSeq++;
-        g_x3Scan.lastScanMs = nowMs;
-        g_x3Scan.scanReady = true;
-        g_x3Diag.scansPublished++;
-        s_accumCount = 0;
-      }
-      // Bỏ qua 10 byte header, không có payload
-      if (s_bufLen >= 10) {
-        memmove(s_buf, s_buf + 10, s_bufLen - 10);
-        s_bufLen -= 10;
-      } else {
-        s_bufLen = 0;
-      }
-      continue;
-    }
-
-    if (s_bufLen < packageLen) break; // chưa đủ, đợi packet kế tiếp
-
-    // 2) Tính góc start/end
     uint16_t fsa = s_buf[4] | (s_buf[5] << 8);
     uint16_t lsa = s_buf[6] | (s_buf[7] << 8);
     float startAngle = (float)(fsa >> 1) / 64.0f;
@@ -234,35 +144,38 @@ inline uint16_t x3DrainUart() {
     float diffAngle = endAngle - startAngle;
     if (diffAngle < 0) diffAngle += 360.0f;
 
-    // 3) Flush accumulator nếu packet này là rotation boundary
-    //    (đảm bảo scan đầy đủ trước khi ghi packet mới của rotation tiếp theo)
-    if (isRotationBoundary && s_accumCount > 0) {
-      memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
-      g_x3Scan.count = s_accumCount;
-      g_x3Scan.scanSeq++;
-      g_x3Scan.lastScanMs = nowMs;
-      g_x3Scan.scanReady = true;
-      g_x3Diag.scansPublished++;
-      s_accumCount = 0;
-    }
+    // Kiếm tra gói Zero Packet (Bit 0 của CT = 1 -> Bắt đầu vòng quay 360° mới)
+    static LidarPoint s_accumPoints[X3_MAX_POINTS];
+    static uint16_t   s_accumCount = 0;
+    static uint32_t   s_lastPacketMs = 0;
 
-    // 4) Vẫn duy trì timeout-based flush làm fallback (nếu X3 firmware
-    //    này không gửi zero-packet đều)
-    bool timeout = (nowMs - s_lastPacketMs) > 200;
+    bool isZeroPacket = (s_buf[2] & 0x01) != 0;
+    uint32_t nowMs = millis();
+    // Timeout 80ms = ~12 Hz refresh (X3 ở baud 115200 gửi ~10 packets/s × 40 pts = 400 pts/s)
+    // 80ms đủ chờ 1 packet liên tiếp, nếu quá 80ms không có packet → scan đã đứt quãng → flush
+    bool timeout = (nowMs - s_lastPacketMs) > 80;
+
+    // Flush scan khi:
+    //   1. Timeout > 80ms + có >= 100 điểm (đảm bảo scan đủ dày, không rỗng)
+    // KHÔNG dùng Zero packet (X3 firmware này gửi Zero packet không đều, gây dao động pts)
     if (timeout && s_accumCount >= 100) {
+      // Copy Double-Buffer sang mảng hiển thị công khai (KHÔNG BAO GIỜ BỊ RESET VỀ 0 ĐỨNG HÌNH!)
       memcpy(g_x3Scan.points, s_accumPoints, s_accumCount * sizeof(LidarPoint));
       g_x3Scan.count = s_accumCount;
       g_x3Scan.scanSeq++;
       g_x3Scan.lastScanMs = nowMs;
       g_x3Scan.scanReady = true;
-      g_x3Diag.scansPublished++;
-      s_accumCount = 0;
+
+      // Serial log mỗi 2s để theo dõi
+      static uint32_t lastLogMs = 0;
+      if (nowMs - lastLogMs > 2000) {
+        lastLogMs = nowMs;
+        Serial.printf("[YDLIDAR X3] 360° Scan #%u | Points: %u\n", g_x3Scan.scanSeq, g_x3Scan.count);
+      }
+      s_accumCount = 0; // Reset bộ đệm tích lũy cho vòng quay tiếp theo
     }
     s_lastPacketMs = nowMs;
 
-    g_x3Diag.packetsParsed++;
-
-    // 5) Đọc points
     if (sampleCount > 0 && sampleCount <= 200) {
       float angleStep = (sampleCount > 1) ? (diffAngle / (sampleCount - 1)) : 0.0f;
       for (uint8_t i = 0; i < sampleCount; i++) {
@@ -279,11 +192,9 @@ inline uint16_t x3DrainUart() {
           s_accumCount++;
         }
       }
-    } else {
-      g_x3Diag.packetsRejected++;
     }
 
-    // 6) Trượt phần còn lại lên đầu
+    // Trượt phần bộ nhớ dư còn lại trong buffer lên đầu (KHÔNG xóa s_bufLen về 0 để tránh vỡ sync UART)
     if (s_bufLen >= packageLen) {
       memmove(s_buf, s_buf + packageLen, s_bufLen - packageLen);
       s_bufLen -= packageLen;
@@ -291,64 +202,11 @@ inline uint16_t x3DrainUart() {
       s_bufLen = 0;
     }
   }
-
-  // === Rate-limited diagnostic log (chỉ in khi có vấn đề) ===
-  if (nowMs - s_dbgLastMs > 1000) {
-    s_dbgLastMs = nowMs;
-    bool hasIssue = (g_x3Diag.bytesDropped > 0) ||
-                    (g_x3Diag.syncLosses > 5) ||
-                    (g_x3Diag.checksumErrors > 0) ||
-                    (g_x3Diag.scansPublished == 0);  // critical: no scans = bug
-    if (hasIssue) {
-      Serial.printf("[X3-DIAG] read=%u drop=%u sync=%u parsed=%u zero=%u scan=%u avail=%d\n",
-                    (unsigned)g_x3Diag.bytesRead,
-                    (unsigned)g_x3Diag.bytesDropped,
-                    (unsigned)g_x3Diag.syncLosses,
-                    (unsigned)g_x3Diag.packetsParsed,
-                    (unsigned)g_x3Diag.zeroSamplePkts,
-                    (unsigned)g_x3Diag.scansPublished,
-                    Serial1.available());
-
-      // Hex dump 22 byte đầu của s_buf để debug protocol (chỉ khi scan=0
-      // — happy path không cần dump). Format như debug cũ để dễ compare.
-      static uint32_t s_dumpLastMs = 0;
-      if (g_x3Diag.scansPublished == 0 && (nowMs - s_dumpLastMs) > 5000) {
-        s_dumpLastMs = nowMs;
-        Serial.printf("[X3-HEX] first22=");
-        uint16_t n = (s_bufLen < 22) ? s_bufLen : 22;
-        for (uint16_t i = 0; i < n; i++) Serial.printf("%02X ", s_buf[i]);
-        Serial.println();
-      }
-
-      // Reset counters để lần sau chỉ log delta mới (tránh spam)
-      g_x3Diag.bytesDropped = 0;
-      g_x3Diag.syncLosses = 0;
-      g_x3Diag.checksumErrors = 0;
-      g_x3Diag.packetsRejected = 0;
-    }
-  }
-
-  return got;
-}
-
-/**
- * taskX3 — Dedicated FreeRTOS task cho LiDAR, priority 6 (cao hơn control).
- * Chạy trên core 1, period 5ms (=200Hz) — đủ nhanh để drain UART trước khi FIFO tràn.
- *
- * FreeRTOS task signature: `void func(void *pvParams)`.
- */
-inline void taskX3(void *pvParams) {
-  (void)pvParams;
-  const TickType_t xPeriod = pdMS_TO_TICKS(5);
-  TickType_t xLastWake = xTaskGetTickCount();
-  for (;;) {
-    x3DrainUart();
-    vTaskDelayUntil(&xLastWake, xPeriod);
-  }
 }
 
 /**
  * Lấy khoảng cách min (mm) trong cung góc [centerDeg ± halfWidthDeg].
+ * Dùng cho obstacle backup: lấy cung trước robot ±30° → set g_state.lidarFront.
  */
 inline uint16_t x3MinInArc(float centerDeg, float halfWidthDeg, uint8_t minQuality = 10) {
   float cMin = centerDeg - halfWidthDeg;
@@ -387,23 +245,25 @@ struct X3Scan {
   uint32_t lastScanMs;
   bool scanReady;
 };
-struct X3Diag {
-  uint32_t bytesRead, bytesDropped, syncLosses, checksumErrors,
-           scansPublished, zeroSamplePkts, packetsParsed, packetsRejected;
-};
 extern X3Scan g_x3Scan;
-extern X3Diag g_x3Diag;
 inline void x3Init() {}
-inline void x3DrainUart() {}
-inline void x3ResetDiag() {}
-inline void taskX3(void *) {}
+inline void x3Poll() {}
 inline uint16_t x3MinInArc(float, float, uint8_t = 10) { return 0xFFFF; }
 inline void x3Stop() {}
 
 #endif // USE_YDLIDAR_X3
 
-/** Definition biến global — dùng `inline` để tránn multiple-definition khi include ở nhiều .h */
+/** Definition biến global — dùng `inline` để tránh multiple-definition khi include ở nhiều .h */
 inline X3Scan g_x3Scan = {};
-inline X3Diag g_x3Diag = {};
+
+/** Task wrapper: gọi x3Poll() trong vòng lặp vô hạn.
+ *  Được `.ino` gọi qua xTaskCreatePinnedToCore(taskX3, ...).
+ *  Luôn compile — x3Poll() sẽ là stub nếu USE_YDLIDAR_X3=0. */
+inline void taskX3(void *) {
+  for (;;) {
+    x3Poll();
+    delay(1);
+  }
+}
 
 #endif // YDLIDAR_X3_H

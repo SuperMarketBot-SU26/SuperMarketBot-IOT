@@ -1,7 +1,7 @@
 /* =====================================================================
  *  StatusRGB.h — Chỉ LED RGB zin trên bo ESP32-S3-DevKit (GPIO 38), không LED ngoài
  *  Thư viện: Adafruit NeoPixel.
- *  ENC_RR=48, Neo=38 → không trùng chân; Echo US 10–13, ENC_FL=39.
+ *  ENC_L=8, ENC_R=9, YDLIDAR M_CTR=48, Neo=38 → không trùng chân; Echo US 10–13.
  * =====================================================================*/
 #ifndef STATUS_RGB_H
 #define STATUS_RGB_H

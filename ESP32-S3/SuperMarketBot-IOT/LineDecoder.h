@@ -153,7 +153,7 @@ inline void lineBotDrive(int16_t turn, int16_t fwdPct) {
 
 /** Reset OA context khi vào/chuyển chế độ. */
 inline void lineResetOA() {
-#if USE_HC_SR04_HARDWARE || !USE_LIDAR_HARDWARE
+#if USE_HC_SR04_HARDWARE
   oaReset(g_oaCtx);
 #endif
 }
@@ -277,7 +277,7 @@ inline void lineDecoderUpdate(float dtS) {
 
     /* ── AVOID_OBS: né vật cản (OA Module 1) ─────────────────────── */
     case LD_AVOID_OBS: {
-#if USE_HC_SR04_HARDWARE || !USE_LIDAR_HARDWARE
+#if USE_HC_SR04_HARDWARE
       int16_t frontCm = obsFrontCm();
       // Trigger OA: nếu chưa bắt đầu → oaBegin()
       if (g_oaCtx.state == OA_IDLE) {

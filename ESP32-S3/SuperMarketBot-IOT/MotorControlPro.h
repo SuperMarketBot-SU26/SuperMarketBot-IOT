@@ -211,6 +211,60 @@ inline void botDriveMecanumPro(
     }
 }
 
+/**
+ * Dedicated drive function for ROS 2. 
+ * Provides velocity smoothing (joystick filter) and PWM ramping (motorDriveSmooth),
+ * but BYPASSES the cubic curve mapping designed for human joystick input.
+ * ROS 2 controllers (like pure pursuit) expect a linear response to their velocity commands.
+ */
+inline void botDriveROS2(int16_t turn, int16_t fwd, uint16_t base) {
+    if (base > PWM_MAX) base = PWM_MAX;
+
+    // Apply low-pass filter to ROS 2 inputs for velocity smoothing
+    static int16_t prevFwd = 0, prevTurn = 0;
+    int16_t fwdF = joystickFilter(fwd, prevFwd);
+    int16_t turnF = joystickFilter(turn, prevTurn);
+
+    // Skip the cubic mapping entirely for ROS 2! Use linear values directly.
+    float fwdCurve = (float)fwdF;
+    float turnCurve = (float)turnF;
+    float strafeCurve = 0.0f; // No mecanum
+
+    uint16_t rotBase = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : base;
+    int32_t fwdScaled = (int32_t)(fwdCurve * (int32_t)base / 100);
+    int32_t strafeScaled = 0;
+    int32_t turnScaled = (int32_t)(turnCurve * (int32_t)rotBase / 100);
+
+    // Optimized mecanum gains
+    constexpr int32_t STRAFE_GAIN = 140;
+    constexpr int32_t FWD_GAIN = 115;
+    constexpr int32_t TURN_GAIN = 135;
+
+    // Calculate wheel speeds
+    int32_t fl = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
+    int32_t rl = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN + turnScaled * TURN_GAIN) / 100;
+    int32_t fr = (fwdScaled * FWD_GAIN - strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
+    int32_t rr = (fwdScaled * FWD_GAIN + strafeScaled * STRAFE_GAIN - turnScaled * TURN_GAIN) / 100;
+
+    // Normalize to prevent saturation
+    int32_t maxAllowedSpd = max((int32_t)base, (int32_t)rotBase);
+    int32_t maxSpd = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
+    if (maxSpd > maxAllowedSpd && maxSpd > 0) {
+        int32_t scale = maxAllowedSpd * 100 / maxSpd;
+        fl = fl * scale / 100;
+        rl = rl * scale / 100;
+        fr = fr * scale / 100;
+        rr = rr * scale / 100;
+    }
+
+    // Always apply smooth motor drive for ROS 2
+    motorDriveSmooth(MID_FL, fl);
+    motorDriveSmooth(MID_RL, rl);
+    motorDriveSmooth(MID_FR, fr);
+    motorDriveSmooth(MID_RR, rr);
+}
+
+
 /* ==================== VELOCITY PROFILING ========================= */
 /**
  * Tạo velocity profile cho smooth acceleration/deceleration

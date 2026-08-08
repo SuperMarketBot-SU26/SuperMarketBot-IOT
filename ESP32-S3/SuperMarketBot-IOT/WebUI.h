@@ -1,5 +1,5 @@
 /* =====================================================================
- *  WebUI.h — HMI: SoftAP + WebSocket (LiDAR ưu tiên, siêu âm = an toàn)
+ *  WebUI.h — HMI: SoftAP + WebSocket (HC-SR04 + YDLIDAR X3)
  * =====================================================================*/
 #ifndef WEBUI_H
 #define WEBUI_H
@@ -218,7 +218,7 @@ h2 .dot.safety{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .b-item.sensor-off{opacity:.58;border-left-color:#475569}
 .b-item.sensor-off .val{color:var(--muted)}
 .b-bar{height:6px;border-radius:3px;background:#1a2330;margin-top:8px;overflow:hidden}
-.b-fill{height:100%;border-radius:3px;transition:width .2s,background .15s}
+.b-fill{height:100%;border-radius:3px;transition:width .08s,background .08s;will-change:width}
 .slam{
   min-height:112px;border:1px dashed var(--line2);border-radius:12px;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;
@@ -392,10 +392,10 @@ details pre{
 <div class="wrap">
   <header class="brand">
     <h1>SMARTMARKETBOT</h1>
-    <p class="desc">IoT Edge HMI &mdash; <strong>4× HC-SR04</strong> (TRIG chung GPIO16, ECHO 35-38): dừng &lt;30&nbsp;cm, tự hành lách theo bên trống. Vòng tròn lớn = min trước/sau; thanh 4 góc = từng cảm biến.</p>
+    <p class="desc">IoT Edge HMI &mdash; <strong>4&times; HC-SR04</strong> (TRIG=GPIO16, ECHO=10/11/12/13): dừng &lt;35 cm, tự hành lách theo bên trống. TF-Luna đã bỏ (2026-07-30).</p>
     <div class="pillrow">
-      <span class="pill">TF-Luna &middot; quét 2 hướng</span>
-      <span class="pill safety">Né vật · LiDAR (+ SR04 tùy chọn)</span>
+      <span class="pill">YDLIDAR X3 &middot; quét 360&deg;</span>
+      <span class="pill safety">Né vật &middot; HC-SR04</span>
       <span class="pill">8× TCRT5000 &middot; ADC1: 1,2,3,10,11,12,13,14</span>
     </div>
   </header>
@@ -455,8 +455,8 @@ details pre{
       </div>
 
       <div class="card">
-        <h2><span class="dot safety"></span> Bumper — bốn góc (bản sao LiDAR hoặc HC-SR04)</h2>
-        <p class="hint">Trước/sau lấy từ TF-Luna (cùng số như trên cung LiDAR). Trái/phải: không có LiDAR ngang → hiển thị “xa” (<code>OFF</code> link). Có thể bật lại HC-SR04 thật trong <code>Config.h</code>. <b>OFF</b> khi chưa có frame hợp lệ / chưa nối dây.</p>
+        <h2><span class="dot safety"></span> Bumper — bốn góc HC-SR04</h2>
+        <p class="hint">4&times; HC-SR04. TF-Luna đã bỏ (2026-07-30). YDLIDAR X3 dùng cho SLAM (ROS2).</p>
         <div class="bump-grid" id="bumpBox"></div>
       </div>
 
@@ -550,11 +550,11 @@ details pre{
       </div>
 
       <div class="card">
-        <h2>Tốc độ Encoder (GPIO 35 & 36)</h2>
+        <h2>Tốc độ Encoder (GPIO 8 & 9)</h2>
         <p class="hint" style="margin-top:-4px;margin-bottom:8px;font-size:.68rem"><b>OFF</b> khi vài giây gần đây <b>chưa có xung</b> encoder — lăn nhẹ bánh để kiểm tra.</p>
         <div class="rpm-grid">
-          <div class="rpm-item sensor-off" id="rpmLF"><div class="rpm-val" id="rFL">OFF</div><div class="rpm-lbl">Trái (GPIO 35)</div></div>
-          <div class="rpm-item sensor-off" id="rpmRF"><div class="rpm-val" id="rFR">OFF</div><div class="rpm-lbl">Phải (GPIO 36)</div></div>
+          <div class="rpm-item sensor-off" id="rpmLF"><div class="rpm-val" id="rFL">OFF</div><div class="rpm-lbl">Trái (GPIO 8)</div></div>
+          <div class="rpm-item sensor-off" id="rpmRF"><div class="rpm-val" id="rFR">OFF</div><div class="rpm-lbl">Phải (GPIO 9)</div></div>
         </div>
       </div>
 
@@ -615,8 +615,8 @@ details pre{
         <h2><span class="dot"></span> Bố trí cảm biến (team &mdash; kh&ocirc;ng đổi d&acirc;y GPIO)</h2>
         <p class="hint">Chọn cổng Siêu &acirc;m vật lý tương ứng với vị trí tr&ecirc;n xe (0&ndash;3, kh&ocirc;ng tr&ugrave;ng).</p>
         <p class="hint" style="margin-top:4px">
-          <b>HC-SR04 (đã move):</b> TRIG chung GPIO16 &middot; ECHO 35 (Trước-trái), 36 (Sau-trái), 37 (Trước-phải), 38 (Sau-phải, RGB LED đ&atilde; tắt).
-          GPIO35-38 input-only &rarr; nếu module kh&ocirc;ng c&oacute; pull-up 10K sẵn, cần th&ecirc;m R 10K&Omega; l&ecirc;n 3V3.
+          <b>HC-SR04 (đã move):</b> TRIG chung GPIO16 • ECHO 10 (Trước-trái), 11 (Sau-trái), 12 (Trước-phải), 13 (Sau-phải)
+          Encoder: GPIO 35 (Trái), GPIO 36 (Phải) — input-only
         </p>
         <div class="layout-form" id="layGrid"></div>
         <div class="layout-lid" style="display:none">
@@ -708,16 +708,19 @@ let ws,retry;
 const LIDAR_MAX_CM=800, US_BAR_MAX_CM=200;
 const SLOT_LBL=['Trái trước','Trái sau','Phải trước','Phải sau'];
 const SENS_LBL=['Trước (Front)','Sau (Back)','Trái (Left)','Phải (Right)'];
-// ★ Move US sang GPIO16,35,36,37,38 để nhường ADC1 cho TCRT5000 (xem Config.h).
-//   Index 0..3 = 4 cảm biến HC-SR04; GPIO ghi đúng với US_TRIG=16, US_ECHO_LF=35, _RL=36, _RF=37, _RR=38.
-//   Lưu ý: GPIO35..38 là input-only, cần pull-up 10K ngoài nếu module HC-SR04 không có sẵn.
+//   Index 0..3 = 4 cảm biến HC-SR04; GPIO ghi đúng với US_TRIG=16, US_ECHO_LF=10, _RL=11, _RF=12, _RR=13.
+//   ⚠️ GPIO 35/36 đã chuyển sang Encoder — không còn dùng cho ECHO.
 const PHY_US=[
-  {v:0, t:'US #0 — TRIG 16 / ECHO_LF 35 (Trước-trái)'},
-  {v:1, t:'US #1 — TRIG 16 / ECHO_RL 36 (Sau-trái)'},
-  {v:2, t:'US #2 — TRIG 16 / ECHO_RF 37 (Trước-phải)'},
-  {v:3, t:'US #3 — TRIG 16 / ECHO_RR 38 (Sau-phải, RGB LED đã tắt)'}
+  {v:0, t:'US #0 — TRIG 16 / ECHO_LF 10 (Trước-trái)'},
+  {v:1, t:'US #1 — TRIG 16 / ECHO_RL 11 (Sau-trái)'},
+  {v:2, t:'US #2 — TRIG 16 / ECHO_RF 12 (Trước-phải)'},
+  {v:3, t:'US #3 — TRIG 16 / ECHO_RR 13 (Sau-phải)'}
 ];
-const PHY_ENC=[{v:0,t:'Enc FL (GPIO39)'},{v:1,t:'Enc RL (GPIO16)'},{v:2,t:'Enc FR (GPIO3)'},{v:3,t:'Enc RR (GPIO48)'}];
+// Encoder: 2 kênh vật lý (Trái=GPIO35, Phải=GPIO36), mỗi kênh shared cho FL+RL và FR+RR
+const PHY_ENC=[
+  {v:0, t:'Enc Trái — GPIO35 (FL+RL)'},
+  {v:1, t:'Enc Phải — GPIO36 (FR+RR)'}
+];
 const PHY_MOT=[
   {v:0,t:'#1-A FL — PWM4, AIN 5/6 → AO1-AO2'},
   {v:1,t:'#1-B RL — PWM7, BIN 8/9 → BO1-BO2'},

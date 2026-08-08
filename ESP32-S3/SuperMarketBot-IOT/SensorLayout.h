@@ -1,12 +1,13 @@
 /* =====================================================================
- *  SensorLayout.h — Ánh xạ logic (4 góc xe / trước-sau LiDAR) → phần cứng cố định
+ *  SensorLayout.h — Ánh xạ logic (4 góc xe) → phần cứng cố định
  *  Lưu NVS; team chỉnh trên web, không đổi GPIO trong code.
  *
  *  Siêu âm vật lý (USE_HC_SR04_HARDWARE=1): 0=LF, 1=RL, 2=RF, 3=RR (GPIO Config).
- *  Khi chỉ LiDAR: web nhận uf/ub từ Luna; 4 góc = max.
- *  Encoder vật lý: 0=FL(39), 1=RL(16), 2=FR(3), 3=RR(48)
+ *  Encoder vật lý: ENC_L=GPIO35, ENC_R=GPIO36 (2 bánh, shared FL+RL và FR+RR)
+ *  ⚠️ GPIO 35/36 là input-only trên ESP32-S3 N16R8 (PSRAM chiếm).
  *  Slot logic: 0=Trái trước, 1=Trái sau, 2=Phải trước, 3=Phải sau
- *  LiDAR: lidF=0 → Serial1 = “LiDAR trước xe”; 1 → Serial2 = trước (đổi vai trừu tượng)
+ *
+ *  TF-Luna đã bỏ hoàn toàn (2026-07-30). YDLIDAR X3 dùng Serial1.
  * =====================================================================*/
 #ifndef SENSOR_LAYOUT_H
 #define SENSOR_LAYOUT_H
@@ -43,8 +44,6 @@ enum EncPhy : uint8_t {
 
 uint8_t g_mapUsSlot[4] = {0, 1, 2, 3};
 uint8_t g_mapEncSlot[4] = {0, 1, 2, 3};
-/** 0 = Serial1 là LiDAR trước xe; 1 = Serial2 là LiDAR trước xe */
-uint8_t g_lidarFrontUart = 0;
 
 inline bool layoutIsPermutation4(const uint8_t *m) {
   bool seen[4] = {false, false, false, false};
@@ -61,7 +60,6 @@ inline void sensorLayoutApplyDefaults() {
     g_mapUsSlot[i] = (uint8_t)i;
     g_mapEncSlot[i] = (uint8_t)i;
   }
-  g_lidarFrontUart = 0;
 }
 
 /** Đọc NVS (namespace đã mở sẵn read-only) — không gọi begin/end */
@@ -76,8 +74,6 @@ inline void sensorLayoutLoad(Preferences &prefs) {
     v = prefs.getUChar(k, 255);
     if (v <= 3) g_mapEncSlot[i] = v;
   }
-  uint8_t lf = prefs.getUChar("lidFront", 255);
-  if (lf <= 1) g_lidarFrontUart = lf;
   if (!layoutIsPermutation4(g_mapUsSlot) || !layoutIsPermutation4(g_mapEncSlot)) {
     sensorLayoutApplyDefaults();
   }
@@ -93,13 +89,12 @@ inline bool sensorLayoutSave(Preferences &prefs) {
     snprintf(k, sizeof(k), "mapE%d", i);
     prefs.putUChar(k, g_mapEncSlot[i]);
   }
-  prefs.putUChar("lidFront", g_lidarFrontUart);
   prefs.end();
   return true;
 }
 
 /**
- * JSON: { "t":"layout", "us":[0..3]x4, "enc":[..], "lidF":0|1 }
+ * JSON: { "t":"layout", "us":[0..3]x4, "enc":[..] }
  * Mảng theo thứ tự slot: Trái trước, Trái sau, Phải trước, Phải sau
  */
 inline bool sensorLayoutApplyJson(JsonDocument &doc, Preferences &prefs) {
@@ -115,13 +110,10 @@ inline bool sensorLayoutApplyJson(JsonDocument &doc, Preferences &prefs) {
     tmpE[i] = (uint8_t)e;
   }
   if (!layoutIsPermutation4(tmpU) || !layoutIsPermutation4(tmpE)) return false;
-  int lf = doc["lidF"].as<int>();
-  if (lf != 0 && lf != 1) return false;
   for (int i = 0; i < 4; i++) {
     g_mapUsSlot[i] = tmpU[i];
     g_mapEncSlot[i] = tmpE[i];
   }
-  g_lidarFrontUart = (uint8_t)lf;
   return sensorLayoutSave(prefs);
 }
 
@@ -139,7 +131,6 @@ inline void sensorLayoutReplyToClient(WebSocketsServer &ws, uint8_t clientNum) {
     a.add(g_mapUsSlot[i]);
     b.add(g_mapEncSlot[i]);
   }
-  doc["lidF"] = g_lidarFrontUart;
   char out[192];
   size_t n = serializeJson(doc, out, sizeof(out) - 1);
   if (n > 0) ws.sendTXT(clientNum, out, n);

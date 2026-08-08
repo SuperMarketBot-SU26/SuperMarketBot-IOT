@@ -182,6 +182,13 @@ inline void pidYawReset() {
     s_pidYaw.firstRun = true;
 }
 
+// v2.6 DIAGNOSTIC (2026-07-30): expose yaw PID integral state so the
+// cmd_vel_callback branch log can spot windup before the heading-lock
+// PID saturates the differential steering.
+inline float pidYawIntegral() {
+    return s_pidYaw.integral;
+}
+
 /**
  * @param targetRad  Heading mong muốn (rad)
  * @param actualRad  Heading thực từ g_pose.headingRad

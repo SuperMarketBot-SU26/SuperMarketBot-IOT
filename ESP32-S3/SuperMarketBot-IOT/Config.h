@@ -47,31 +47,18 @@
 
 #define M_STBY        47    // Standby chung cho 2 TB6612
 
-/* -------------------- LIDAR TF-Luna (UART) -------------------------- */
-// Cặp 17/18 = U1 theo sơ đồ board; LiDAR: 5V, GND, TX/Luna → RX ESP, RX/Luna ← TX ESP
-#define LIDAR_F_TX    17
-#define LIDAR_F_RX    18
-// Cặp 1/2: Serial2 — tránh 19,20; đủ cho UART 2
-#define LIDAR_B_TX    1
-#define LIDAR_B_RX    2
-
-#define LIDAR_BAUD    115200
-// Góc đo TF-Luna thường 2,3°/step; tầm datasheet ~0,2m–8m (phụ thuộc vật liệu, ánh sáng)
+// TF-Luna đã bỏ hoàn toàn (2026-07-30).
+// YDLIDAR X3 dùng Serial1: ESP32 RX=GPIO43 (nhận từ YDLIDAR TX),
+//                          ESP32 TX=GPIO1  (gửi lệnh tới YDLIDAR RX).
+// GPIO 43 là chân U1RXD input-only; GPIO 44 input-only nên dùng GPIO 1 cho TX.
 #define LIDAR_MAX_CM  800
 
 /* -------------------- YDLIDAR X3 (360°, 30m, SLAM) ------------------ */
-// Dùng Serial1 riêng để không xung đột TF-Luna. ESP32-S3 có 3 UART:
-//   Serial0 = USB (debug)
-//   Serial1 = LIDAR_X3_TX=15, LIDAR_X3_RX=16 (dùng cho X3)
-//   Serial2 = LIDAR_B_TX=1,  LIDAR_B_RX=2  (TF-Luna back)
-// Lưu ý: ENC_RL=16 đang dùng; nếu bật X3 phải tắt encoder RL hoặc chuyển ENC_RL sang GPIO khác.
-#define USE_YDLIDAR_X3          1   // Bật YDLIDAR X3 (UART TX=1, RX=2, M_CTR=48)
-#define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> Cắm vào chân RX của YDLIDAR (tránh 43/44 bị trùng Serial console)
-#define YDLIDAR_X3_RX           2   // ESP32 RX (GPIO 2) -> Cắm vào chân TX của YDLIDAR
+#define USE_YDLIDAR_X3          1   // Bật YDLIDAR X3
+#define YDLIDAR_X3_TX           1   // ESP32 TX (GPIO 1) -> RX của YDLIDAR
+#define YDLIDAR_X3_RX          44   // ESP32 RX (GPIO 44) -> TX của YDLIDAR
 #define YDLIDAR_X3_M_CTR        48  // Chân điều khiển động cơ quay M_CTR (GPIO 48 rảnh)
-#define YDLIDAR_X3_BAUD         115200  // YDLIDAR X3 factory default baudrate.
-                                          // Thử 230400 trước — nếu first16 không có 0xAA 0x55 thì X3 ở 115200.
-                                          // 115200 → ~349 pts/scan ở sample rate 4kHz. Đủ cho SLAM.
+#define YDLIDAR_X3_BAUD         115200  // YDLIDAR X3 factory default baudrate
 #define YDLIDAR_SCAN_HZ         10   // Tần số scan (10 Hz điển hình cho X3)
 #define YDLIDAR_SCAN_BUFF_SIZE  4096  // Buffer bytes cho nhiều scan packet (tăng từ 1024)
 
@@ -87,17 +74,10 @@
  * Nếu ROS2/slam_toolbox chậm, có thể giảm xuống 2000.
  */
 #define YDLIDAR_MAX_POINTS      4000  // Max ~4000 pts/scan (full 360° ở 4kHz)
-/**
- * TF-Luna (Benewake): gửi lệnh UART sau khi mở cổng — bật output, khung 9 byte (cm), FPS, save.
- * Tắt (=0) nếu bạn đã cấu hình bằng tool PC và không muốn firmware đụng vào.
- */
-#define TFLUNA_SEND_INIT_CMD  1
-/** Tần số mẫu 1–250 Hz (chỉ khi TFLUNA_SEND_INIT_CMD=1). */
-#define TFLUNA_SAMPLE_HZ      100
 
 /* -------------------- SIÊU ÂM (4x HC-SR04 — 4 góc xe) ---------------- */
 // VCC 5V, GND; Trig 3,3V OK; Echo 5V → chia áp 3,3V (1k+2k) vào GPIO
-// Sơ đồ chuẩn: Trig 14 chung; Echo 10=Trái trước (LF), 11=Trái sau (RL), 12=Phải trước (RF), 13=Phải sau (RR).
+// Sơ đồ chuẩn: Trig 14 chung; Echo 10=Trái trước (LF), 11=Sau-trái (RL), 12=Phải trước (RF), 13=Phải sau (RR).
 #define US_TRIG         14
 #define US_ECHO_LF      10
 #define US_ECHO_RL      11
@@ -114,11 +94,9 @@
 /** Dưới ngưỡng này (cm) coi là không đo được / nhiễu SR04. */
 #define US_MIN_VALID_CM     2
 /**
- * 1 = 4× HC-SR04 (né vật theo 4 góc). 0 = TF-Luna trước/sau.
+ * 1 = 4× HC-SR04 (né vật theo 4 góc). TF-Luna đã bỏ.
  */
 #define USE_HC_SR04_HARDWARE  1
-/** Bật cả hai phần cứng hoạt động song song để Fusion 5 cảm biến. */
-#define USE_LIDAR_HARDWARE    0
 
 #if USE_HC_SR04_HARDWARE
 /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
@@ -130,21 +108,18 @@
 #define OA_DETECT_CM          US_OA_DETECT_CM
 #define PATH_CLEAR_MIN_CM     US_PATH_CLEAR_CM
 #define OA_PATH_CLEAR_STREAK  18
-#else
-#define US_STOP_CM            30
-#define US_OA_DETECT_CM       42
-#define US_PATH_CLEAR_CM      48
-#endif
+#endif // USE_HC_SR04_HARDWARE
 
 /* -------------------- CẢM BIẾN GÓC IMU MPU6050 (I2C) ---------------- */
-#define USE_IMU_MPU6050  1    // Bật cảm biến góc nghiêng IMU MPU6050 (I2C SDA=17, SCL=18)
-#define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17)
-#define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18)
+#define USE_IMU_MPU6050  1    // Bật cảm biến góc nghiêng IMU MPU6050
+#define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17 — U2TXD, không xung đột YDLIDAR)
+#define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18 — U2RXD, không xung đột YDLIDAR)
 #define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
 
 /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
 #define USE_ENCODER_HARDWARE  1 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
 // Chân D0 cắm vào GPIO + ngắt ngoài; VCC = 3.3V, GND chung ESP32. Chân A0 KHÔNG NỐI (BỎ TRỐNG).
+// ⚠️ GPIO 35/36 là input-only trên ESP32-S3 N16R8 (PSRAM chiếm) — test kỹ interrupt.
 #define ENC_L         35    // Encoder Bên Trái (GPIO 35)
 #define ENC_R         36    // Encoder Bên Phải (GPIO 36)
 
@@ -280,17 +255,7 @@
 /** Ngưỡng trái/phải (cm) để bẻ lái trong AUTO — chỉ có tác dụng khi bật HC-SR04 (USE_HC_SR04_HARDWARE=1). */
 #define SAFE_SIDE_AVOID_CM  30
 
-#if USE_HC_SR04_HARDWARE
 #define AUTO_LIDAR_BLOCK_CM     US_STOP_CM
-#else
-#define AUTO_LIDAR_BLOCK_CM     16
-#endif
-#if !USE_HC_SR04_HARDWARE
-/** Phát hiện vật cản — LiDAR (cm). */
-#define OA_DETECT_CM            70
-#define PATH_CLEAR_MIN_CM       100
-#define OA_PATH_CLEAR_STREAK    12
-#endif
 #define OA_CLEAR_MIN_CM         PATH_CLEAR_MIN_CM
 #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
 #define ROBOT_HEAVY_LOAD        1
@@ -373,8 +338,8 @@
 /* -------------------- WIFI STA (kết nối router để MQTT) ----------- */
 /** Robot thử lần lượt từng WiFi — kết nối được cái đầu tiên tìm thấy.
  *  Thêm hotspot điện thoại vào STA_SSID_2/3/4/5 để demo ở bất kỳ đâu mà không cần reflash. */
-#define STA_SSID               "2K2L"     // Ưu tiên 1 - WiFi trường FPT
-#define STA_PASS               "01010804"
+#define STA_SSID               "Khkh"     // Ưu tiên 1 - WiFi trường FPT
+#define STA_PASS               "khoa101042"
 #define STA_SSID_2             "Snuggie"        // Hotspot điện thoại demo (tránh trùng AP của ESP)
 #define STA_PASS_2             "asksnuggie"
 #define STA_SSID_3             "Khkh"    // Dự phòng / quán cafe (ưu tiên 3)
@@ -404,15 +369,23 @@
 
 /* -------------------- MICRO-ROS (ROS2 Agent Bridge) ------------------ */
 /** 0 = Dùng Rosbridge WebSocket.
- *  1 = Bật Micro-ROS trực tiếp qua UDP kết nối tới máy Linux chạy micro-ros-agent. */
+ *  1 = Bật Micro-ROS. */
 #define USE_MICRO_ROS           1
+/** 0 = Dùng Wi-Fi UDP.
+ *  1 = Dùng USB Serial cắm thẳng vào Raspberry Pi 5 (chạy mượt mà, zero-latency, không phụ thuộc mạng). */
+#define MICRO_ROS_USE_SERIAL    1
+/** 0 = Tắt WebUI + MQTT tasks (ROS2-only diagnostics mode).
+ *  1 = Bật WebIO + MQTT tasks song song với micro-ROS.
+ *  Khi tắt, CtrlJson.h vẫn compile nhưng không ai gọi đến → không có race
+ *  giữa WebUI joystick / MQTT EStop và ROS2 /cmd_vel + 500 ms watchdog. */
+#define ENABLE_WEBUI_TASK       1
 /** IP của máy Linux chạy micro-ros-agent. Thay đổi mỗi khi chuyển WiFi / mạng.
  *  Tìm IP: `ip addr show` (linux) hoặc `ipconfig` (Windows).
  *  Ví dụ:
  *    - Nhà (WiFi nhà):      "192.168.1.241"
  *    - Trường (WiFi trường): "192.168.x.x"   ← xem IP laptop trên mạng trường
  *    - Điểm khác: `ip addr show` trên laptop rồi điền vào đây */
-#define MICRO_ROS_AGENT_IP      "192.168.1.106"
+#define MICRO_ROS_AGENT_IP      "192.168.154.120"
 #define MICRO_ROS_AGENT_PORT    8888
 
 /* -------------------- ĐO PIN (ADC, tùy chọn) ------------------------
@@ -558,19 +531,11 @@ inline bool lidarRearBlocked(int16_t bCm) {
 
 extern RobotState g_state;
 
-/** Tích lũy byte nhận từ Luna (Serial1=trước, Serial2=sau) — debug nhanh trên web (`lr1`/`lr2`). */
-extern volatile uint32_t g_lunaRxBytes1;
-extern volatile uint32_t g_lunaRxBytes2;
-
-/** Dò “có tín hiệu thật” cho HMI — millis lần cuối (0 = chưa từng). Định nghĩa trong Sensors.h / Odometry.h */
-extern volatile uint32_t g_luna1LastOkMs;
-extern volatile uint32_t g_luna2LastOkMs;
 extern volatile uint32_t g_usPhyLastEchoMs[4];
 extern volatile uint32_t g_encPhyLastPulseMs[4];
 extern volatile uint32_t s_settleUntilMs;
 
 /** Cửa sổ thời gian: sau bấy lâu không có tín hiệu thì web hiển thị OFF */
-#define SENSOR_LINK_MS_LIDAR  500u
 #define SENSOR_LINK_MS_US     2000u
 #define SENSOR_LINK_MS_ENC    3500u
 
