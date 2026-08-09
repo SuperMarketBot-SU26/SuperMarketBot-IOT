@@ -32,6 +32,8 @@
 #include <nav_msgs/msg/odometry.h>
 #include <geometry_msgs/msg/twist.h>
 #include <sensor_msgs/msg/imu.h>
+#include <sensor_msgs/msg/range.h>
+#include <std_msgs/msg/string.h>
 
 // Forward declarations — actual types defined in YdlidarX3.h / Localization.h
 // Placed at GLOBAL scope (NOT inside microRos namespace) so the linker
@@ -49,6 +51,8 @@ static rclc_executor_t  g_executor;
 // Publishers
 static rcl_publisher_t  g_odom_pub;
 static rcl_publisher_t  g_imu_pub;
+static rcl_publisher_t  g_us_front_pub;
+static rcl_publisher_t  g_us_debug_pub;
 
 // Subscribers
 static rcl_subscription_t g_cmd_vel_sub;
@@ -57,6 +61,8 @@ static rcl_subscription_t g_cmd_vel_sub;
 static nav_msgs__msg__Odometry      g_odom_msg;
 static sensor_msgs__msg__Imu        g_imu_msg;
 static geometry_msgs__msg__Twist    g_cmd_vel_msg;
+static sensor_msgs__msg__Range      g_us_front_msg;
+static std_msgs__msg__String        g_us_debug_msg;
 
 // State
 static bool   g_initialized = false;
@@ -363,6 +369,18 @@ inline bool init() {
         "/imu/data"
     );
 
+    rclc_publisher_init_best_effort(
+        &g_us_front_pub, &g_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "/us_front_dist"
+    );
+
+    rclc_publisher_init_best_effort(
+        &g_us_debug_pub, &g_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+        "/us_debug"
+    );
+
     // /cmd_vel: BEST_EFFORT, depth=1. A stale velocity command that arrives
     // late (WiFi jitter, DDS retransmit) is unsafe to replay — it could
     // resume a high-throttle PWM that was issued before a stop or ESTOP.
@@ -393,6 +411,18 @@ inline bool init() {
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
 
+    g_us_front_msg.header.frame_id.data = (char*)"us_front_link";
+    g_us_front_msg.header.frame_id.size = 13;
+    g_us_front_msg.header.frame_id.capacity = 14;
+    g_us_front_msg.radiation_type = sensor_msgs__msg__Range__ULTRASOUND;
+    g_us_front_msg.field_of_view = 0.26f; // ~15 degrees
+    g_us_front_msg.min_range = 0.02f;
+    g_us_front_msg.max_range = 2.0f;
+
+    g_us_debug_msg.data.data = (char *) malloc(100);
+    g_us_debug_msg.data.capacity = 100;
+    g_us_debug_msg.data.size = 0;
+
     g_initialized = true;
     Serial.printf("[micro-ROS] Node ready. agent=%s:%d\n",
                   g_agent_ip.c_str(), g_agent_port);
@@ -418,6 +448,24 @@ inline void spin() {
         g_last_imu_ms = now;
         fill_imu_msg();
         rcl_publish(&g_imu_pub, &g_imu_msg, NULL);
+    }
+
+    // Publish Ultrasonic front data
+    static uint32_t s_last_us_ms = 0;
+    if (now - s_last_us_ms >= 100) { // 10Hz
+        s_last_us_ms = now;
+        g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
+        g_us_front_msg.header.stamp.nanosec = (uint32_t)((now % 1000) * 1000000);
+        float dist_m = g_state.usFront / 100.0f;
+        g_us_front_msg.range = dist_m;
+        rcl_publish(&g_us_front_pub, &g_us_front_msg, NULL);
+
+        if (g_us_debug_msg.data.data != NULL) {
+            snprintf(g_us_debug_msg.data.data, 100, "[US_DEBUG] Front: %dcm | Back: %dcm | Left: %dcm | Right: %dcm", 
+                     g_state.usFront, g_state.usBack, g_state.usLeft, g_state.usRight);
+            g_us_debug_msg.data.size = strlen(g_us_debug_msg.data.data);
+            rcl_publish(&g_us_debug_pub, &g_us_debug_msg, NULL);
+        }
     }
 
     // 3. Ping agent and re-sync every 2 seconds to detect if agent was restarted (Ctrl+C on Pi)

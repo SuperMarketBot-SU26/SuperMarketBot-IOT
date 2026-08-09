@@ -64,16 +64,17 @@ inline void sensorLayoutApplyDefaults() {
   g_lidarFrontUart = 0;
 }
 
-/** Đọc NVS (namespace đã mở sẵn read-only) — không gọi begin/end */
 inline void sensorLayoutLoad(Preferences &prefs) {
   sensorLayoutApplyDefaults();
   for (int i = 0; i < 4; i++) {
     char k[8];
-    snprintf(k, sizeof(k), "mapU%d", i);
-    uint8_t v = prefs.getUChar(k, 255);
-    if (v <= 3) g_mapUsSlot[i] = v;
+    // DO NOT LOAD mapU from NVS, it scrambles our Config.h pins!
+    // snprintf(k, sizeof(k), "mapU%d", i);
+    // uint8_t v = prefs.getUChar(k, 255);
+    // if (v <= 3) g_mapUsSlot[i] = v;
+    
     snprintf(k, sizeof(k), "mapE%d", i);
-    v = prefs.getUChar(k, 255);
+    uint8_t v = prefs.getUChar(k, 255);
     if (v <= 3) g_mapEncSlot[i] = v;
   }
   uint8_t lf = prefs.getUChar("lidFront", 255);

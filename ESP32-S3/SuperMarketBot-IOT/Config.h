@@ -76,10 +76,10 @@
  // VCC 5V, GND; Trig 3,3V OK; Echo 5V → chia áp 3,3V (1k+2k) vào GPIO
  // Sơ đồ chuẩn: Trig 14 chung; Echo 10=Trái trước (LF), 11=Sau-trái (RL), 12=Phải trước (RF), 13=Phải sau (RR).
  #define US_TRIG         14
- #define US_ECHO_LF      10
- #define US_ECHO_RL      11
- #define US_ECHO_RF      12
- #define US_ECHO_RR      13
+ #define US_ECHO_LF      13 // Front Software -> Pin 13
+ #define US_ECHO_RL      12 // Back Software -> Pin 12
+ #define US_ECHO_RF      11 // Left Software -> Pin 11
+ #define US_ECHO_RR      10 // Right Software -> Pin 10
  #define US_ECHO_F       US_ECHO_LF
  #define US_ECHO_B       US_ECHO_RL
  #define US_ECHO_L       US_ECHO_RF
@@ -93,7 +93,7 @@
  /**
   * 1 = 4× HC-SR04 (né vật theo 4 góc). TF-Luna đã bỏ.
   */
- #define USE_HC_SR04_HARDWARE  0
+ #define USE_HC_SR04_HARDWARE  1
  
  /** Dừng cứng & khẩn cấp (cm) — yêu cầu: < 35 cm thì dừng. */
  #define US_STOP_CM            35

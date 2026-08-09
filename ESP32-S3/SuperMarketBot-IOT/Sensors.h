@@ -202,17 +202,27 @@ inline void sensorsCommitPhyToState(const int16_t phy[4]) {
 inline int16_t readCustomSonar(uint8_t triggerPin, uint8_t echoPin) {
   // 1. Đảm bảo chân Trig ở mức LOW trước
   digitalWrite(triggerPin, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(5);
   
-  // 2. Kích hoạt phát sóng bằng cách kéo Trig lên HIGH trong 10us
+  // 2. Kích hoạt phát sóng bằng cách kéo Trig lên HIGH trong 50us
+  // Dùng 50us thay vì 10us để đảm bảo cảm biến nhận được tín hiệu kể cả khi sụt áp
   digitalWrite(triggerPin, HIGH);
-  delayMicroseconds(10);
+  delayMicroseconds(50);
   digitalWrite(triggerPin, LOW);
   
-  // 3. Đo thời gian phản hồi HIGH trên chân Echo
-  // 15000us tương đương khoảng ~250cm (an toàn và phản hồi nhanh)
-  uint32_t duration = pulseIn(echoPin, HIGH, 15000UL);
-  if (duration == 0) return 0;
+  // 3. Chờ chân Echo lên HIGH (timeout 5ms)
+  uint32_t waitHigh = micros();
+  while (digitalRead(echoPin) == LOW) {
+      if (micros() - waitHigh > 5000UL) return 0; // Sensor không phản hồi
+  }
+  
+  // 4. Đo thời gian chân Echo giữ ở mức HIGH (timeout 15ms ~ 250cm)
+  uint32_t startEcho = micros();
+  while (digitalRead(echoPin) == HIGH) {
+      if (micros() - startEcho > 15000UL) return 0; // Vật thể ở quá xa
+  }
+  
+  uint32_t duration = micros() - startEcho;
   
   // Khoảng cách (cm) = thời gian / 58
   return (int16_t)(duration / 58);
