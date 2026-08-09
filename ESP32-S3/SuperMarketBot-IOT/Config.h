@@ -114,11 +114,11 @@
 #define IMU_FUSION_DEBUG 0    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
  
  /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
- #define USE_ENCODER_HARDWARE  0 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
+ #define USE_ENCODER_HARDWARE  1 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
  // Chân D0 cắm vào GPIO + ngắt ngoài; VCC = 3.3V, GND chung ESP32. Chân A0 KHÔNG NỐI (BỎ TRỐNG).
  // ⚠️ GPIO 35/36 là input-only trên ESP32-S3 N16R8 (PSRAM chiếm) — test kỹ interrupt.
- #define ENC_L         35    // Encoder Bên Trái (GPIO 35)
- #define ENC_R         36    // Encoder Bên Phải (GPIO 36)
+ #define ENC_L         43    // Encoder Bên Trái (GPIO 43)
+ #define ENC_R         44    // Encoder Bên Phải (GPIO 44)
  
  #define ENC_FL        ENC_L // Bánh trước trái dùng chung xung bên Trái
  #define ENC_RL        ENC_L // Bánh sau trái dùng chung xung bên Trái
@@ -126,9 +126,9 @@
  #define ENC_RR        ENC_R // Bánh sau phải dùng chung xung bên Phải
  
  // Số xung trên 1 vòng bánh xe (tuỳ đĩa encoder - thường 20 khe chữ U)
- // Đĩa encoder được gắn trực tiếp trên bánh xe, nên 1 vòng bánh = 20 xung.
+ // Đĩa encoder được gắn trên trục motor (trước hộp số), nên 1 vòng bánh = 20 xung * 48 (gear ratio) = 960 xung.
  #ifndef ENC_PPR
- #define ENC_PPR       20.0f
+ #define ENC_PPR       960.0f
  #endif
  
  // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm
