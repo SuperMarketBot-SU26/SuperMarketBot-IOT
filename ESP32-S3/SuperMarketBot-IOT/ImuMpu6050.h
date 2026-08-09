@@ -173,6 +173,13 @@ inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
   // Full scale 2000 deg/s -> 16.4 LSB/(deg/s)
   const float gyroZ = (float)(rawZ - s_gyroBiasZ) / 16.4f;
   gyroZRadOut = gyroZ * (float)M_PI / 180.0f;
+
+  // Cắt nhiễu cứng (Deadband) trước khi đưa vào EKF: 
+  // Nếu noise < 0.05 rad/s (~2.8 deg/s), coi như = 0
+  if (fabsf(gyroZRadOut) < 0.05f) {
+      gyroZRadOut = 0.f;
+  }
+
 #if IMU_YAW_INVERTED
   gyroZRadOut = -gyroZRadOut;
 #endif

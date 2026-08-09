@@ -89,8 +89,8 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_ANG_MIN = 0.02f;
     constexpr float ROS2_LIN_MIN = 0.005f;
     constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr float ROS2_ANG_MAX_FWD = 1.00f;
-    constexpr int32_t ROS2_PWM_MIN = 320;
+    constexpr float ROS2_ANG_MAX_FWD = 2.00f;
+    constexpr int32_t ROS2_PWM_MIN = 450;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -99,7 +99,7 @@ static void cmd_vel_callback(const void *msgin) {
     if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
         // Continuous Arcade Drive (No stepping/pausing needed for USB Serial)
         float normFwd = lin / ROS2_LIN_MAX;
-        float normRot = (ang / ROS2_ANG_MAX_FWD) * 1.25f;
+        float normRot = ang / ROS2_ANG_MAX_FWD;
 
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
@@ -112,7 +112,7 @@ static void cmd_vel_callback(const void *msgin) {
 
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
-            int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 460 : ROS2_PWM_MIN;
+            int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 550 : ROS2_PWM_MIN;
             int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
             if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
             return (norm >= 0) ? p : -p;

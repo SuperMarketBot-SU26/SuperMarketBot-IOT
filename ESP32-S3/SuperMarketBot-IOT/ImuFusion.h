@@ -71,10 +71,10 @@ extern float g_dThetaEncRate;
 #define IMU_FUSION_WHEEL_MIN_DIFF  5.0f  // % PWM khác biệt tối thiểu để tin wheel-derived dθ
 #endif
 #ifndef IMU_FUSION_ZUPT_MAX_DTHETA
-#define IMU_FUSION_ZUPT_MAX_DTHETA 0.002f  // rad/tick: ngưỡng để coi là "đứng yên" (0.11°/tick)
+#define IMU_FUSION_ZUPT_MAX_DTHETA 0.010f  // rad/tick: Tăng mạnh để bỏ qua nhiễu encoder khi đứng yên
 #endif
 #ifndef IMU_FUSION_ZUPT_GYRO_THRESH
-#define IMU_FUSION_ZUPT_GYRO_THRESH 0.050f  // rad/s — tăng lên 0.05 (~2.8 deg/s) do nhiễu cao hơn ở thang đo 2000 deg/s
+#define IMU_FUSION_ZUPT_GYRO_THRESH 0.150f  // rad/s (~8.5 deg/s): Tăng mạnh để triệt tiêu drift từ MPU6050 clone
 #endif
 #ifndef IMU_FUSION_ZUPT_SETTLE_TICKS
 #define IMU_FUSION_ZUPT_SETTLE_TICKS 10    // ticks đứng yên trước khi kích hoạt ZUPT (10×50ms = 0.5s)

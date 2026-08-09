@@ -232,7 +232,18 @@ inline void odomUpdate() {
   g_state.distRR = g_distRR;
   g_dThetaEncRate = 0.f;
 
-  locUpdate(0, 0, 0);
+  extern uint8_t g_mapMotSlot[4];
+  extern uint8_t g_motInv[4];
+  uint8_t pL = g_mapMotSlot[0] > 3 ? 0 : g_mapMotSlot[0];
+  uint8_t pR = g_mapMotSlot[2] > 3 ? 2 : g_mapMotSlot[2];
+  float rawDirL = (float)g_motorDir[pL];
+  float rawDirR = (float)g_motorDir[pR];
+  float dirL = g_motInv[0] ? -rawDirL : rawDirL;
+  float dirR = g_motInv[2] ? -rawDirR : rawDirR;
+
+  float dsL_pwm = dirL * distPhy[g_mapEncSlot[SLOT_LF]];
+  float dsR_pwm = dirR * distPhy[g_mapEncSlot[SLOT_RF]];
+  locUpdate(dsL_pwm, dsR_pwm, 0);
 #endif
 }
 
