@@ -682,7 +682,7 @@ static void taskWebIO(void *pvParams) {
             doc["msg"] = logMsg.text;
             char buf[256];
             serializeJson(doc, buf);
-            g_mqttClient.publish(MQTT_TOPIC_LOG, buf);
+            // g_mqttClient.publish(MQTT_TOPIC_LOG, buf);
           }
           xSemaphoreGive(g_mqttMutex);
         }

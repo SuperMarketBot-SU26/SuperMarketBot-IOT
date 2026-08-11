@@ -1,0 +1,40 @@
+diff --git a/ESP32-S3/SuperMarketBot-IOT/AutoExplore.h b/ESP32-S3/SuperMarketBot-IOT/AutoExplore.h
+index b53d07a..7ece6cd 100644
+--- a/ESP32-S3/SuperMarketBot-IOT/AutoExplore.h
++++ b/ESP32-S3/SuperMarketBot-IOT/AutoExplore.h
+@@ -382,7 +382,9 @@ inline void tick() {
+         pidYawReset();
+       }
+       float dt_s = (float)SAFE_LOOP_MS / 1000.f;
+-      float steer = pidYawCompute(s_backHeading, g_pose.headingRad, dt_s);
++      // [CRITICAL FIX] botDrive(turn, fwd) where turn > 0 is CW (Right).
++      // error < 0 means we need to turn Right. So steer must be > 0.
++      float steer = -pidYawCompute(s_backHeading, g_pose.headingRad, dt_s);
+       steer = constrain(steer, -70.0f, 70.0f);
+       uint16_t spd = g_state.swerveBaseSpeed;
+       if (spd == 0) spd = (uint16_t)((uint32_t)PWM_MAX * 40 / 100);
+diff --git a/ESP32-S3/SuperMarketBot-IOT/Config.h b/ESP32-S3/SuperMarketBot-IOT/Config.h
+index e81410b..c6166c9 100644
+--- a/ESP32-S3/SuperMarketBot-IOT/Config.h
++++ b/ESP32-S3/SuperMarketBot-IOT/Config.h
+@@ -110,7 +110,7 @@
+ #define IMU_FUSION_ENABLE 1   // Bật EKF (Hợp nhất Gyro + Bỏ qua Encoder nhờ variance cực lớn)
+ #define IMU_I2C_SDA      17    // Chân I2C SDA (GPIO 17 — U2TXD, không xung đột YDLIDAR)
+ #define IMU_I2C_SCL      18    // Chân I2C SCL (GPIO 18 — U2RXD, không xung đột YDLIDAR)
+-#define IMU_YAW_INVERTED 1     // Đặt thành 1 nếu Robot bị xoay tại chỗ vô hạn (do cảm biến IMU bị lật ngược)
++#define IMU_YAW_INVERTED 1     // [REVERTED] Đảo chiều ảo IMU để giữ tính ổn định cũ của WebUI
+ #define IMU_FUSION_DEBUG 0    // 1: bật serial debug EKF mỗi 1s (bias convergence + ZUPT state)
+  
+  /* -------------------- ENCODER (Hệ thống 2 Cảm Biến Đếm Xung 2 Bánh) ------- */
+diff --git a/ESP32-S3/SuperMarketBot-IOT/WaypointNav.h b/ESP32-S3/SuperMarketBot-IOT/WaypointNav.h
+index 1851da1..ece6c71 100644
+--- a/ESP32-S3/SuperMarketBot-IOT/WaypointNav.h
++++ b/ESP32-S3/SuperMarketBot-IOT/WaypointNav.h
+@@ -522,6 +522,7 @@ inline void wpNavTick() {
+       targetHeading = atan2f(ty - g_pose.y, tx - g_pose.x);
+     }
+     float yawOut = pidYawCompute(targetHeading, g_pose.headingRad, dt_s);
++    // [CRITICAL FIX] botDriveSmoothNormal(turn) where turn > 0 means CW (Right) turn.
+     steer = (int16_t)constrain(yawOut, -100, 100);
+     strafeCmd = 0;
+ 

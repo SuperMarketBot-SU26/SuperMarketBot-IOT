@@ -128,7 +128,7 @@ static void mqttPublishScanProgress() {
 
   char buf[256];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
+  // g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
 }
 
 static void mqttPublishScanComplete() {
@@ -145,7 +145,7 @@ static void mqttPublishScanComplete() {
 
   char buf[256];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
+  // g_mqttClient.publish(MQTT_TOPIC_SCAN, (const uint8_t *)buf, n, false);
 
   g_scanPendingComplete = false;
 }
@@ -451,7 +451,7 @@ static void mqttPublishTelemetry() {
 
   char buf[512];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  g_mqttClient.publish(MQTT_TOPIC_TELEMETRY, (const uint8_t *)buf, n, false);
+  // g_mqttClient.publish(MQTT_TOPIC_TELEMETRY, (const uint8_t *)buf, n, false);
 }
 
 /* ==================== PUBLISH STATUS =============================== */
@@ -468,7 +468,7 @@ static void mqttPublishStatus(const char *status) {
   size_t n = serializeJson(doc, buf, sizeof(buf));
   /* QoS-1 mô phỏng: retained=false, PubSubClient không hỗ trợ QoS1 natively
      → publish 2 lần đảm bảo broker nhận (đơn giản, đủ cho demo) */
-  g_mqttClient.publish(MQTT_TOPIC_STATUS, (const uint8_t *)buf, n, false);
+  // g_mqttClient.publish(MQTT_TOPIC_STATUS, (const uint8_t *)buf, n, false);
 }
 
 /* ==================== MAIN LOOP (gọi từ taskWebIO) ================= */
