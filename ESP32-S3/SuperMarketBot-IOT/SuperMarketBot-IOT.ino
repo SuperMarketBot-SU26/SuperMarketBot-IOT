@@ -40,8 +40,6 @@
 #include "MqttClient.h"
 #include "YdlidarX3.h"       // ← YDLidar X3 driver (SLAM + localization + obstacle backup)
 #include "WebUI.h"
-#include "LineSensor.h"      // Phase 9 — TCRT5000 8-ch line sensor
-#include "LineDecoder.h"     // Phase 9 — line state machine + steering PID
 #include "LidarStreamWS.h"   // ← Stream LiDAR thô sang Tablet (port 82)
 #include "ImuMpu6050.h"      // ← Đọc góc xoay từ MPU6050
 #include "MotorTrim.h"       // ← NV1c — Auto-calibrate motor trim dựa trên yaw drift
@@ -201,7 +199,6 @@ float            g_lineOffsetVariance = 0.0f;
 LineDecoderState g_ldState = LD_IDLE;
 uint32_t         g_ldStateEnterMs = 0;
 uint32_t         g_lostSinceMs = 0;
-uint8_t          g_lineSpeedPct = 60;   // 0..100 — slider mode LINE (lưu NVS)
 
 
 /* =====================================================================
@@ -356,7 +353,6 @@ static void autoNavigateAvoidance() {
  *                        Nếu cmdY != 0 và cmdX == 0 → bật heading lock nhẹ cho dễ lái.
  *       - MODE_AUTO    : autoNavigateAvoidance() — 3 state CRUISE/BACKUP/SPIN_SEARCH.
  *       - MODE_WAYPOINT: wpNavTick() — Pure Pursuit + OA + Align.
- *       - MODE_LINE    : lineDecoderUpdate() — TCRT5000 8-ch line tracking.
  * =================================================================== */
 
 // ── Task: micro-ROS DDS spin (runs on Core 1, priority 4) ───────────────
@@ -441,19 +437,8 @@ static void taskControl(void *pvParams) {
       Serial.printf("[Mode] Switched → %s\n",
         g_state.mode == MODE_MANUAL ? "MANUAL" :
         g_state.mode == MODE_AUTO ? "AUTO" :
-        g_state.mode == MODE_WAYPOINT ? "WAYPOINT" : "LINE");
+        g_state.mode == MODE_WAYPOINT ? "WAYPOINT" : "UNKNOWN");
     }
-
-    /* ── 0) Line sensor read (50Hz) — chạy trước để LineDecoder có data mới ─ */
-#if USE_LINE_SENSOR
-    {
-      uint32_t nowMs = millis();
-      if (nowMs - g_state.lineLastUpdateMs >= LINE_READ_MS) {
-        lineSensorUpdate();
-        lineSensorPublishState();
-      }
-    }
-#endif
 
     /* ── 1) IMU → EKF heading fusion ──────────────────────────────────
      *  Chuỗi xử lý:
@@ -650,13 +635,7 @@ static void taskControl(void *pvParams) {
         break;
       }
 
-#if USE_LINE_SENSOR
-      case MODE_LINE: {
-        float dtS = (float)SAFE_LOOP_MS * 0.001f;
-        lineDecoderUpdate(dtS);
-        break;
-      }
-#endif
+
     }
 
     vTaskDelayUntil(&xLastWake, xPeriod);
@@ -753,13 +732,6 @@ void setup() {
   sensorsInit();
   sensorsLogBootSample();
   odomInit();
-
-#if USE_LINE_SENSOR
-  lineSensorInit();
-  lineDecoderInit();
-  g_state.lineActiveMask = 0;
-  g_state.linePattern = (uint8_t)LINE_PAT_UNKNOWN;
-#endif
 
 #if USE_YDLIDAR_X3
   Serial.println(F("[Boot] Initializing YDLIDAR X3..."));

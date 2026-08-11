@@ -480,7 +480,6 @@ details pre{
             <button type="button" class="mode-btn active" id="btnManual" onclick="setMode(0)">LÁI TAY</button>
             <button type="button" class="mode-btn" id="btnAuto" onclick="setMode(1)">TỰ HÀNH</button>
             <button type="button" class="mode-btn" id="btnRoute" onclick="setMode(2)">WAYPOINT</button>
-            <button type="button" class="mode-btn" id="btnLine" onclick="setMode(3)">DÒ LINE</button>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
             <button type="button" class="estop" style="margin-top:0;font-size:.8rem" onclick="sendEstop()">ESTOP (DỪNG KHẨN)</button>
@@ -534,18 +533,7 @@ details pre{
               oninput="sendSpeedSwerve(this.value)" aria-label="Tốc độ tránh vật phần trăm"/>
             <div class="spd-block__ticks"><span>15%</span><span>45%</span><span>100%</span></div>
           </div>
-          <div class="spd-block spd-block--line">
-            <div class="spd-block__head">
-              <div>
-                <div class="spd-block__label">Tốc độ · Dò line</div>
-                <div class="spd-block__hint">TCRT5000 8-ch — bám line, dấu +, né vật (15–100%)</div>
-              </div>
-              <span class="spd-block__badge" id="spdLineVal">60%</span>
-            </div>
-            <input type="range" class="spd-range spd-range--line" id="spdLineSlider" min="15" max="100" value="30"
-              oninput="sendSpeedLine(this.value)" aria-label="Tốc độ dò line phần trăm"/>
-            <div class="spd-block__ticks"><span>15%</span><span>50%</span><span>100%</span></div>
-          </div>
+
         </div>
       </div>
 
@@ -1043,7 +1031,7 @@ function applyTelemetry(d){
       const da=((d.dFL??0)+(d.dRL??0)+(d.dFR??0)+(d.dRR??0))/4;
       document.getElementById('distAvg').textContent=da.toFixed(2);
       const ml=document.getElementById('modeLabel');
-      ml.textContent=(d.mode===3)?'DÒ LINE':((d.mode===2)?'WAYPOINT':((d.mode===1)?'Tự hành':'Lái tay'));
+      ml.textContent=(d.mode===2)?'WAYPOINT':((d.mode===1)?'Tự hành':'Lái tay');
       ml.className=(d.mode>0)?'mode-auto':'mode-manual';
       const wl=document.getElementById('wheelLabel');
       if(wl){
@@ -1058,7 +1046,6 @@ function applyTelemetry(d){
       const btnMan = document.getElementById('btnManual');
       const btnAut = document.getElementById('btnAuto');
       const btnRot = document.getElementById('btnRoute');
-      const btnLin = document.getElementById('btnLine');
       if(btnMan) btnMan.classList.toggle('active', d.mode===0);
       if(btnAut) btnAut.classList.toggle('active', d.mode===1);
       if(btnRot) btnRot.classList.toggle('active', d.mode===2);
@@ -1144,16 +1131,7 @@ function applyTelemetry(d){
           document.getElementById('spdSwerveVal').textContent=String(d.spdSwervePct)+'%';
         }
       }
-      if(d.spdLinePct!=null){
-        const sl=document.getElementById('spdLineSlider');
-        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
-        if(sl && document.activeElement!==sl && !touched){
-          const lv=Math.max(15,Math.min(100,d.spdLinePct));
-          sl.value=lv;
-          paintSpdTrack(sl,lv);
-          document.getElementById('spdLineVal').textContent=String(d.spdLinePct)+'%';
-        }
-      }
+
       if(!window._rawJTick) window._rawJTick=0;
       if((++window._rawJTick%8)===0){
         const rj=document.getElementById('rawJ');
@@ -1218,21 +1196,13 @@ function sendSpeedSwerve(v){
   document.getElementById('spdSwerveVal').textContent=v+'%';
   wsS({t:'spdSwerve',v:parseInt(v,10)});
 }
-function sendSpeedLine(v){
-  window._lastSliderTouch = Date.now();
-  const el=document.getElementById('spdLineSlider');
-  paintSpdTrack(el,v);
-  document.getElementById('spdLineVal').textContent=v+'%';
-  wsS({t:'spdLine',v:parseInt(v,10)});
-}
 function setMode(m){
   const bM = document.getElementById('btnManual'); if(bM) bM.classList.toggle('active',m===0);
   const bA = document.getElementById('btnAuto'); if(bA) bA.classList.toggle('active',m===1);
   const bR = document.getElementById('btnRoute'); if(bR) bR.classList.toggle('active',m===2);
-  const bL = document.getElementById('btnLine'); if(bL) bL.classList.toggle('active',m===3);
   const ml=document.getElementById('modeLabel');
   if(ml) {
-    ml.textContent=(m===3)?'DÒ LINE':((m===2)?'WAYPOINT':((m===1)?'Tự hành (demo)':'Lái tay'));
+    ml.textContent=(m===2)?'WAYPOINT':((m===1)?'Tự hành (demo)':'Lái tay');
     ml.className=(m>0)?'mode-auto':'mode-manual';
   }
   wsS({t:'mode',m});
@@ -1327,11 +1297,10 @@ initSecNav();
 buildLayoutGrid();
 buildMotorGrid();
 buildBump();
-(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider'),d=document.getElementById('spdLineSlider');
+(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider');
   if(a){paintSpdTrack(a,a.value);document.getElementById('spdVal').textContent=a.value+'%';}
   if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}
-  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}
-  if(d){paintSpdTrack(d,d.value);document.getElementById('spdLineVal').textContent=d.value+'%';}})();
+  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}})();
 connectWS();
 </script>
 </body>
@@ -1499,8 +1468,7 @@ inline void webUIInit() {
   g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT  / 100);
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed",    PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100);
   g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed",    PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT    / 100);
-  g_lineSpeedPct = g_prefs.getUChar("lineSpeedPct", ROBOT_DEFAULT_CRUISE_PCT);   // line follow = 30%
-  if (g_lineSpeedPct < 15) g_lineSpeedPct = 15;
+
   g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);

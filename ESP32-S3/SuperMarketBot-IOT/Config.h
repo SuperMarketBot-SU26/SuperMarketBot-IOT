@@ -135,62 +135,7 @@
  #define WHEEL_DIAM_M  0.065f
  #define WHEEL_CIRC_M  (PI * WHEEL_DIAM_M)
  
- /* -------------------- TCRT5000 LINE SENSOR (8 channels) ------------- *
-  *  Module: TCRT5000 8-channel IR barrier (board đỏ 10-pin).
-  *  Pinout header (10 chân):
-  *     1=VCC  2=GND  3=IR  4=D1  5=D2  6=D3  7=D4  8=D5  9=D6  10=D7
-  *  (D8 nếu có tách riêng trên board — module này đôi khi 7 kênh thay vì 8).
-  *
-  *  ★★★ CHECKLIST KHI CẮM ★★★
-  *  [1] Jumper VCC↔IR trên board: hàn 1 giọt thiếc/dây nhảy nối 2 pad "EN".
-  *      Nếu không có jumper, sensor không hoạt động (LED IR tắt → ADC=0).
-  *  [2] Cấp VCC = 3.3V (an toàn cho ESP32 ADC, không cần mạch chia áp).
-  *      Nếu cấp 5V thì ADC vượt 3.3V → cháy ESP32 input.
-  *  [3] GND chung ESP32 ↔ module.
-  *  [4] D1..D8 → GPIO analog (xem pin map dưới).
-  *  [5] Test: soi camera điện thoại vào mặt dưới sensor trong tối →
-  *      phải thấy ánh sáng đỏ mờ (LED IR hồng ngoại hoạt động).
-  *
-  *  Giá trị ADC mong đợi:
-  *    - Trên nền trắng (phản xạ mạnh): ADC ≈ 2500-3500
-  *    - Trên line đen (phản xạ yếu):   ADC ≈ 300-800
-  *    - Threshold khuyến nghị: 1500 (giữa 2 vùng, có hysteresis ±200).
-  */
- #define USE_LINE_SENSOR        0    // Tạm thời tắt dò line theo yêu cầu để hiển thị toàn bộ log mượt mà
- #define LINE_SENSOR_COUNT     8
- // Sơ đồ 8 chân ADC1 còn rảnh:
- //   ĐÃ DÙNG: motor (4-9,21,40,45,46,41,42,47), YDLIDAR (43,44),
- //             IMU I2C (17,18), Battery (15), RGB LED đã tắt (38→move US).
- //   HC-SR04 vừa move từ (10..14) → (16,35..38) để giải phóng ADC1.
- //   CHỌN 8 chân ADC1 còn rảnh, INPUT-ONLY-safe (tránh GPIO0 BOOT).
- #define LINE_PIN_S0   1     // ADC1_CH0
- #define LINE_PIN_S1   2     // ADC1_CH1
- #define LINE_PIN_S2   3     // ADC1_CH2  (Trở về trạng thái ban đầu)
- #define LINE_PIN_S3   10    // ADC1_CH9
- #define LINE_PIN_S4   11    // ADC1_CH10 (Trở về trạng thái ban đầu)
- #define LINE_PIN_S5   12    // ADC1_CH11
- #define LINE_PIN_S6   13    // ADC1_CH12
- #define LINE_PIN_S7   14    // ADC1_CH13
- 
- 
- /** ADC threshold để phân biệt line đen vs nền sáng.
-  *  TCRT5000: line đen ~300-800, nền trắng ~2500-3500 (tùy mức LED + resistor).
-  *  Threshold ở giữa để có margin. Calibrate bằng cách in Serial. */
- #define LINE_DARK_THRESHOLD    1500   // ADC < 1500 = thấy line
- #define LINE_HYSTERESIS        200    // ±200 chống rung khi giao động quanh biên
- #define LINE_INVERTED          0      // 0 = line đen thấp ADC; 1 = đảo (line trắng trên nền đen)
- 
- /** Pattern detection thresholds — dựa trên 8-bit active mask (sensor thấy line = 1). */
- #define LINE_NODE_MIN_ACTIVE   6      // Node (dấu +) khi ≥6/8 sensor thấy line cùng lúc
- #define LINE_LOST_MAX_ACTIVE   0      // Mất line khi 0/8 sensor active
- #define LINE_JUNCTION_MIN      3      // Junction (rẽ nhánh/T) khi ≥3/8 sensor active nhưng < NODE_MIN
- #define LINE_OFFSET_MAX        100    // Offset range -100..+100 (-=trái, +=phải) for steering PID
- 
- /** Line read period (ms). 50Hz đủ mượt cho robot 0.5 m/s. */
- #define LINE_READ_MS           20
- 
- /** Node detection debounce: cần ≥2 frame active cùng pattern → giảm nhiễu. */
- #define LINE_NODE_DEBOUNCE_FRAMES  3
+
  // Hệ số hiệu chuẩn quãng đường (giảm < 1.0 nếu đi xa hơn lý thuyết, tăng > 1.0 nếu đi ngắn hơn)
  #define ODOM_CALIB_FACTOR  1.0f
  
@@ -434,8 +379,7 @@
    MODE_AUTO_EXPLORE = 1,// Tự đi quét Map (Frontier exploration + LIDAR + US fusion)
                            //   Lưu ý: alias cho MODE_AUTO cũ (reactive né vật) — đổi tên
                            //   để khớp với WebManager "Tự đi quét Map" và mode mới auto-save.
-   MODE_WAYPOINT = 2,    // Tự hành bám waypoint (Pure Pursuit, Phase 3)
-   MODE_LINE     = 3     // Tự hành theo line (TCRT5000) — Phase 9
+   MODE_WAYPOINT = 2     // Tự hành bám waypoint (Pure Pursuit, Phase 3)
  };
  
  // Backward-compat alias: code cũ tham chiếu MODE_AUTO → vẫn hoạt động
@@ -491,19 +435,6 @@
     *  Chia sẻ giữa taskControl (Core 1) và taskWebIO (Core 0) nên KHÔNG dùng static cục bộ. */
    volatile int32_t lastMotorSpeed[4];
  
-   // ============== Line sensor (TCRT5000 8-ch) ==============
-   /** Raw ADC: 0..4095 cho mỗi sensor. Index 0 = ngoài cùng trái. */
-   volatile uint16_t lineRaw[8];
-   /** Bitmask 8 bit — sensor thấy line = 1. */
-   volatile uint8_t  lineActiveMask;
-   /** Offset tính từ weight: -100..+100 (-100 = robot lệch hẳn trái, +100 = lệch phải). */
-   volatile int16_t  lineOffset;
-   /** Pattern enum (LinePattern dưới). */
-   volatile uint8_t  linePattern;
-   /** Số frame liên tiếp pattern hiện tại đang ổn định (debounce). */
-   volatile uint8_t  lineStableFrames;
-   /** ID node cuối cùng đã đi qua (tăng dần, do Android gán). */
-   volatile uint16_t lastNodeId;
    /** Khoảng cách gần đúng tới node tiếp theo (m), -1 nếu không có. */
    volatile float    distToNextNode_m;
    /** Timestamp lần cuối cập nhật line sensor. */
