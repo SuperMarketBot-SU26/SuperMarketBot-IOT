@@ -366,14 +366,14 @@ extern "C" {
         (void)err;
         uint32_t start = millis();
         size_t read_bytes = 0;
-        // Cap maximum blocking read timeout to 2ms so XRCE-DDS polling never delays our 50Hz control & telemetry loop!
-        uint32_t max_wait = (timeout > 2) ? 2 : (uint32_t)timeout;
+        // Do NOT cap the timeout! taskMicroRos runs at priority 4 and will be preempted by taskControl (priority 5)
+        // automatically. Capping this breaks the XRCE-DDS framing protocol during the initial handshake.
         while (read_bytes < len) {
             if (SMB_USB_SERIAL.available() > 0) {
                 buf[read_bytes++] = SMB_USB_SERIAL.read();
             } else {
-                if (read_bytes > 0 || (millis() - start) >= max_wait) break; // Instant return once available bytes are consumed
-                delayMicroseconds(50);
+                if ((millis() - start) >= (uint32_t)timeout) break;
+                delay(1); // Yield to FreeRTOS (allows taskControl to run smoothly)
             }
         }
         return read_bytes;
