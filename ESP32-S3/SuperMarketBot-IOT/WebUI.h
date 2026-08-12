@@ -18,7 +18,7 @@
 #include "SensorLayout.h"
 #include "MotorLayout.h"
 #include "MotorTrim.h"   // NV1c — motorTrimInit() gọi từ webUIInit()
-#include "LineDecoder.h" // cần extern g_lineSpeedPct (slider mode LINE)
+
 
 Preferences g_prefs;
 #include "CtrlJson.h"
@@ -26,8 +26,7 @@ Preferences g_prefs;
 #include "VisionHttps.h"
 #include "MqttClient.h"
 
-// Fallback extern g_lineSpeedPct — chắc chắn thấy
-extern uint8_t g_lineSpeedPct;
+
 
 static WebServer      g_httpServer(WEB_PORT);
 static WebSocketsServer g_wsServer(WS_PORT);

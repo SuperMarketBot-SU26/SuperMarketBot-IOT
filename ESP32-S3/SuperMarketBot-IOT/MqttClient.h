@@ -234,20 +234,6 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       g_state.waypointBaseSpeed = (uint16_t)((uint32_t)PWM_MAX * 15u / 100u);
     }
 
-  } else if (strcmp(cmd, "set_speed_line") == 0) {
-    int v = -1;
-    if (doc["payload"].is<int>()) {
-      v = doc["payload"].as<int>();
-    } else if (doc["payload"].is<const char*>()) {
-      v = atoi(doc["payload"].as<const char*>());
-    }
-    Serial.printf(">>> LỆNH: ĐẶT TỐC ĐỘ DÒ LINE (SET_SPEED_LINE) từ Backend! Tốc độ: %d%%\n", v);
-    if (v >= 15 && v <= 100) {
-      g_lineSpeedPct = (uint8_t)v;
-    } else if (v >= 0 && v < 15) {
-      g_lineSpeedPct = 15;
-    }
-
   } else if (strcmp(cmd, "set_speed_rotate") == 0) {
     int v = -1;
     if (doc["payload"].is<int>()) {
@@ -423,7 +409,7 @@ static void mqttPublishTelemetry() {
   doc["CurrentNodeId"] = (const char *)nullptr;
   doc["Mode"]          = (g_state.mode == MODE_WAYPOINT) ? "waypoint"
                        : (g_state.mode == MODE_AUTO_EXPLORE) ? "auto_explore"
-                       : (g_state.mode == MODE_LINE) ? "line" : "manual";
+                       : "manual";
   doc["IsOnline"]      = true;
   doc["XCoord"]        = g_pose.x;
   doc["YCoord"]        = g_pose.y;

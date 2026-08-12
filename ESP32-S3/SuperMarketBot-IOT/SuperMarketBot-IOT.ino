@@ -192,13 +192,6 @@ SemaphoreHandle_t g_mqttMutex;
  *  Sử dụng để ký hiệu hóa số xung đếm từ encoder không chiều. */
 volatile int8_t g_motorDir[4] = {0, 0, 0, 0};
 
-// ── Line Sensor & Decoder Global Definitions (Phase 9) ─────────────
-LineState        g_lineState;
-float            g_lineOffsetEMA = 0.0f;
-float            g_lineOffsetVariance = 0.0f;
-LineDecoderState g_ldState = LD_IDLE;
-uint32_t         g_ldStateEnterMs = 0;
-uint32_t         g_lostSinceMs = 0;
 
 
 /* =====================================================================

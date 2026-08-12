@@ -10,14 +10,12 @@
 extern void botStop();
 #include "Localization.h"     // [Bước 6 - 2026-07-27] Bắt buộc include TRỰC TIẾP trong CtrlJson.h (không chỉ qua WaypointNav.h) để inline functions (locSetSlamPose, locResetPose) visible.
 #include "WaypointNav.h"
-#include "LineDecoder.h"   // cần extern g_lineSpeedPct (slider mode LINE)
+
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <freertos/FreeRTOS.h>
 
-// Fallback: declare extern g_lineSpeedPct trực tiếp nếu LineDecoder.h
-// không include kịp (compile order issue).
-extern uint8_t g_lineSpeedPct;
+
 #include <freertos/semphr.h>
 #include <cstring>
 
@@ -102,15 +100,6 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     g_prefs.begin(NVS_NAMESPACE, false);
     g_prefs.putUInt("swerveSpeed", g_state.swerveBaseSpeed);
     g_prefs.end();
-  } else if (strcmp(t, "spdLine") == 0) {
-    uint16_t pct = doc["v"].as<uint16_t>();
-    if (pct > 100) pct = 100;
-    if (pct < 15) pct = 15;   // tối thiểu 15% cho motor torque
-    g_lineSpeedPct = (uint8_t)pct;
-    g_prefs.begin(NVS_NAMESPACE, false);
-    g_prefs.putUChar("lineSpeedPct", g_lineSpeedPct);
-    g_prefs.end();
-    Serial.printf("[LINE-SPD] Slider -> %u%%\n", (unsigned)g_lineSpeedPct);
   } else if (strcmp(t, "spdRotate") == 0) {
     uint16_t pct = doc["v"].as<uint16_t>();
     if (pct > 100) pct = 100;
@@ -129,7 +118,7 @@ inline void robotApplyControlJson(JsonDocument &doc) {
   } else if (strcmp(t, "mode") == 0) {
     uint8_t m = doc["m"].as<uint8_t>();
     Serial.printf("[WS-Mode] Yeu cau chuyen sang Mode: %d\n", m);
-    if (m > MODE_LINE) m = MODE_MANUAL;
+    if (m > MODE_WAYPOINT) m = MODE_MANUAL;
 
     // [Bước 4 - 2026-07-27] EStop guard: không cho vào Auto/Waypoint khi EStop active.
     if (g_state.estop && m != MODE_MANUAL) {
