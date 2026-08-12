@@ -18,9 +18,21 @@ struct LogMessage {
 
 extern QueueHandle_t g_logQueue;
 
+// With USB CDC On Boot, Arduino maps `Serial` to either HWCDCSerial
+// (USB-Serial/JTAG mode) or USBSerial (native USB mode). Keep an explicit alias
+// because this project later redefines `Serial` to the queueing logger below.
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT == 1)
+#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 1)
+#define SMB_USB_SERIAL HWCDCSerial
+#else
+#define SMB_USB_SERIAL USBSerial
+#endif
+#endif
+
 class LoggerSerial : public Print {
 private:
-    HardwareSerial& _realSerial;
+    Stream& _realSerial;
+    void (*_beginTransport)(unsigned long);
     char _logBuf[128];
     size_t _logIdx = 0;
 
@@ -50,10 +62,11 @@ private:
 public:
     bool muteRealSerial = false;
 
-    LoggerSerial(HardwareSerial& real) : _realSerial(real) {}
+    LoggerSerial(Stream& real, void (*beginTransport)(unsigned long))
+        : _realSerial(real), _beginTransport(beginTransport) {}
 
     void begin(unsigned long baud) {
-        _realSerial.begin(baud);
+        if (_beginTransport != nullptr) _beginTransport(baud);
     }
 
     size_t write(uint8_t c) override {

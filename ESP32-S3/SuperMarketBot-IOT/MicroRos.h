@@ -1,6 +1,8 @@
 // ===========================================================
 // MicroRos.h — ESP32-S3 = micro-ROS node
-// Publish: /scan (LiDAR), /odom (wheel encoder), /imu/data (MPU6050)
+// Publish: /odom (wheel encoder), /imu/data (MPU6050).
+// YDLIDAR X3 is connected directly to the Pi 5 in the production topology,
+// so /scan is normally published by ydlidar_ros2_driver, not this firmware.
 // Subscribe: /cmd_vel (motor speed command)
 //
 // Yêu cầu Arduino IDE:
@@ -194,7 +196,9 @@ static void set_synced_stamp(int32_t &sec, uint32_t &nanosec, int32_t offset_ms 
 // FILL Odometry message
 // ============================================================
 static void fill_odom_msg() {
-    const Pose2D &pose = g_pose;
+    // /odom is deliberately wheel-only. The independent raw gyro stays on
+    // /imu/data and robot_localization on the Pi performs the actual fusion.
+    const Pose2D &pose = g_wheelOdomPose;
 
     // ---- Header ----
     g_odom_msg.header.frame_id.data = (char*)"odom";
@@ -264,19 +268,19 @@ static void fill_odom_msg() {
     }
     
     // Realistic covariances for an ESP32 skid-steer bot with MPU6050
-    g_odom_msg.pose.covariance[0]  = 0.01f;   // X
-    g_odom_msg.pose.covariance[7]  = 0.01f;   // Y
+    g_odom_msg.pose.covariance[0]  = 0.02f;   // X — encoder + skid uncertainty
+    g_odom_msg.pose.covariance[7]  = 0.02f;   // Y
     g_odom_msg.pose.covariance[14] = 9999.0f; // Z (ignored)
     g_odom_msg.pose.covariance[21] = 9999.0f; // Roll (ignored)
     g_odom_msg.pose.covariance[28] = 9999.0f; // Pitch (ignored)
-    g_odom_msg.pose.covariance[35] = 0.05f;   // Yaw (IMU fusion - slightly loose to allow SLAM to correct it)
+    g_odom_msg.pose.covariance[35] = 0.20f;   // Yaw — wheel-only skid-steer estimate
 
     g_odom_msg.twist.covariance[0]  = 0.01f;  // Vx
     g_odom_msg.twist.covariance[7]  = 9999.0f;// Vy
     g_odom_msg.twist.covariance[14] = 9999.0f;// Vz
     g_odom_msg.twist.covariance[21] = 9999.0f;// Vroll
     g_odom_msg.twist.covariance[28] = 9999.0f;// Vpitch
-    g_odom_msg.twist.covariance[35] = 0.05f;  // Vyaw
+    g_odom_msg.twist.covariance[35] = 0.20f;  // Vyaw
 }
 
 // ============================================================
@@ -286,13 +290,14 @@ static uint32_t s_imuPrevGyroZ_ms __attribute__((unused)) = 0;
 static float    s_imuPrevGyroZ_radps __attribute__((unused)) = 0.f;
 
 static void fill_imu_msg() {
-    const Pose2D &pose = g_pose;
-
-    float h = pose.headingRad * 0.5f;
+    // MPU6050 has no absolute yaw reference. Do not advertise the firmware's
+    // already-fused heading as an independent IMU orientation measurement.
+    // Consumers must use angular_velocity.z; covariance[0] = -1 marks the
+    // orientation field unavailable per sensor_msgs/Imu.
     g_imu_msg.orientation.x = 0.0f;
     g_imu_msg.orientation.y = 0.0f;
-    g_imu_msg.orientation.z = sinf(h);
-    g_imu_msg.orientation.w = cosf(h);
+    g_imu_msg.orientation.z = 0.0f;
+    g_imu_msg.orientation.w = 1.0f;
 
     float gyroZ = 0.f;
     bool gyroOk = false;
@@ -323,8 +328,6 @@ static void fill_imu_msg() {
         g_imu_msg.linear_acceleration_covariance[i] = 0.0f;
     }
     g_imu_msg.orientation_covariance[0] = -1.0f;
-    g_imu_msg.orientation_covariance[4] = -1.0f;
-    g_imu_msg.orientation_covariance[8] = 0.02f;
     g_imu_msg.angular_velocity_covariance[0] = -1.0f;
     g_imu_msg.angular_velocity_covariance[4] = -1.0f;
     g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : -1.0f;
@@ -339,21 +342,24 @@ static void fill_imu_msg() {
 }
 
 #if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+#if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
+#error "micro-ROS serial must use native USB CDC; UART0 GPIO43/44 are encoder inputs."
+#endif
 extern "C" {
     bool arduino_transport_open(struct uxrCustomTransport * transport) {
         (void)transport;
-        Serial0.begin(921600); // 921600 baud for ultra-fast low-latency sensor streaming!
+        SMB_USB_SERIAL.begin(921600); // CDC transport; baud is ignored by USB hardware
         return true;
     }
     bool arduino_transport_close(struct uxrCustomTransport * transport) {
         (void)transport;
-        Serial0.end();
+        SMB_USB_SERIAL.end();
         return true;
     }
     size_t arduino_transport_write(struct uxrCustomTransport* transport, const uint8_t * buf, size_t len, uint8_t * err) {
         (void)transport;
         (void)err;
-        return Serial0.write(buf, len);
+        return SMB_USB_SERIAL.write(buf, len);
     }
     size_t arduino_transport_read(struct uxrCustomTransport* transport, uint8_t* buf, size_t len, int timeout, uint8_t* err) {
         (void)transport;
@@ -363,8 +369,8 @@ extern "C" {
         // Cap maximum blocking read timeout to 2ms so XRCE-DDS polling never delays our 50Hz control & telemetry loop!
         uint32_t max_wait = (timeout > 2) ? 2 : (uint32_t)timeout;
         while (read_bytes < len) {
-            if (Serial0.available() > 0) {
-                buf[read_bytes++] = Serial0.read();
+            if (SMB_USB_SERIAL.available() > 0) {
+                buf[read_bytes++] = SMB_USB_SERIAL.read();
             } else {
                 if (read_bytes > 0 || (millis() - start) >= max_wait) break; // Instant return once available bytes are consumed
                 delayMicroseconds(50);
@@ -382,7 +388,7 @@ inline bool init() {
     if (g_initialized) return true;
 
     logger.muteRealSerial = true; // Ngắt ASCII log lên cáp USB để nhường đường cho XRCE-DDS
-    set_microros_transports();    // Kích hoạt giao thức XRCE-DDS qua Serial0 phần cứng!
+    set_microros_transports();    // XRCE-DDS qua native USB CDC (/dev/ttyACM*).
 
     // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
     if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {

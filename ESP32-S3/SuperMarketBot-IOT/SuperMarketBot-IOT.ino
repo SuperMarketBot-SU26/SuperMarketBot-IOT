@@ -138,7 +138,11 @@ static void printMemInfo() {
 
 // ── Định nghĩa biến toàn cục (extern trong các .h) ──────────────────
 #undef Serial
-LoggerSerial logger(Serial0);
+#if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
+#error "Enable Tools > USB CDC On Boot. UART0 GPIO43/44 are reserved for encoders."
+#endif
+static void beginNativeUsbLog(unsigned long baud) { SMB_USB_SERIAL.begin(baud); }
+LoggerSerial logger(SMB_USB_SERIAL, beginNativeUsbLog);
 #define Serial logger
 QueueHandle_t g_logQueue = NULL;
 
@@ -450,8 +454,6 @@ static void taskControl(void *pvParams) {
       //
       // Đây là fusion CHUẨN công nghiệp: gyroZ thô + encoder thô + EKF 1D heading.
       // Sai số heading sau 10 phút: < 2° (đo được khi SLAM có /amcl_pose feedback).
-      float imuHeadingBuf = g_pose.headingRad;
-      imuMpu6050Update(imuHeadingBuf);  // Giữ tích lũy heading IMU (cho telemetry/debug)
       const uint32_t nowMs = millis();
 
       // 2) Đọc gyroZ thô (rad/s) — ImuMpu6050.h đã trừ bias + IMU_YAW_INVERTED.

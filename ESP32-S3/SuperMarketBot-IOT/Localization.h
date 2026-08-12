@@ -1,14 +1,17 @@
 /* =====================================================================
- *  Localization.h — Pose estimate dùng IMU (heading) + PWM dead-reckoning (translation)
+ *  Localization.h — Internal pose estimate dùng encoder + MPU6050
  *
- *  QUAN TRỌNG: Project này KHÔNG dùng encoder nữa.
- *    - Heading (góc xoay)   ← MPU6050 (cập nhật ở taskControl)
- *    - Translation (x, y)   ← PWM lệnh cuối × hệ số PWM_TO_MPS × dt
+ *  QUAN TRỌNG:
+ *    - g_pose là pose nội bộ phục vụ Web UI/waypoint cũ: translation từ
+ *      encoder, heading từ ImuFusion (gyro + encoder correction).
+ *    - /odom ROS 2 KHÔNG publish g_pose; MicroRos.h publish
+ *      g_wheelOdomPose độc lập, chỉ dùng encoder để robot_localization có thể
+ *      fuse với /imu/data mà không đếm gyro hai lần.
  *
  *  Cách hoạt động:
  *    - Motors.h gọi locSetDriveCmd(leftPct, rightPct) mỗi lần botDrive() chạy.
  *    - Odometry.h gọi locUpdate() mỗi ODOM_PERIOD_MS (100ms).
- *      locUpdate() tính ds từ PWM lệnh trong dt kể từ lần cuối.
+ *      locUpdate(dsL, dsR, dt) tích phân quãng đường encoder.
  *
  *  Hiệu chỉnh:
  *    - LOC_PWM_TO_MPS: hệ số PWM → m/s. Cần đo thực tế:
@@ -19,7 +22,7 @@
  *    locInit()              — Reset pose về (0,0,0)
  *    locUpdate()            — Tích phân ds/dTheta → cập nhật pose (gọi mỗi ODOM_PERIOD_MS)
  *    locSetDriveCmd(L, R)   — Motors báo lệnh hiện tại (-100..+100 %)
- *    locSetEncoderless(b)   — Bật/tắt fallback PWM (luôn true trong project này)
+ *    locSetEncoderless(b)   — Bật/tắt cập nhật pose; PWM chỉ là fallback khi tắt encoder
  *    locResetPose()         — Đặt pose về (0,0,0) + reset heading về 0
  *    g_pose                 — struct {x, y, headingRad} đọc từ mọi module
  * =====================================================================*/
@@ -45,10 +48,6 @@ namespace imuFusion {
 #define IMU_FUSION_ENABLE  1
 #endif
 
-#ifndef WHEEL_BASE_M
-#define WHEEL_BASE_M    0.22f   // Synchronized with ROS 2 URDF (0.22m track width) to prevent rotational overshooting during steering
-#endif
-
 #ifndef LOC_PWM_TO_MPS
 // Calibration hệ số tốc độ: 100% PWM → ? m/s
 // Đo thực tế: cho robot chạy thẳng 1 giây, đo khoảng cách thực.
@@ -72,7 +71,7 @@ struct LocDriveCmd {
   uint32_t tMs;
 };
 static LocDriveCmd s_locDriveCmd = {0, 0, 0};
-static bool        s_locEnabled  = true;  // luôn true vì project không dùng encoder
+static bool        s_locEnabled  = true;
 
 inline void locInit() {
   g_pose = {0.f, 0.f, 0.f};
