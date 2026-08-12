@@ -203,7 +203,9 @@ inline void locUpdate(float dsL, float dsR, float dt) {
       dsRaw = avg;
     }
   }
-  const float ds = (fabsf(dsRaw) < 0.0005f) ? 0.f : dsRaw;
+  // Giảm deadband từ 0.0005 (0.5mm) → 0.0001 (0.1mm) để bắt được
+  // encoder ticks khi đi chậm (0.01 m/s → ~0.2mm/20ms loop).
+  const float ds = (fabsf(dsRaw) < 0.0001f) ? 0.f : dsRaw;
 
   // dTheta từ chênh lệch 2 bánh (rad).
   //   arc = (dsR - dsL); góc = arc / WHEEL_BASE_M
