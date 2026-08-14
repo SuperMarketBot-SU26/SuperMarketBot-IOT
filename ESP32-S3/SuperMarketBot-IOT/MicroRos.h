@@ -52,6 +52,9 @@ static rclc_executor_t  g_executor;
 static rcl_publisher_t  g_odom_pub;
 static rcl_publisher_t  g_imu_pub;
 static rcl_publisher_t  g_us_front_pub;
+static rcl_publisher_t  g_us_rear_pub;
+static rcl_publisher_t  g_us_left_pub;
+static rcl_publisher_t  g_us_right_pub;
 static rcl_publisher_t  g_us_debug_pub;
 
 // Subscribers
@@ -62,6 +65,9 @@ static nav_msgs__msg__Odometry      g_odom_msg;
 static sensor_msgs__msg__Imu        g_imu_msg;
 static geometry_msgs__msg__Twist    g_cmd_vel_msg;
 static sensor_msgs__msg__Range      g_us_front_msg;
+static sensor_msgs__msg__Range      g_us_rear_msg;
+static sensor_msgs__msg__Range      g_us_left_msg;
+static sensor_msgs__msg__Range      g_us_right_msg;
 static std_msgs__msg__String        g_us_debug_msg;
 
 // State
@@ -369,10 +375,25 @@ inline bool init() {
         "/imu/data"
     );
 
-    rclc_publisher_init_best_effort(
+rclc_publisher_init_best_effort(
         &g_us_front_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
         "/us_front_dist"
+    );
+    rclc_publisher_init_best_effort(
+        &g_us_rear_pub, &g_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "/us_rear_dist"
+    );
+    rclc_publisher_init_best_effort(
+        &g_us_left_pub, &g_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "/us_left_dist"
+    );
+    rclc_publisher_init_best_effort(
+        &g_us_right_pub, &g_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "/us_right_dist"
     );
 
     rclc_publisher_init_best_effort(
@@ -411,9 +432,21 @@ inline bool init() {
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
 
-    g_us_front_msg.header.frame_id.data = (char*)"us_front_link";
+g_us_front_msg.header.frame_id.data = (char*)"us_front_link";
     g_us_front_msg.header.frame_id.size = 13;
     g_us_front_msg.header.frame_id.capacity = 14;
+
+    g_us_rear_msg.header.frame_id.data = (char*)"us_rear_link";
+    g_us_rear_msg.header.frame_id.size = 12;
+    g_us_rear_msg.header.frame_id.capacity = 13;
+
+    g_us_left_msg.header.frame_id.data = (char*)"us_left_link";
+    g_us_left_msg.header.frame_id.size = 12;
+    g_us_left_msg.header.frame_id.capacity = 13;
+
+    g_us_right_msg.header.frame_id.data = (char*)"us_right_link";
+    g_us_right_msg.header.frame_id.size = 13;
+    g_us_right_msg.header.frame_id.capacity = 14;
     g_us_front_msg.radiation_type = sensor_msgs__msg__Range__ULTRASOUND;
     g_us_front_msg.field_of_view = 0.26f; // ~15 degrees
     g_us_front_msg.min_range = 0.02f;
@@ -454,11 +487,22 @@ inline void spin() {
     static uint32_t s_last_us_ms = 0;
     if (now - s_last_us_ms >= 100) { // 10Hz
         s_last_us_ms = now;
-        g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
+g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
         g_us_front_msg.header.stamp.nanosec = (uint32_t)((now % 1000) * 1000000);
-        float dist_m = g_state.usFront / 100.0f;
-        g_us_front_msg.range = dist_m;
+        g_us_front_msg.range = g_state.usFront / 100.0f;
         rcl_publish(&g_us_front_pub, &g_us_front_msg, NULL);
+
+        g_us_rear_msg.header.stamp = g_us_front_msg.header.stamp;
+        g_us_rear_msg.range = g_state.usBack / 100.0f;
+        rcl_publish(&g_us_rear_pub, &g_us_rear_msg, NULL);
+
+        g_us_left_msg.header.stamp = g_us_front_msg.header.stamp;
+        g_us_left_msg.range = g_state.usLeft / 100.0f;
+        rcl_publish(&g_us_left_pub, &g_us_left_msg, NULL);
+
+        g_us_right_msg.header.stamp = g_us_front_msg.header.stamp;
+        g_us_right_msg.range = g_state.usRight / 100.0f;
+        rcl_publish(&g_us_right_pub, &g_us_right_msg, NULL);
 
         if (g_us_debug_msg.data.data != NULL) {
             snprintf(g_us_debug_msg.data.data, 100, "[US_DEBUG] Front: %dcm | Back: %dcm | Left: %dcm | Right: %dcm", 
