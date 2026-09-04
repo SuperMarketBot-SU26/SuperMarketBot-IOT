@@ -1468,7 +1468,7 @@ inline void webUIInit() {
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed",    PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100);
   g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed",    PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT    / 100);
 
-  g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 100) / 100.0f;
+  g_state.imuYawScale = (float)g_prefs.getUInt("yawScale", 154) / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
   motorTrimInit(g_prefs);   // NV1c — Load motor trim scale từ NVS
