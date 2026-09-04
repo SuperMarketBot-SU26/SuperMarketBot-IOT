@@ -65,14 +65,14 @@ static volatile int32_t s_encTicksR = 0;   // Encoder bên phải
 static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Glitch filter: tại max speed 0.4 m/s (1.96 rev/s * 960 PPR = ~1880 Hz), chu kỳ xung thật là ~530us.
-// Bất kỳ xung nào có khoảng cách < 200us (> 5000 Hz) chắc chắn là nhiễu điện từ / PWM crosstalk từ GPIO 40/41/42 kế bên.
+// Bất kỳ xung nào có khoảng cách < 2000us (> 500 Hz) chắc chắn là nhiễu điện từ / PWM crosstalk từ GPIO 40/41/42 kế bên.
 static volatile uint32_t s_lastEncL_us = 0;
 static volatile uint32_t s_lastEncR_us = 0;
 
 // ISR — gọi trong ngắt ngoài, cần IRAM_ATTR + portENTER_CRITICAL_ISR.
 static inline void IRAM_ATTR isr_enc_left() {
   uint32_t nowUs = (uint32_t)micros();
-  if ((uint32_t)(nowUs - s_lastEncL_us) < 200u) return; // Bỏ qua xung nhiễu PWM < 200us
+  if ((uint32_t)(nowUs - s_lastEncL_us) < 2000u) return; // Bỏ qua xung nhiễu UART0 TX / PWM < 2ms
   s_lastEncL_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksL++;
@@ -82,7 +82,7 @@ static inline void IRAM_ATTR isr_enc_left() {
 
 static inline void IRAM_ATTR isr_enc_right() {
   uint32_t nowUs = (uint32_t)micros();
-  if ((uint32_t)(nowUs - s_lastEncR_us) < 200u) return; // Bỏ qua xung nhiễu PWM < 200us
+  if ((uint32_t)(nowUs - s_lastEncR_us) < 2000u) return; // Bỏ qua xung nhiễu UART0 RX / PWM < 2ms
   s_lastEncR_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksR++;
@@ -153,10 +153,16 @@ inline void odomUpdate() {
   const uint32_t nowMs = millis();
   const int32_t ticksL_now = odomGetTicksL();
   const int32_t ticksR_now = odomGetTicksR();
-  const int32_t dTicksL = ticksL_now - s_lastTicksL;
-  const int32_t dTicksR = ticksR_now - s_lastTicksR;
+  const int32_t raw_dTicksL = ticksL_now - s_lastTicksL;
+  const int32_t raw_dTicksR = ticksR_now - s_lastTicksR;
   s_lastTicksL = ticksL_now;
   s_lastTicksR = ticksR_now;
+
+  // Sanity clamp: đĩa 20 xung, bánh 65mm. Max speed động cơ TT là ~150-200 RPM (~3 vòng/s).
+  // Trong 100ms, tối đa bánh quay ~0.3 vòng = 6 xung.
+  // Clamp cứng [0, 8] xung mỗi 100ms để triệt tiêu hoàn toàn hiện tượng teleport / runaway speed!
+  int32_t dTicksL = constrain(raw_dTicksL, 0, 8);
+  int32_t dTicksR = constrain(raw_dTicksR, 0, 8);
 
   // dt = 100ms (mặc định). Nếu taskControl bị delay (rare), clamp.
   const float dt = (float)ODOM_PERIOD_MS / 1000.0f;
@@ -194,6 +200,16 @@ inline void odomUpdate() {
   // Gate: if PWM is in dead-zone, motor isn't spinning → ticks = EMI noise
   const bool motorLActive = abs(g_state.lastMotorSpeed[pL]) > ENC_PWM_DEADZONE;
   const bool motorRActive = abs(g_state.lastMotorSpeed[pR]) > ENC_PWM_DEADZONE;
+
+  // Cân bằng khi chạy thẳng: Nếu lệnh phát ra chạy thẳng đều (forward hoặc backward),
+  // ép dTicksL và dTicksR không bị lệch do nhiễu chân UART TX0/RX0 (GPIO 43/44)
+  if (motorLActive && motorRActive && (dirL == dirR) && abs(g_state.lastMotorSpeed[pL] - g_state.lastMotorSpeed[pR]) < 60) {
+    if (abs(dTicksL - dTicksR) > 1) {
+      int32_t avgTicks = (dTicksL + dTicksR) / 2;
+      dTicksL = avgTicks;
+      dTicksR = avgTicks;
+    }
+  }
 
   const float mPerTick = (WHEEL_CIRC_M / ENC_PPR) * ODOM_CALIB_FACTOR;
   const float dsL = (dirL == 0.f || !motorLActive) ? 0.f : dirL * ((float)dTicksL * mPerTick);

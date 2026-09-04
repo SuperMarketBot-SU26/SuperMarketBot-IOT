@@ -297,13 +297,6 @@ static void fill_imu_msg() {
     bool gyroOk = false;
 #if USE_IMU_MPU6050
     gyroOk = ::imuMpu6050GetGyroZ(gyroZ);
-    if (gyroOk) {
-        // Subtract real-time ZUPT bias estimate to eliminate straight-line heading drift
-        gyroZ -= imuFusion::getState().bias;
-        if (fabsf(gyroZ) < 0.015f) {
-            gyroZ = 0.0f; // Deadband to prevent drifting when moving straight
-        }
-    }
 #endif
     g_imu_msg.angular_velocity.x = 0.0f;
     g_imu_msg.angular_velocity.y = 0.0f;
