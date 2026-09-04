@@ -196,9 +196,9 @@ static void set_synced_stamp(int32_t &sec, uint32_t &nanosec, int32_t offset_ms 
 // FILL Odometry message
 // ============================================================
 static void fill_odom_msg() {
-    // /odom is deliberately wheel-only. The independent raw gyro stays on
-    // /imu/data and robot_localization on the Pi performs the actual fusion.
-    const Pose2D &pose = g_wheelOdomPose;
+    // Use g_pose which is stabilized by MPU6050 gyro via ImuFusion.
+    // This prevents fake wheel-yaw rotation when stationary or when wheels slip.
+    const Pose2D &pose = g_pose;
 
     // ---- Header ----
     g_odom_msg.header.frame_id.data = (char*)"odom";
