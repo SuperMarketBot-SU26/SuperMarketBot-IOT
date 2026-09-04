@@ -1468,8 +1468,7 @@ inline void webUIInit() {
   g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed",    PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100);
   g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed",    PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT    / 100);
 
-  uint32_t savedYawScale = g_prefs.getUInt("yawScale", 100);
-  if (savedYawScale == 154) { savedYawScale = 100; g_prefs.putUInt("yawScale", 100); }
+  uint32_t savedYawScale = g_prefs.getUInt("yawScale", 154);
   g_state.imuYawScale = (float)savedYawScale / 100.0f;
   sensorLayoutLoad(g_prefs);
   motorLayoutLoad(g_prefs);
