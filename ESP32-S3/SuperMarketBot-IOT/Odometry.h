@@ -149,6 +149,15 @@ inline void odomUpdate() {
   // → nghĩ robot đang TIẾN với vận tốc 2×1 bánh, gây teleport pose 5-15 m
   // khi chỉ xoay 6s lệnh 0.4 rad/s (user-observed 2026-07-28).
   //
+  // v2.5 (2026-09-04): FIX ghost encoder pulses when motor power is OFF.
+  //
+  // GPIO 43/44 (encoder) picks up EMI from WiFi, I2C (MPU6050), and PWM
+  // switching even when motors are mechanically stopped (12V power off).
+  // If g_motorDir != 0 (direction set from last cmd) but PWM is below the
+  // dead-zone threshold, any ticks counted are electrical noise. We gate them
+  // out using the actual PWM value stored in g_state.lastMotorSpeed.
+  //
+  constexpr int32_t ENC_PWM_DEADZONE = 50; // ticks gated out below this PWM (motor can't spin)
   extern uint8_t g_mapMotSlot[4];
   extern uint8_t g_motInv[4];
   uint8_t pL = g_mapMotSlot[0] > 3 ? 0 : g_mapMotSlot[0];
@@ -157,9 +166,14 @@ inline void odomUpdate() {
   float rawDirR = (float)g_motorDir[pR];
   const float dirL = g_motInv[0] ? -rawDirL : rawDirL;
   const float dirR = g_motInv[2] ? -rawDirR : rawDirR;
+
+  // Gate: if PWM is in dead-zone, motor isn't spinning → ticks = EMI noise
+  const bool motorLActive = abs(g_state.lastMotorSpeed[pL]) > ENC_PWM_DEADZONE;
+  const bool motorRActive = abs(g_state.lastMotorSpeed[pR]) > ENC_PWM_DEADZONE;
+
   const float mPerTick = WHEEL_CIRC_M / ENC_PPR;
-  const float dsL = (dirL == 0.f) ? 0.f : dirL * ((float)dTicksL * mPerTick);
-  const float dsR = (dirR == 0.f) ? 0.f : dirR * ((float)dTicksR * mPerTick);
+  const float dsL = (dirL == 0.f || !motorLActive) ? 0.f : dirL * ((float)dTicksL * mPerTick);
+  const float dsR = (dirR == 0.f || !motorRActive) ? 0.f : dirR * ((float)dTicksR * mPerTick);
   const float ds  = ((dirL * dirR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
 
   // ---- 3) RPM thật ----
