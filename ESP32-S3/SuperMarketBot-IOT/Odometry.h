@@ -64,8 +64,16 @@ static volatile int32_t s_encTicksR = 0;   // Encoder bên phải
 // g_encPhyLastPulseMs[] đã được extern trong Config.h:555 — không khai báo lại ở đây.
 static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Glitch filter: tại max speed 0.4 m/s (1.96 rev/s * 960 PPR = ~1880 Hz), chu kỳ xung thật là ~530us.
+// Bất kỳ xung nào có khoảng cách < 200us (> 5000 Hz) chắc chắn là nhiễu điện từ / PWM crosstalk từ GPIO 40/41/42 kế bên.
+static volatile uint32_t s_lastEncL_us = 0;
+static volatile uint32_t s_lastEncR_us = 0;
+
 // ISR — gọi trong ngắt ngoài, cần IRAM_ATTR + portENTER_CRITICAL_ISR.
 static inline void IRAM_ATTR isr_enc_left() {
+  uint32_t nowUs = (uint32_t)micros();
+  if ((uint32_t)(nowUs - s_lastEncL_us) < 200u) return; // Bỏ qua xung nhiễu PWM < 200us
+  s_lastEncL_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksL++;
   g_encPhyLastPulseMs[0] = (uint32_t)millis();  // mark "left encoder pulse seen at this ms" cho RobotTelemetry.jEnOn[]
@@ -73,6 +81,9 @@ static inline void IRAM_ATTR isr_enc_left() {
 }
 
 static inline void IRAM_ATTR isr_enc_right() {
+  uint32_t nowUs = (uint32_t)micros();
+  if ((uint32_t)(nowUs - s_lastEncR_us) < 200u) return; // Bỏ qua xung nhiễu PWM < 200us
+  s_lastEncR_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksR++;
   g_encPhyLastPulseMs[1] = (uint32_t)millis();  // mark "right encoder pulse seen at this ms"
