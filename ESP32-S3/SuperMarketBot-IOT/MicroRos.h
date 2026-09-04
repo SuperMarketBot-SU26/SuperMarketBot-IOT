@@ -342,24 +342,21 @@ static void fill_imu_msg() {
 }
 
 #if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
-#if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
-#error "micro-ROS serial must use native USB CDC; UART0 GPIO43/44 are encoder inputs."
-#endif
 extern "C" {
     bool arduino_transport_open(struct uxrCustomTransport * transport) {
         (void)transport;
-        SMB_USB_SERIAL.begin(921600); // CDC transport; baud is ignored by USB hardware
+        Serial0.begin(921600); // 921600 baud UART transport
         return true;
     }
     bool arduino_transport_close(struct uxrCustomTransport * transport) {
         (void)transport;
-        SMB_USB_SERIAL.end();
+        Serial0.end();
         return true;
     }
     size_t arduino_transport_write(struct uxrCustomTransport* transport, const uint8_t * buf, size_t len, uint8_t * err) {
         (void)transport;
         (void)err;
-        return SMB_USB_SERIAL.write(buf, len);
+        return Serial0.write(buf, len);
     }
     size_t arduino_transport_read(struct uxrCustomTransport* transport, uint8_t* buf, size_t len, int timeout, uint8_t* err) {
         (void)transport;
@@ -369,8 +366,8 @@ extern "C" {
         // Do NOT cap the timeout! taskMicroRos runs at priority 4 and will be preempted by taskControl (priority 5)
         // automatically. Capping this breaks the XRCE-DDS framing protocol during the initial handshake.
         while (read_bytes < len) {
-            if (SMB_USB_SERIAL.available() > 0) {
-                buf[read_bytes++] = SMB_USB_SERIAL.read();
+            if (Serial0.available() > 0) {
+                buf[read_bytes++] = Serial0.read();
             } else {
                 if ((millis() - start) >= (uint32_t)timeout) break;
                 delay(1); // Yield to FreeRTOS (allows taskControl to run smoothly)
@@ -388,7 +385,7 @@ inline bool init() {
     if (g_initialized) return true;
 
     logger.muteRealSerial = true; // Ngắt ASCII log lên cáp USB để nhường đường cho XRCE-DDS
-    set_microros_transports();    // XRCE-DDS qua native USB CDC (/dev/ttyACM*).
+    set_microros_transports();    // XRCE-DDS qua Serial0 (UART0)
 
     // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
     if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {
