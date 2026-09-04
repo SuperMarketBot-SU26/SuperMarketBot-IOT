@@ -330,6 +330,22 @@ input[type=range]:not(.spd-range)::-moz-range-thumb{width:22px;height:22px;borde
 }
 .test-mot-btn:hover{background:var(--accent);color:var(--bg0);border-color:var(--accent)}
 .test-mot-btn:active{transform:scale(0.95)}
+/* Motor Scale Tuning Cards */
+.scale-card{background:#0c1016;border:1px solid var(--line);border-radius:8px;padding:6px 3px;text-align:center}
+.scale-card .lbl{font-size:.62rem;font-weight:700;color:var(--accent);margin-bottom:3px;letter-spacing:.05em}
+.scale-card .btn-row{display:flex;gap:2px;justify-content:center;margin-bottom:4px}
+.scale-step-btn{
+  background:#1e293b;color:var(--text);border:1px solid var(--line2);border-radius:4px;
+  width:26px;height:22px;display:flex;align-items:center;justify-content:center;
+  font-size:.8rem;font-weight:700;cursor:pointer;touch-action:manipulation;user-select:none;
+}
+.scale-step-btn:active{background:var(--accent);color:var(--bg0)}
+.scale-inp{
+  width:100%;text-align:center;font-size:.78rem;font-weight:700;padding:4px 2px;
+  border-radius:5px;border:1px solid var(--line2);background:#070a0f;color:#fff;
+  font-family:ui-monospace,Consolas,monospace;box-sizing:border-box;
+}
+.scale-inp:focus{border-color:var(--accent);outline:none;background:#0d1520}
 .estop{
   width:100%;padding:14px 16px;border:none;border-radius:12px;margin-top:4px;cursor:pointer;font-weight:700;letter-spacing:.04em;
   font-family:inherit;font-size:.95rem;
@@ -659,23 +675,42 @@ details pre{
 
         <!-- Motor Scale & Balance Section -->
         <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)">
-          <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;color:var(--accent)">Cân bằng động cơ</div>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
-            <div style="text-align:center">
-              <span style="font-size:.6rem;color:var(--muted)">FL</span>
-              <input type="number" id="scaleFL" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)">Cân bằng động cơ</span>
+            <span style="font-size:.58rem;color:var(--muted)">0.00 – 3.00</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px">
+            <div class="scale-card">
+              <div class="lbl">FL</div>
+              <div class="btn-row">
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',-0.05)">−</button>
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',0.05)">+</button>
+              </div>
+              <input type="number" id="scaleFL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
-            <div style="text-align:center">
-              <span style="font-size:.6rem;color:var(--muted)">RL</span>
-              <input type="number" id="scaleRL" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            <div class="scale-card">
+              <div class="lbl">RL</div>
+              <div class="btn-row">
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',-0.05)">−</button>
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',0.05)">+</button>
+              </div>
+              <input type="number" id="scaleRL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
-            <div style="text-align:center">
-              <span style="font-size:.6rem;color:var(--muted)">FR</span>
-              <input type="number" id="scaleFR" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            <div class="scale-card">
+              <div class="lbl">FR</div>
+              <div class="btn-row">
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',-0.05)">−</button>
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',0.05)">+</button>
+              </div>
+              <input type="number" id="scaleFR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
-            <div style="text-align:center">
-              <span style="font-size:.6rem;color:var(--muted)">RR</span>
-              <input type="number" id="scaleRR" step="0.01" min="0.5" max="1.5" value="1.00" style="width:100%;text-align:center;font-size:.7rem;padding:4px">
+            <div class="scale-card">
+              <div class="lbl">RR</div>
+              <div class="btn-row">
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',-0.05)">−</button>
+                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',0.05)">+</button>
+              </div>
+              <input type="number" id="scaleRR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -683,7 +718,7 @@ details pre{
             <button type="button" class="mode-btn" style="background:#1a2030;font-size:.7rem" onclick="autoBalanceMotors()">Auto Cân</button>
             <button type="button" class="mode-btn" style="background:#2a1520;font-size:.7rem" onclick="resetMotorScales()">Reset 1.0</button>
           </div>
-          <p class="hint" style="margin-top:6px;font-size:.6rem;color:var(--muted)">Scale < 1.0 = giảm tốc bánh đó</p>
+          <p id="scaleHint" class="hint" style="margin-top:6px;font-size:.62rem;color:var(--muted);transition:color .2s">Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05</p>
         </div>
       </div>
     </div>
@@ -812,7 +847,9 @@ function applyMotorPayload(d){
   for(let i=0;i<4;i++){
     const el=document.getElementById(scaleIds[i]);
     if(el && d.motSc && d.motSc[i]!=null){
-      el.value = d.motSc[i].toFixed(2);
+      if(document.activeElement !== el) {
+        el.value = Number(d.motSc[i]).toFixed(2);
+      }
     }
   }
 }
@@ -867,35 +904,82 @@ function toggleMotorInvert(slot) {
 }
 
 // Motor Scale Functions
+function adjScale(id, delta) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  let val = parseFloat(el.value);
+  if (isNaN(val)) val = 1.0;
+  val = Math.round((val + delta) * 100) / 100;
+  val = Math.max(0.0, Math.min(3.0, val));
+  el.value = val.toFixed(2);
+}
+
 function applyMotorScale() {
-  const scales = [
-    parseFloat(document.getElementById('scaleFL').value) || 1.0,
-    parseFloat(document.getElementById('scaleRL').value) || 1.0,
-    parseFloat(document.getElementById('scaleFR').value) || 1.0,
-    parseFloat(document.getElementById('scaleRR').value) || 1.0
-  ];
-  // Send each scale
+  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
+  const scales = [];
   for(let i = 0; i < 4; i++) {
-    const scale = Math.max(0.5, Math.min(1.5, scales[i]));
-    wsS({t:'motorScale', payload: i + '_' + scale.toFixed(2)});
+    let v = parseFloat(document.getElementById(ids[i]).value);
+    if (isNaN(v)) v = 1.0;
+    v = Math.max(0.0, Math.min(3.0, v));
+    v = Math.round(v * 100) / 100;
+    scales.push(v);
+    document.getElementById(ids[i]).value = v.toFixed(2);
+  }
+  // Gửi cả dạng batch lẫn từng bánh để đảm bảo mọi phiên bản firmware đều nhận
+  wsS({t:'motorScales', sc: scales});
+  for(let i = 0; i < 4; i++) {
+    wsS({t:'motorScale', payload: i + '_' + scales[i].toFixed(2)});
   }
   console.log('[ApplyScale] Applied:', scales);
+  const hint = document.getElementById('scaleHint');
+  if(hint) {
+    hint.textContent = '✓ Đã lưu: FL=' + scales[0].toFixed(2) + ' RL=' + scales[1].toFixed(2) + ' FR=' + scales[2].toFixed(2) + ' RR=' + scales[3].toFixed(2);
+    hint.style.color = '#34d399';
+    setTimeout(() => {
+      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.style.color = 'var(--muted)';
+    }, 3500);
+  }
 }
+
 function autoBalanceMotors() {
   wsS({t:'motorBalance'});
   console.log('[AutoBalance] Balancing all motors...');
-  // Reset inputs to 1.00 after auto-balance
+  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
+  let sum = 0;
   for(let i = 0; i < 4; i++) {
-    const id = ['scaleFL','scaleRL','scaleFR','scaleRR'][i];
-    document.getElementById(id).value = '1.00';
+    sum += (parseFloat(document.getElementById(ids[i]).value) || 1.0);
+  }
+  const avg = (sum / 4.0).toFixed(2);
+  for(let i = 0; i < 4; i++) {
+    document.getElementById(ids[i]).value = avg;
+  }
+  const hint = document.getElementById('scaleHint');
+  if(hint) {
+    hint.textContent = '✓ Auto cân tất cả bánh về ' + avg;
+    hint.style.color = '#34d399';
+    setTimeout(() => {
+      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.style.color = 'var(--muted)';
+    }, 3500);
   }
 }
+
 function resetMotorScales() {
   wsS({t:'motorResetScales'});
   console.log('[ResetScales] Reset to 1.0');
+  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
   for(let i = 0; i < 4; i++) {
-    const id = ['scaleFL','scaleRL','scaleFR','scaleRR'][i];
-    document.getElementById(id).value = '1.00';
+    document.getElementById(ids[i]).value = '1.00';
+  }
+  const hint = document.getElementById('scaleHint');
+  if(hint) {
+    hint.textContent = '✓ Đã reset tất cả bánh về 1.00';
+    hint.style.color = '#34d399';
+    setTimeout(() => {
+      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.style.color = 'var(--muted)';
+    }, 3500);
   }
 }
 

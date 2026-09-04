@@ -266,12 +266,26 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     int slot = -1;
     float scale = 1.0f;
     if (sscanf(payloadStr, "%d_%f", &slot, &scale) == 2) {
-      if (slot >= 0 && slot < 4 && scale >= 0.5f && scale <= 1.5f) {
+      if (slot >= 0 && slot < 4 && scale >= 0.0f && scale <= 3.0f) {
         extern void motorSetScale(uint8_t slot, float scale);
         motorSetScale((uint8_t)slot, scale);
         motorLayoutSaveCurrent(g_prefs);
         Serial.printf("[WS-MotorScale] Slot %d -> %.3f\n", slot, scale);
       }
+    }
+  } else if (strcmp(t, "motorScales") == 0) {
+    // Đặt scale đồng thời cả 4 bánh: sc = [s0, s1, s2, s3]
+    JsonArray scArr = doc["sc"];
+    if (scArr.size() == 4) {
+      extern void motorSetScale(uint8_t slot, float scale);
+      for (uint8_t i = 0; i < 4; i++) {
+        float sc = scArr[i].as<float>();
+        motorSetScale(i, sc);
+      }
+      motorLayoutSaveCurrent(g_prefs);
+      extern float g_motorScale[4];
+      Serial.printf("[WS-MotorScales] All -> FL:%.2f RL:%.2f FR:%.2f RR:%.2f\n",
+                    g_motorScale[0], g_motorScale[1], g_motorScale[2], g_motorScale[3]);
     }
   } else if (strcmp(t, "motorBalance") == 0) {
     // Auto-balance: đặt tất cả bánh về cùng scale

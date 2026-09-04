@@ -68,7 +68,7 @@ inline void motorLayoutLoad(Preferences &prefs) {
     char k[8];
     snprintf(k, sizeof(k), "motSc%d", i);
     float sc = prefs.getFloat(k, 1.0f);
-    if (sc >= 0.5f && sc <= 1.5f) {
+    if (sc >= 0.0f && sc <= 3.0f) {
       g_motorScale[i] = sc;
     }
   }
@@ -125,7 +125,7 @@ inline bool motorLayoutApplyJson(JsonDocument &doc, Preferences &prefs) {
   if (jsc.size() == 4) {
     for (int i = 0; i < 4; i++) {
       float sc = jsc[i].as<float>();
-      if (sc >= 0.5f && sc <= 1.5f) {
+      if (sc >= 0.0f && sc <= 3.0f) {
         g_motorScale[i] = sc;
       }
     }
@@ -189,11 +189,11 @@ inline uint8_t motorLayoutToggleInvert(uint8_t slot) {
 /**
  * Đặt scale cho 1 bánh
  * @param slot   0-3
- * @param scale  0.5-1.5
+ * @param scale  0.0-3.0
  */
 inline void motorSetScale(uint8_t slot, float scale) {
   if (slot > 3) return;
-  scale = constrain(scale, 0.5f, 1.5f);
+  scale = constrain(scale, 0.0f, 3.0f);
   g_motorScale[slot] = scale;
   
   // Cập nhật left/right scale

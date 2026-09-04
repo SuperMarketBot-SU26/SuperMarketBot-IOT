@@ -167,9 +167,9 @@
   * -------------------------------------------------------------------- */
  #define LEFT_MOTOR_SCALE_DEFAULT   1.00f   // Scale bánh Trái (FL+RL) — tắt trim tạm, để 1.00
  #define RIGHT_MOTOR_SCALE_DEFAULT  1.00f   // Scale bánh Phải (FR+RR)
- /** Safety clamp — không cho scale vượt quá ±20% để tránh brick robot */
- #define MOTOR_SCALE_MIN            0.80f
- #define MOTOR_SCALE_MAX            1.20f
+ /** Scale range cho phép cân bằng động cơ tự do (0.00 = tắt bánh, 1.00 = chuẩn, lên tới 3.00) */
+ #define MOTOR_SCALE_MIN            0.00f
+ #define MOTOR_SCALE_MAX            3.00f
  /** NVS keys (lưu vào flash, giữ qua reboot) */
  #define NVS_KEY_SCALE_L            "motScL"
  #define NVS_KEY_SCALE_R            "motScR"
