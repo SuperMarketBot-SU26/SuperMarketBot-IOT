@@ -143,7 +143,7 @@ static void cmd_vel_callback(const void *msgin) {
             }
             float steer = constrain(pidYawCompute(s_rosTgtH, g_pose.headingRad, dt_h), -25.f, 25.f);
             float steerNorm = steer / 100.0f;
-            normRot = -steerNorm;
+            normRot = steerNorm;
         } else {
             if (s_rosHaveH) {
                 pidYawReset();
@@ -297,14 +297,14 @@ static void fill_odom_msg() {
     g_odom_msg.pose.covariance[14] = 9999.0f; // Z (ignored)
     g_odom_msg.pose.covariance[21] = 9999.0f; // Roll (ignored)
     g_odom_msg.pose.covariance[28] = 9999.0f; // Pitch (ignored)
-    g_odom_msg.pose.covariance[35] = 0.20f;   // Yaw — wheel-only skid-steer estimate
+    g_odom_msg.pose.covariance[35] = 0.02f;   // Yaw — stabilized by MPU6050 gyro via ImuFusion + ZUPT
 
     g_odom_msg.twist.covariance[0]  = 0.01f;  // Vx
     g_odom_msg.twist.covariance[7]  = 9999.0f;// Vy
     g_odom_msg.twist.covariance[14] = 9999.0f;// Vz
     g_odom_msg.twist.covariance[21] = 9999.0f;// Vroll
     g_odom_msg.twist.covariance[28] = 9999.0f;// Vpitch
-    g_odom_msg.twist.covariance[35] = 0.20f;  // Vyaw
+    g_odom_msg.twist.covariance[35] = 0.02f;  // Vyaw
 }
 
 // ============================================================
@@ -327,6 +327,22 @@ static void fill_imu_msg() {
     bool gyroOk = false;
 #if USE_IMU_MPU6050
     gyroOk = ::imuMpu6050GetGyroZ(gyroZ);
+    if (gyroOk) {
+        // Subtract real-time ZUPT bias estimate to eliminate straight-line heading drift
+        gyroZ -= imuFusion::getState().bias;
+
+        // Stationary zero-clamp: when robot is physically stationary, angular velocity is exactly 0.0
+        const bool hasDriveCmd = (g_state.cmd_velMoving || g_state.cmdY != 0 || g_state.cmdX != 0 || g_state.cmdStrafe != 0);
+        const bool encoderStill = (fabsf(g_dThetaEncRate) <= 0.05f);
+        const bool gyroStill    = (fabsf(gyroZ) <= 0.05f); // ~2.8 deg/s
+        const bool robotMoving  = hasDriveCmd || !encoderStill || !gyroStill;
+
+        if (!robotMoving) {
+            gyroZ = 0.0f; // Absolute zero when stationary — eliminates standstill spin!
+        } else if (fabsf(gyroZ) < 0.015f) {
+            gyroZ = 0.0f;
+        }
+    }
 #endif
     g_imu_msg.angular_velocity.x = 0.0f;
     g_imu_msg.angular_velocity.y = 0.0f;
@@ -354,7 +370,7 @@ static void fill_imu_msg() {
     g_imu_msg.orientation_covariance[0] = -1.0f;
     g_imu_msg.angular_velocity_covariance[0] = 9999.0f;
     g_imu_msg.angular_velocity_covariance[4] = 9999.0f;
-    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : 9999.0f;
+    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.02f : 9999.0f;
     g_imu_msg.linear_acceleration_covariance[0] = -1.0f;
     g_imu_msg.linear_acceleration_covariance[4] = -1.0f;
     g_imu_msg.linear_acceleration_covariance[8] = 0.01f;
