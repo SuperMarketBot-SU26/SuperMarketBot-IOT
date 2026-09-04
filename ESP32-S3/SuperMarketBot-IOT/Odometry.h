@@ -217,8 +217,8 @@ inline void odomUpdate() {
   const float ds  = ((dirL * dirR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
 
   // ---- 3) RPM thật ----
-  const float rpmL = dirL * ((float)dTicksL / dt) * 60.0f / ENC_PPR;
-  const float rpmR = dirR * ((float)dTicksR / dt) * 60.0f / ENC_PPR;
+  const float rpmL = (dirL == 0.f || !motorLActive) ? 0.f : dirL * ((float)dTicksL / dt) * 60.0f / ENC_PPR;
+  const float rpmR = (dirR == 0.f || !motorRActive) ? 0.f : dirR * ((float)dTicksR / dt) * 60.0f / ENC_PPR;
 
   const float rpmPhy[4] = { rpmL, rpmL, rpmR, rpmR };
   const float distPhy[4] = { dsL, dsL, dsR, dsR };
