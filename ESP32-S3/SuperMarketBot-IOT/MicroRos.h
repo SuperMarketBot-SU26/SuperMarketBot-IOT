@@ -220,18 +220,12 @@ static void fill_odom_msg() {
     g_odom_msg.pose.pose.orientation.z = sinf(h);
     g_odom_msg.pose.pose.orientation.w  = cosf(h);
 
-    // Kinematic Slip Guard: prevent single-channel encoder scrubbing during turns from spiking forward twist velocity in RViz
+    // Calculate forward linear velocity from wheel RPM; 0 when turning in place
     float avgRpm = 0.f;
     if ((g_state.rpmFL * g_state.rpmFR) < 0.f) {
         avgRpm = 0.f;
     } else {
-        const float diffRpm = fabsf(g_state.rpmFR - g_state.rpmFL);
-        const float meanRpm = (g_state.rpmFL + g_state.rpmFR) * 0.5f;
-        if (diffRpm > fabsf(meanRpm) && diffRpm > 5.0f) {
-            avgRpm = (fabsf(g_state.rpmFL) < fabsf(g_state.rpmFR)) ? g_state.rpmFL : g_state.rpmFR;
-        } else {
-            avgRpm = meanRpm;
-        }
+        avgRpm = (g_state.rpmFL + g_state.rpmFR) * 0.5f;
     }
     const float wheelRps = avgRpm / 60.0f;
     const float linearMps = wheelRps * (float)WHEEL_CIRC_M;

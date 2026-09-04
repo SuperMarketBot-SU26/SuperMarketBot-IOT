@@ -129,9 +129,9 @@
  #define ENC_RR        ENC_R // Bánh sau phải dùng chung xung bên Phải
  
  // Số xung trên 1 vòng bánh xe (tuỳ đĩa encoder - thường 20 khe chữ U)
- // Đĩa encoder được gắn trên trục motor (trước hộp số), nên 1 vòng bánh = 20 xung * 48 (gear ratio) = 960 xung.
+ // Đĩa encoder được gắn trực tiếp trên trục bánh xe (hoặc trục ra hộp số), 1 vòng bánh = 20 xung.
  #ifndef ENC_PPR
- #define ENC_PPR       960.0f
+ #define ENC_PPR       20.0f
  #endif
  
  // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm

@@ -193,14 +193,7 @@ inline void locUpdate(float dsL, float dsR, float dt) {
   if ((dsL * dsR) < 0.f) {
     dsRaw = 0.f;  // Xoay tại chỗ (opposite polarity) → không di chuyển tịnh tiến
   } else {
-    const float diff = fabsf(dsR - dsL);
-    const float avg  = (dsL + dsR) * 0.5f;
-    if (diff > fabsf(avg) && diff > 0.002f) {
-      // Đang rẽ gắt hoặc trượt góc → giới hạn tịnh tiến theo bánh chậm hơn để không nhảy ảo
-      dsRaw = (fabsf(dsL) < fabsf(dsR)) ? dsL : dsR;
-    } else {
-      dsRaw = avg;
-    }
+    dsRaw = (dsL + dsR) * 0.5f;
   }
   // Giảm deadband từ 0.0005 (0.5mm) → 0.0001 (0.1mm) để bắt được
   // encoder ticks khi đi chậm (0.01 m/s → ~0.2mm/20ms loop).
