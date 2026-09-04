@@ -175,8 +175,10 @@ inline bool imuMpu6050GetGyroZ(float &gyroZRadOut) {
   gyroZRadOut = gyroZ * (float)M_PI / 180.0f;
 
   // Cắt nhiễu cứng (Deadband) trước khi đưa vào EKF: 
-  // Nếu noise < 0.05 rad/s (~2.8 deg/s), coi như = 0
-  if (fabsf(gyroZRadOut) < 0.05f) {
+  // Giảm từ 0.05 → 0.008 rad/s (~0.46 deg/s) để bắt được micro-corrections
+  // từ Nav2 controller khi đi chậm (0.01-0.04 m/s). Deadband 0.05 nuốt hết
+  // tín hiệu xoay nhẹ → EKF đóng băng heading → map trượt.
+  if (fabsf(gyroZRadOut) < 0.008f) {
       gyroZRadOut = 0.f;
   }
 

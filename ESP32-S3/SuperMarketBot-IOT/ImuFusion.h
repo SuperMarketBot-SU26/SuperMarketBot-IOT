@@ -317,9 +317,12 @@ inline float step(float gyroZRad, float dt, bool gyroOk) {
   }
 
   // ZUPT — Zero-Velocity Update: freeze heading khi robot đứng yên.
-  const bool encoderStill = (fabsf(g_dThetaEncRate) <= (IMU_FUSION_ZUPT_MAX_DTHETA / (dt > 0.001f ? dt : 0.1f)));
-  const bool gyroStill    = (fabsf(gyroZRad)      <= IMU_FUSION_ZUPT_GYRO_THRESH);
-  const bool robotMoving  = !encoderStill || !gyroStill;
+  // Ngưỡng cũ quá lớn (8.5 deg/s) khiến robot đang chạy thẳng bị dính ZUPT
+  // và nuốt hết micro-correction vào bias. Giờ kết hợp check thêm trạng thái lái.
+  const bool hasDriveCmd = (g_state.cmd_velMoving || g_state.cmdY != 0 || g_state.cmdX != 0 || g_state.cmdStrafe != 0);
+  const bool encoderStill = (fabsf(g_dThetaEncRate) <= 0.05f); // 0.05 rad/s ~ 2.8 deg/s
+  const bool gyroStill    = (fabsf(gyroZRad)      <= 0.05f); // 0.05 rad/s ~ 2.8 deg/s
+  const bool robotMoving  = hasDriveCmd || !encoderStill || !gyroStill;
 
   if (robotMoving) {
     s_zuptStillTicks = 0;

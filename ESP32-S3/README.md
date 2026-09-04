@@ -166,7 +166,7 @@ Tất cả hằng số nằm trong `Config.h`:
 | `SAFE_STOP_CM` | 28 cm | (Hiện không dùng trong FSM demo; giữ cho bản mở rộng) |
 | `SAFE_SIDE_AVOID_CM` | 14 cm | Chỉ **tự lái**: HC-SR04 trái/phải — bẻ lái khi thực sự gần (giảm giật) |
 | `SAFE_SLOW_CM` | 100 cm | (FSM hiện dùng `AUTO_LIDAR_SLOW_CM`; hằng này dự phòng) |
-| `ENC_PPR` | 20 | Xung/vòng bánh xe |
+| `ENC_PPR` | 960 | 20 khe trên trục motor × hộp số 1:48; dùng 20 nếu đĩa nằm trực tiếp trên trục bánh |
 | `WHEEL_DIAM_M` | 0.065 m | Đường kính bánh |
 | `PWM_FREQ` | 20 000 Hz | Tần số PWM động cơ |
 | `TFLUNA_SEND_INIT_CMD` | 1 | Gửi lệnh Benewake lúc boot (bật UART output); tắt nếu module đã cấu hình sẵn |

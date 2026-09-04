@@ -1,6 +1,8 @@
 // ===========================================================
 // MicroRos.h — ESP32-S3 = micro-ROS node
-// Publish: /scan (LiDAR), /odom (wheel encoder), /imu/data (MPU6050)
+// Publish: /odom (wheel encoder), /imu/data (MPU6050).
+// YDLIDAR X3 is connected directly to the Pi 5 in the production topology,
+// so /scan is normally published by ydlidar_ros2_driver, not this firmware.
 // Subscribe: /cmd_vel (motor speed command)
 //
 // Yêu cầu Arduino IDE:
@@ -52,9 +54,6 @@ static rclc_executor_t  g_executor;
 static rcl_publisher_t  g_odom_pub;
 static rcl_publisher_t  g_imu_pub;
 static rcl_publisher_t  g_us_front_pub;
-static rcl_publisher_t  g_us_rear_pub;
-static rcl_publisher_t  g_us_left_pub;
-static rcl_publisher_t  g_us_right_pub;
 static rcl_publisher_t  g_us_debug_pub;
 
 // Subscribers
@@ -65,9 +64,6 @@ static nav_msgs__msg__Odometry      g_odom_msg;
 static sensor_msgs__msg__Imu        g_imu_msg;
 static geometry_msgs__msg__Twist    g_cmd_vel_msg;
 static sensor_msgs__msg__Range      g_us_front_msg;
-static sensor_msgs__msg__Range      g_us_rear_msg;
-static sensor_msgs__msg__Range      g_us_left_msg;
-static sensor_msgs__msg__Range      g_us_right_msg;
 static std_msgs__msg__String        g_us_debug_msg;
 
 // State
@@ -100,19 +96,32 @@ static void cmd_vel_callback(const void *msgin) {
 
     constexpr float ROS2_ANG_MIN = 0.02f;
     constexpr float ROS2_LIN_MIN = 0.005f;
-    constexpr float ROS2_LIN_MAX = 0.40f;
-    constexpr float ROS2_ANG_MAX_FWD = 2.00f;
-    constexpr int32_t ROS2_PWM_MIN = 450;
+    // *** CRITICAL FIX: Reduced from 0.40 to 0.05 ***
+    // At desired_linear_vel=0.04, normFwd=0.04/0.10=0.40 → good PWM resolution with headroom
+    constexpr float ROS2_LIN_MAX = 0.10f;
+    constexpr float ROS2_ANG_MAX_FWD = 1.00f;  // Reduced from 2.0: tighter angular mapping for precision
+    constexpr int32_t ROS2_PWM_MIN = 300;       // Straight-line minimum PWM
+    constexpr int32_t ROS2_PWM_ROT = 450;       // Rotation minimum PWM (4WD skid-steer needs more torque)
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
+
+    // *** SMOOTHING FILTER STATE (persistent across calls) ***
+    // Exponential Moving Average (EMA) eliminates sudden PWM jumps that cause
+    // encoder jitter → bad odometry → SLAM map drift.
+    // alpha=0.3: each cmd_vel moves PWM 30% toward target. At 10-15 Hz cmd_vel,
+    // settling time ≈ 200-300ms → smooth ramp, no motor stutter.
+    static int32_t s_smoothL = 0;
+    static int32_t s_smoothR = 0;
+    constexpr float SMOOTH_ALPHA = 0.3f;
 
     g_state.cmd_velLastMs = nowMs;
     g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
 
     if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
-        // Continuous Arcade Drive (No stepping/pausing needed for USB Serial)
-        float normFwd = lin / ROS2_LIN_MAX;
-        float normRot = ang / ROS2_ANG_MAX_FWD;
+        // Normalize velocity to [-1, 1] range
+        float normFwd = constrain(lin / ROS2_LIN_MAX, -1.0f, 1.0f);
+        float normRot = constrain(ang / ROS2_ANG_MAX_FWD, -1.0f, 1.0f);
 
+        // Arcade drive: differential left/right
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
 
@@ -122,24 +131,48 @@ static void cmd_vel_callback(const void *msgin) {
             normRight /= maxNorm;
         }
 
+        // Map normalized value to PWM with separate straight/rotation thresholds
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
-            int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 550 : ROS2_PWM_MIN;
+            
+            // 4WD skid-steer needs more torque for rotation than going straight.
+            // CRITICAL FIX: Smoothly blend the minimum PWM based on rotation intent.
+            // Using a hard ternary (normRot > 0.05 ? 450 : 300) caused a violent 150-PWM jolt 
+            // when Nav2 made tiny 1-degree micro-corrections, completely destroying SLAM odometry.
+            // Now, it linearly scales from 300 to 450 as rotation increases.
+            float rotFactor = constrain(fabsf(normRot) * 3.0f, 0.0f, 1.0f); // Reaches full ROT torque at 33% rotation command
+            int32_t activeMinPwm = ROS2_PWM_MIN + (int32_t)(rotFactor * (ROS2_PWM_ROT - ROS2_PWM_MIN));
+            
             int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
             if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
             return (norm >= 0) ? p : -p;
         };
 
-        int32_t leftPwm  = mapPwm(normLeft);
-        int32_t rightPwm = mapPwm(normRight);
+        int32_t targetL = mapPwm(normLeft);
+        int32_t targetR = mapPwm(normRight);
+
+        // *** APPLY SMOOTHING FILTER ***
+        // EMA low-pass: smooth_pwm = α * target + (1-α) * smooth_pwm
+        s_smoothL = (int32_t)(SMOOTH_ALPHA * (float)targetL + (1.0f - SMOOTH_ALPHA) * (float)s_smoothL);
+        s_smoothR = (int32_t)(SMOOTH_ALPHA * (float)targetR + (1.0f - SMOOTH_ALPHA) * (float)s_smoothR);
+
         locSetDriveCmd(
-            (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
-            (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
+            (int16_t)constrain((int)(s_smoothL * 100L / ROS2_PWM_MAX), -100, 100),
+            (int16_t)constrain((int)(s_smoothR * 100L / ROS2_PWM_MAX), -100, 100));
         
-        const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
+        const int32_t sp[4] = {s_smoothL, s_smoothL, s_smoothR, s_smoothR};
         ::motorApplyLayout(sp);
     } else {
-        ::botStop();
+        // Smooth stop: ramp down instead of instant brake
+        s_smoothL = (int32_t)((1.0f - SMOOTH_ALPHA) * (float)s_smoothL);
+        s_smoothR = (int32_t)((1.0f - SMOOTH_ALPHA) * (float)s_smoothR);
+        if (abs(s_smoothL) < 20 && abs(s_smoothR) < 20) {
+            s_smoothL = 0; s_smoothR = 0;
+            ::botStop();
+        } else {
+            const int32_t sp[4] = {s_smoothL, s_smoothL, s_smoothR, s_smoothR};
+            ::motorApplyLayout(sp);
+        }
     }
 }
 
@@ -163,7 +196,9 @@ static void set_synced_stamp(int32_t &sec, uint32_t &nanosec, int32_t offset_ms 
 // FILL Odometry message
 // ============================================================
 static void fill_odom_msg() {
-    const Pose2D &pose = g_pose;
+    // /odom is deliberately wheel-only. The independent raw gyro stays on
+    // /imu/data and robot_localization on the Pi performs the actual fusion.
+    const Pose2D &pose = g_wheelOdomPose;
 
     // ---- Header ----
     g_odom_msg.header.frame_id.data = (char*)"odom";
@@ -223,15 +258,29 @@ static void fill_odom_msg() {
     s_odomPrevMs = nowMs;
     s_odomPrevHeading = pose.headingRad;
 
+    // CRITICAL FIX: Do NOT send 0.0 covariance! 
+    // 0.0 covariance tells slam_toolbox that odometry is mathematically perfect.
+    // This causes SLAM to shrink its scan-matching search window to 0 and blindly follow
+    // the IMU, even if the IMU is drifting (causing the ghosting effect).
     for (int i = 0; i < 36; i++) {
         g_odom_msg.pose.covariance[i] = 0.0f;
         g_odom_msg.twist.covariance[i] = 0.0f;
     }
-    g_odom_msg.pose.covariance[0] = 0.05f;
-    g_odom_msg.pose.covariance[7] = 0.05f;
-    g_odom_msg.pose.covariance[35] = 0.10f;
-    g_odom_msg.twist.covariance[0] = 0.02f;
-    g_odom_msg.twist.covariance[35] = 0.10f;
+    
+    // Realistic covariances for an ESP32 skid-steer bot with MPU6050
+    g_odom_msg.pose.covariance[0]  = 0.02f;   // X — encoder + skid uncertainty
+    g_odom_msg.pose.covariance[7]  = 0.02f;   // Y
+    g_odom_msg.pose.covariance[14] = 9999.0f; // Z (ignored)
+    g_odom_msg.pose.covariance[21] = 9999.0f; // Roll (ignored)
+    g_odom_msg.pose.covariance[28] = 9999.0f; // Pitch (ignored)
+    g_odom_msg.pose.covariance[35] = 0.20f;   // Yaw — wheel-only skid-steer estimate
+
+    g_odom_msg.twist.covariance[0]  = 0.01f;  // Vx
+    g_odom_msg.twist.covariance[7]  = 9999.0f;// Vy
+    g_odom_msg.twist.covariance[14] = 9999.0f;// Vz
+    g_odom_msg.twist.covariance[21] = 9999.0f;// Vroll
+    g_odom_msg.twist.covariance[28] = 9999.0f;// Vpitch
+    g_odom_msg.twist.covariance[35] = 0.20f;  // Vyaw
 }
 
 // ============================================================
@@ -241,13 +290,14 @@ static uint32_t s_imuPrevGyroZ_ms __attribute__((unused)) = 0;
 static float    s_imuPrevGyroZ_radps __attribute__((unused)) = 0.f;
 
 static void fill_imu_msg() {
-    const Pose2D &pose = g_pose;
-
-    float h = pose.headingRad * 0.5f;
+    // MPU6050 has no absolute yaw reference. Do not advertise the firmware's
+    // already-fused heading as an independent IMU orientation measurement.
+    // Consumers must use angular_velocity.z; covariance[0] = -1 marks the
+    // orientation field unavailable per sensor_msgs/Imu.
     g_imu_msg.orientation.x = 0.0f;
     g_imu_msg.orientation.y = 0.0f;
-    g_imu_msg.orientation.z = sinf(h);
-    g_imu_msg.orientation.w = cosf(h);
+    g_imu_msg.orientation.z = 0.0f;
+    g_imu_msg.orientation.w = 1.0f;
 
     float gyroZ = 0.f;
     bool gyroOk = false;
@@ -278,8 +328,6 @@ static void fill_imu_msg() {
         g_imu_msg.linear_acceleration_covariance[i] = 0.0f;
     }
     g_imu_msg.orientation_covariance[0] = -1.0f;
-    g_imu_msg.orientation_covariance[4] = -1.0f;
-    g_imu_msg.orientation_covariance[8] = 0.02f;
     g_imu_msg.angular_velocity_covariance[0] = -1.0f;
     g_imu_msg.angular_velocity_covariance[4] = -1.0f;
     g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : -1.0f;
@@ -294,35 +342,38 @@ static void fill_imu_msg() {
 }
 
 #if defined(MICRO_ROS_USE_SERIAL) && (MICRO_ROS_USE_SERIAL == 1)
+#if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
+#error "micro-ROS serial must use native USB CDC; UART0 GPIO43/44 are encoder inputs."
+#endif
 extern "C" {
     bool arduino_transport_open(struct uxrCustomTransport * transport) {
         (void)transport;
-        Serial0.begin(921600); // 921600 baud for ultra-fast low-latency sensor streaming!
+        SMB_USB_SERIAL.begin(921600); // CDC transport; baud is ignored by USB hardware
         return true;
     }
     bool arduino_transport_close(struct uxrCustomTransport * transport) {
         (void)transport;
-        Serial0.end();
+        SMB_USB_SERIAL.end();
         return true;
     }
     size_t arduino_transport_write(struct uxrCustomTransport* transport, const uint8_t * buf, size_t len, uint8_t * err) {
         (void)transport;
         (void)err;
-        return Serial0.write(buf, len);
+        return SMB_USB_SERIAL.write(buf, len);
     }
     size_t arduino_transport_read(struct uxrCustomTransport* transport, uint8_t* buf, size_t len, int timeout, uint8_t* err) {
         (void)transport;
         (void)err;
         uint32_t start = millis();
         size_t read_bytes = 0;
-        // Cap maximum blocking read timeout to 2ms so XRCE-DDS polling never delays our 50Hz control & telemetry loop!
-        uint32_t max_wait = (timeout > 2) ? 2 : (uint32_t)timeout;
+        // Do NOT cap the timeout! taskMicroRos runs at priority 4 and will be preempted by taskControl (priority 5)
+        // automatically. Capping this breaks the XRCE-DDS framing protocol during the initial handshake.
         while (read_bytes < len) {
-            if (Serial0.available() > 0) {
-                buf[read_bytes++] = Serial0.read();
+            if (SMB_USB_SERIAL.available() > 0) {
+                buf[read_bytes++] = SMB_USB_SERIAL.read();
             } else {
-                if (read_bytes > 0 || (millis() - start) >= max_wait) break; // Instant return once available bytes are consumed
-                delayMicroseconds(50);
+                if ((millis() - start) >= (uint32_t)timeout) break;
+                delay(1); // Yield to FreeRTOS (allows taskControl to run smoothly)
             }
         }
         return read_bytes;
@@ -337,7 +388,7 @@ inline bool init() {
     if (g_initialized) return true;
 
     logger.muteRealSerial = true; // Ngắt ASCII log lên cáp USB để nhường đường cho XRCE-DDS
-    set_microros_transports();    // Kích hoạt giao thức XRCE-DDS qua Serial0 phần cứng!
+    set_microros_transports();    // XRCE-DDS qua native USB CDC (/dev/ttyACM*).
 
     // Ping agent before initializing XRCE-DDS session to avoid blocking or creating invalid handles
     if (rmw_uros_ping_agent(500, 2) != RMW_RET_OK) {
@@ -375,25 +426,10 @@ inline bool init() {
         "/imu/data"
     );
 
-rclc_publisher_init_best_effort(
+    rclc_publisher_init_best_effort(
         &g_us_front_pub, &g_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
         "/us_front_dist"
-    );
-    rclc_publisher_init_best_effort(
-        &g_us_rear_pub, &g_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
-        "/us_rear_dist"
-    );
-    rclc_publisher_init_best_effort(
-        &g_us_left_pub, &g_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
-        "/us_left_dist"
-    );
-    rclc_publisher_init_best_effort(
-        &g_us_right_pub, &g_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
-        "/us_right_dist"
     );
 
     rclc_publisher_init_best_effort(
@@ -432,21 +468,9 @@ rclc_publisher_init_best_effort(
     g_imu_msg.header.frame_id.size = 9;
     g_imu_msg.header.frame_id.capacity = 10;
 
-g_us_front_msg.header.frame_id.data = (char*)"us_front_link";
+    g_us_front_msg.header.frame_id.data = (char*)"us_front_link";
     g_us_front_msg.header.frame_id.size = 13;
     g_us_front_msg.header.frame_id.capacity = 14;
-
-    g_us_rear_msg.header.frame_id.data = (char*)"us_rear_link";
-    g_us_rear_msg.header.frame_id.size = 12;
-    g_us_rear_msg.header.frame_id.capacity = 13;
-
-    g_us_left_msg.header.frame_id.data = (char*)"us_left_link";
-    g_us_left_msg.header.frame_id.size = 12;
-    g_us_left_msg.header.frame_id.capacity = 13;
-
-    g_us_right_msg.header.frame_id.data = (char*)"us_right_link";
-    g_us_right_msg.header.frame_id.size = 13;
-    g_us_right_msg.header.frame_id.capacity = 14;
     g_us_front_msg.radiation_type = sensor_msgs__msg__Range__ULTRASOUND;
     g_us_front_msg.field_of_view = 0.26f; // ~15 degrees
     g_us_front_msg.min_range = 0.02f;
@@ -487,22 +511,11 @@ inline void spin() {
     static uint32_t s_last_us_ms = 0;
     if (now - s_last_us_ms >= 100) { // 10Hz
         s_last_us_ms = now;
-g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
+        g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
         g_us_front_msg.header.stamp.nanosec = (uint32_t)((now % 1000) * 1000000);
-        g_us_front_msg.range = g_state.usFront / 100.0f;
+        float dist_m = g_state.usFront / 100.0f;
+        g_us_front_msg.range = dist_m;
         rcl_publish(&g_us_front_pub, &g_us_front_msg, NULL);
-
-        g_us_rear_msg.header.stamp = g_us_front_msg.header.stamp;
-        g_us_rear_msg.range = g_state.usBack / 100.0f;
-        rcl_publish(&g_us_rear_pub, &g_us_rear_msg, NULL);
-
-        g_us_left_msg.header.stamp = g_us_front_msg.header.stamp;
-        g_us_left_msg.range = g_state.usLeft / 100.0f;
-        rcl_publish(&g_us_left_pub, &g_us_left_msg, NULL);
-
-        g_us_right_msg.header.stamp = g_us_front_msg.header.stamp;
-        g_us_right_msg.range = g_state.usRight / 100.0f;
-        rcl_publish(&g_us_right_pub, &g_us_right_msg, NULL);
 
         if (g_us_debug_msg.data.data != NULL) {
             snprintf(g_us_debug_msg.data.data, 100, "[US_DEBUG] Front: %dcm | Back: %dcm | Left: %dcm | Right: %dcm", 

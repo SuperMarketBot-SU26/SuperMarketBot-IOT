@@ -117,8 +117,11 @@
  #define USE_ENCODER_HARDWARE  1 // 1 = Bật đọc encoder 2 bánh (ISR GPIO); 0 = Tắt (dùng PWM ảo)
  // Chân D0 cắm vào GPIO + ngắt ngoài; VCC = 3.3V, GND chung ESP32. Chân A0 KHÔNG NỐI (BỎ TRỐNG).
  // ⚠️ GPIO 35/36 là input-only trên ESP32-S3 N16R8 (PSRAM chiếm) — test kỹ interrupt.
- #define ENC_L         43    // Encoder Bên Trái (GPIO 43)
- #define ENC_R         44    // Encoder Bên Phải (GPIO 44)
+ // GPIO43/44 là UART0 mặc định, nhưng firmware production dùng native USB CDC
+ // (GPIO19/20) cho micro-ROS. Không được đổi transport trở lại Serial0 khi hai
+ // encoder còn nối ở đây.
+ #define ENC_L         43    // Encoder Bên Trái (GPIO 43; UART0 phải tắt)
+ #define ENC_R         44    // Encoder Bên Phải (GPIO 44; UART0 phải tắt)
  
  #define ENC_FL        ENC_L // Bánh trước trái dùng chung xung bên Trái
  #define ENC_RL        ENC_L // Bánh sau trái dùng chung xung bên Trái
@@ -134,6 +137,12 @@
  // Chu vi bánh xe (mét) để tính quãng đường — ví dụ bánh D=65mm
  #define WHEEL_DIAM_M  0.065f
  #define WHEEL_CIRC_M  (PI * WHEEL_DIAM_M)
+
+ // Khoảng cách hiệu dụng giữa tâm hai dải bánh trái/phải (m).
+ // Đây là tham số động học, cần hiệu chuẩn bằng bài test quay 360 độ; không
+ // lấy chiều rộng vỏ xe. Khai báo tập trung tại đây để firmware và log boot
+ // luôn dùng cùng một giá trị.
+ #define WHEEL_BASE_M  0.22f
  
 
  // Hệ số hiệu chuẩn quãng đường (giảm < 1.0 nếu đi xa hơn lý thuyết, tăng > 1.0 nếu đi ngắn hơn)

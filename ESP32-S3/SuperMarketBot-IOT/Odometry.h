@@ -2,7 +2,7 @@
  *  Odometry.h — Đọc Encoder thật 2 bánh trước (ISR GPIO) + IMU heading fusion
  *
  *  v2.0 — 2026-07-27 (Root-Cause fix)
- *    - Kích hoạt đọc 2 encoder bánh trước (ENC_L=GPIO35, ENC_R=GPIO36) qua
+ *    - Kích hoạt đọc 2 encoder hai bên (ENC_L=GPIO43, ENC_R=GPIO44) qua
  *      ngắt ngoài (ISR) — KHÔNG còn mô phỏng PWM ảo.
  *    - Tính RPM + distance thật từ số xung tích lũy + ENC_PPR + WHEEL_CIRC_M.
  *    - Pose thật: ds = (sL + sR)/2 × dt ; dθ = (sR - sL)/WHEEL_BASE_M × dt.
@@ -12,7 +12,9 @@
  *
  *  Đặc tả phần cứng:
  *    - 2 encoder Hall/bột thuỷ tinh, 1 kênh (D0), VCC=3.3V, GND chung.
- *    - Mỗi encoder có đĩa 20 khe chữ U → ENC_PPR = 20.
+ *    - Cấu hình hiện tại: 20 khe trên trục motor × hộp số 1:48 →
+ *      ENC_PPR = 960 xung/vòng bánh. Nếu đĩa nằm trên trục bánh thì phải
+ *      hiệu chỉnh lại thành 20.
  *    - 2 bánh trước (FL+FR) đọc xung; 2 bánh sau (RL+RR) dùng chung xung
  *      với bánh trước cùng bên (giả định robot bám đường tốt, 2 bánh cùng
  *      bên không slip độc lập).
@@ -36,6 +38,16 @@
 
 /** Tổng quãng đường (m) cho từng bánh (slot logic LF/LR/RF/RR). */
 float g_distFL = 0, g_distRL = 0, g_distFR = 0, g_distRR = 0;
+
+/**
+ * Wheel-only odometry published to ROS 2.
+ *
+ * Keep this independent from g_pose: g_pose is the firmware navigation pose
+ * whose heading is IMU-assisted, while ROS robot_localization needs genuinely
+ * separate wheel and IMU measurements. Publishing g_pose as /odom and then
+ * fusing /imu/data double-counted the same gyro and made map->odom unstable.
+ */
+Pose2D g_wheelOdomPose = {0.f, 0.f, 0.f};
 
 /** Encoder-derived dTheta (rad/s) — consumed by imuFusion::step() every SAFE_LOOP_MS. */
 float g_dThetaEncRate = 0.f;
@@ -98,6 +110,7 @@ static inline void   odomResetTicks() {}
 /** Khởi tạo: attach ISR cho 2 chân encoder + reset counters. */
 inline void odomInit() {
   g_distFL = g_distRL = g_distFR = g_distRR = 0;
+  g_wheelOdomPose = {0.f, 0.f, 0.f};
 
 #if USE_ENCODER_HARDWARE
   // Đảm bảo chân input + pullup nội (encoder open-collector thường cần pullup).
@@ -171,7 +184,7 @@ inline void odomUpdate() {
   const bool motorLActive = abs(g_state.lastMotorSpeed[pL]) > ENC_PWM_DEADZONE;
   const bool motorRActive = abs(g_state.lastMotorSpeed[pR]) > ENC_PWM_DEADZONE;
 
-  const float mPerTick = WHEEL_CIRC_M / ENC_PPR;
+  const float mPerTick = (WHEEL_CIRC_M / ENC_PPR) * ODOM_CALIB_FACTOR;
   const float dsL = (dirL == 0.f || !motorLActive) ? 0.f : dirL * ((float)dTicksL * mPerTick);
   const float dsR = (dirR == 0.f || !motorRActive) ? 0.f : dirR * ((float)dTicksR * mPerTick);
   const float ds  = ((dirL * dirR) < 0.f) ? 0.f : ((dsL + dsR) * 0.5f);
@@ -200,7 +213,21 @@ inline void odomUpdate() {
   g_state.distRR = g_distRR;
 
   // ---- 6) g_dThetaEncRate cho EKF heading fusion ----
-  g_dThetaEncRate = ((dsR - dsL) / WHEEL_BASE_M) / (dt > 0.001f ? dt : 0.1f);
+  const float dThetaWheel = (dsR - dsL) / WHEEL_BASE_M;
+  g_dThetaEncRate = dThetaWheel / (dt > 0.001f ? dt : 0.1f);
+
+  // ---- 6b) Wheel-only SE(2) pose for host-side robot_localization ----
+  // Midpoint integration is substantially more accurate than applying the
+  // whole translation at either the old or new heading during a curve.
+  const float dsWheel = (dsL + dsR) * 0.5f;
+  const float headingMid = g_wheelOdomPose.headingRad + dThetaWheel * 0.5f;
+  g_wheelOdomPose.x += dsWheel * cosf(headingMid);
+  g_wheelOdomPose.y += dsWheel * sinf(headingMid);
+  g_wheelOdomPose.headingRad += dThetaWheel;
+  while (g_wheelOdomPose.headingRad > (float)M_PI)
+    g_wheelOdomPose.headingRad -= 2.f * (float)M_PI;
+  while (g_wheelOdomPose.headingRad <= -(float)M_PI)
+    g_wheelOdomPose.headingRad += 2.f * (float)M_PI;
 
   // ---- 7) Localization ----
   locUpdate(dsL, dsR, dt);
@@ -266,6 +293,7 @@ inline void odomResetDistance() {
   g_distFL = g_distRL = g_distFR = g_distRR = 0;
   g_state.distFL = g_state.distRL = g_state.distFR = g_state.distRR = 0;
   g_dThetaEncRate = 0.f;
+  g_wheelOdomPose = {0.f, 0.f, 0.f};
 #if USE_ENCODER_HARDWARE
   odomResetTicks();
 #endif
