@@ -121,6 +121,36 @@ static void cmd_vel_callback(const void *msgin) {
         float normFwd = constrain(lin / ROS2_LIN_MAX, -1.0f, 1.0f);
         float normRot = constrain(ang / ROS2_ANG_MAX_FWD, -1.0f, 1.0f);
 
+        // Heading Lock for straight driving: if no rotation is commanded (pure straight driving),
+        // apply PID correction using IMU heading to keep the physical robot moving dead straight!
+        static float s_rosTgtH = 0.f;
+        static bool  s_rosHaveH = false;
+        static uint32_t s_rosLastH_ms = 0;
+        uint32_t nowH = millis();
+        float dt_h = (s_rosLastH_ms > 0) ? (float)(nowH - s_rosLastH_ms) * 0.001f : 0.02f;
+        s_rosLastH_ms = nowH;
+
+        if (g_imuEnabled && fabsf(normRot) < 0.02f && fabsf(normFwd) > 0.02f) {
+            if (!s_rosHaveH) {
+                s_rosTgtH = g_pose.headingRad;
+                pidYawReset();
+                s_rosHaveH = true;
+            }
+            float dh = wpNormalizeAngle(g_pose.headingRad - s_rosTgtH);
+            if (fabsf(dh) > 0.436f) {
+                s_rosTgtH = g_pose.headingRad;
+                pidYawReset();
+            }
+            float steer = constrain(pidYawCompute(s_rosTgtH, g_pose.headingRad, dt_h), -25.f, 25.f);
+            float steerNorm = steer / 100.0f;
+            normRot = -steerNorm;
+        } else {
+            if (s_rosHaveH) {
+                pidYawReset();
+                s_rosHaveH = false;
+            }
+        }
+
         // Arcade drive: differential left/right
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
@@ -322,9 +352,9 @@ static void fill_imu_msg() {
         g_imu_msg.linear_acceleration_covariance[i] = 0.0f;
     }
     g_imu_msg.orientation_covariance[0] = -1.0f;
-    g_imu_msg.angular_velocity_covariance[0] = -1.0f;
-    g_imu_msg.angular_velocity_covariance[4] = -1.0f;
-    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : -1.0f;
+    g_imu_msg.angular_velocity_covariance[0] = 9999.0f;
+    g_imu_msg.angular_velocity_covariance[4] = 9999.0f;
+    g_imu_msg.angular_velocity_covariance[8] = gyroOk ? 0.001f : 9999.0f;
     g_imu_msg.linear_acceleration_covariance[0] = -1.0f;
     g_imu_msg.linear_acceleration_covariance[4] = -1.0f;
     g_imu_msg.linear_acceleration_covariance[8] = 0.01f;
