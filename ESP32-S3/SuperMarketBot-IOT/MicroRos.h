@@ -101,7 +101,7 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float ROS2_LIN_MAX = 0.10f;
     constexpr float ROS2_ANG_MAX_FWD = 1.00f;  // Reduced from 2.0: tighter angular mapping for precision
     constexpr int32_t ROS2_PWM_MIN = 300;       // Straight-line minimum PWM
-    constexpr int32_t ROS2_PWM_ROT = 450;       // Rotation minimum PWM (4WD skid-steer needs more torque)
+    constexpr int32_t ROS2_PWM_ROT = 520;       // Rotation minimum PWM (4WD skid-steer needs more torque)
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     // *** SMOOTHING FILTER STATE (persistent across calls) ***
@@ -114,9 +114,9 @@ static void cmd_vel_callback(const void *msgin) {
     constexpr float SMOOTH_ALPHA = 0.3f;
 
     g_state.cmd_velLastMs = nowMs;
-    g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
 
-    if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
+    if (fabsf(lin) > ROS2_LIN_MIN || fabsf(ang) > ROS2_ANG_MIN) {
+        g_state.cmd_velMoving = true;
         // Normalize velocity to [-1, 1] range
         float normFwd = constrain(lin / ROS2_LIN_MAX, -1.0f, 1.0f);
         float normRot = constrain(ang / ROS2_ANG_MAX_FWD, -1.0f, 1.0f);
@@ -161,16 +161,43 @@ static void cmd_vel_callback(const void *msgin) {
             normRight /= maxNorm;
         }
 
+        // Detect in-place rotation for Kickstart and Gyro Assist
+        static uint32_t s_rosRotStartMs = 0;
+        static bool s_rosWasRotating = false;
+        static int32_t s_rosGyroBoost = 0;
+        static uint32_t s_lastRosBoostMs = 0;
+
+        bool isRosPureRot = (fabsf(normRot) > 0.05f && fabsf(normFwd) < 0.12f);
+
+        if (isRosPureRot) {
+            if (!s_rosWasRotating) {
+                s_rosRotStartMs = nowMs;
+                s_rosWasRotating = true;
+                s_rosGyroBoost = 0;
+                s_lastRosBoostMs = nowMs;
+            }
+
+            // Closed-loop gyro assist: nếu sau 140ms mà |gyroZ| < 0.06 rad/s (robot bị kẹt sàn nhám/bám)
+            if (nowMs - s_rosRotStartMs > 140 && (nowMs - s_lastRosBoostMs >= 40)) {
+                s_lastRosBoostMs = nowMs;
+                float actualOmega = fabsf(g_state.currentGyroZ);
+                if (actualOmega < 0.06f) {
+                    if (s_rosGyroBoost < 250) s_rosGyroBoost += 25;
+                } else if (actualOmega >= 0.15f) {
+                    if (s_rosGyroBoost > 0) s_rosGyroBoost -= 10;
+                }
+            }
+        } else {
+            s_rosWasRotating = false;
+            s_rosRotStartMs = 0;
+            s_rosGyroBoost = 0;
+        }
+
         // Map normalized value to PWM with separate straight/rotation thresholds
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
             
-            // 4WD skid-steer needs more torque for rotation than going straight.
-            // CRITICAL FIX: Smoothly blend the minimum PWM based on rotation intent.
-            // Using a hard ternary (normRot > 0.05 ? 450 : 300) caused a violent 150-PWM jolt 
-            // when Nav2 made tiny 1-degree micro-corrections, completely destroying SLAM odometry.
-            // Now, it linearly scales from 300 to 450 as rotation increases.
-            float rotFactor = constrain(fabsf(normRot) * 3.0f, 0.0f, 1.0f); // Reaches full ROT torque at 33% rotation command
+            float rotFactor = constrain(fabsf(normRot) * 3.0f, 0.0f, 1.0f);
             int32_t activeMinPwm = ROS2_PWM_MIN + (int32_t)(rotFactor * (ROS2_PWM_ROT - ROS2_PWM_MIN));
             
             int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
@@ -180,6 +207,20 @@ static void cmd_vel_callback(const void *msgin) {
 
         int32_t targetL = mapPwm(normLeft);
         int32_t targetR = mapPwm(normRight);
+
+        // Áp dụng Stiction Kickstart Pulse (120ms) hoặc Gyro Boost cho in-place rotation
+        if (isRosPureRot) {
+            if (nowMs - s_rosRotStartMs < 120) {
+                constexpr int32_t KICKSTART_MIN_ROS = 720;
+                if (abs(targetL) < KICKSTART_MIN_ROS) targetL = (targetL >= 0) ? KICKSTART_MIN_ROS : -KICKSTART_MIN_ROS;
+                if (abs(targetR) < KICKSTART_MIN_ROS) targetR = (targetR >= 0) ? KICKSTART_MIN_ROS : -KICKSTART_MIN_ROS;
+            } else if (s_rosGyroBoost > 0) {
+                if (targetL > 0) targetL = min((int32_t)ROS2_PWM_MAX, targetL + s_rosGyroBoost);
+                else if (targetL < 0) targetL = max(-(int32_t)ROS2_PWM_MAX, targetL - s_rosGyroBoost);
+                if (targetR > 0) targetR = min((int32_t)ROS2_PWM_MAX, targetR + s_rosGyroBoost);
+                else if (targetR < 0) targetR = max(-(int32_t)ROS2_PWM_MAX, targetR - s_rosGyroBoost);
+            }
+        }
 
         // *** APPLY SMOOTHING FILTER ***
         // EMA low-pass: smooth_pwm = α * target + (1-α) * smooth_pwm

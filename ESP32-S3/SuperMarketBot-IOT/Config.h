@@ -434,6 +434,7 @@
    volatile uint16_t waypointBaseSpeed; // 0..PWM_MAX — tốc độ riêng cho Waypoint Nav (slider web)
    volatile uint16_t swerveBaseSpeed; // 0..PWM_MAX — tốc độ riêng khi dạt tránh/lùi/xoay (slider web)
    volatile uint16_t rotateBaseSpeed; // 0..PWM_MAX — tốc độ xoay hướng (slider web)
+   volatile float currentGyroZ;       // Vận tốc góc thực tế (rad/s) trục Z từ IMU MPU6050
    volatile float imuYawScale;        // Hệ số nhân bù góc IMU (mặc định 1.0f)
    volatile RobotMode mode;
    volatile bool estop;        // Cờ dừng khẩn cấp

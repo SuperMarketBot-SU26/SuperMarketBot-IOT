@@ -515,14 +515,14 @@ details pre{
           <div class="spd-block spd-block--manual">
             <div class="spd-block__head">
               <div>
-                <div class="spd-block__label">Trượt ngang · Strafe</div>
-                <div class="spd-block__hint">Mecanum: trái/phải không cần xoay</div>
+                <div class="spd-block__label">Tốc độ · Xoay hướng</div>
+                <div class="spd-block__hint">Lực xoay tại chỗ (Lái tay / Tự hành) (20–100%)</div>
               </div>
-              <span class="spd-block__badge" id="strVal">50%</span>
+              <span class="spd-block__badge" id="spdRotVal">70%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="strSlider" min="0" max="100" value="50"
-              oninput="sendStrafe(this.value)" aria-label="Trượt ngang Mecanum"/>
-            <div class="spd-block__ticks"><span>Trái</span><span>50%</span><span>Phải</span></div>
+            <input type="range" class="spd-range spd-range--manual" id="spdRotSlider" min="20" max="100" value="70"
+              oninput="sendRotateSpeed(this.value)" aria-label="Tốc độ xoay hướng phần trăm"/>
+            <div class="spd-block__ticks"><span>20%</span><span>60%</span><span>100%</span></div>
           </div>
           <div class="spd-block spd-block--auto">
             <div class="spd-block__head">
@@ -1214,6 +1214,16 @@ function applyTelemetry(d){
           document.getElementById('spdSwerveVal').textContent=String(d.spdSwervePct)+'%';
         }
       }
+      if(d.spdRotatePct!=null){
+        const sr=document.getElementById('spdRotSlider');
+        const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
+        if(sr && document.activeElement!==sr && !touched){
+          const rv=Math.max(20,Math.min(100,d.spdRotatePct));
+          sr.value=rv;
+          paintSpdTrack(sr,rv);
+          document.getElementById('spdRotVal').textContent=String(rv)+'%';
+        }
+      }
 
       if(!window._rawJTick) window._rawJTick=0;
       if((++window._rawJTick%8)===0){
@@ -1223,7 +1233,7 @@ function applyTelemetry(d){
 }
 const zone=document.getElementById('jsZone');
 const knob=document.getElementById('jsKnob');
-let drag=false, gStrafe=0, lastJx=0, lastJy=0, jInt=null, lastSend=0;
+let drag=false, lastJx=0, lastJy=0, jInt=null, lastSend=0;
 function jUp(cx,cy){
   const r=zone.getBoundingClientRect();
   const R=Math.max(24, Math.min(r.width,r.height)/2 - 10);
@@ -1234,12 +1244,12 @@ function jUp(cx,cy){
   knob.style.left=(r.width/2+ox)+'px';
   knob.style.top=(r.height/2+oy)+'px';
   const now=Date.now();
-  if(now-lastSend>=50){ lastSend=now; wsS({t:'joy',x:lastJx,y:lastJy,s:gStrafe}); }
+  if(now-lastSend>=50){ lastSend=now; wsS({t:'joy',x:lastJx,y:lastJy,s:0}); }
 }
 function jStart(x,y){
   drag=true;
   if(jInt) clearInterval(jInt);
-  jInt=setInterval(()=>{ if(drag) wsS({t:'joy',x:lastJx,y:lastJy,s:gStrafe}); }, 100);
+  jInt=setInterval(()=>{ if(drag) wsS({t:'joy',x:lastJx,y:lastJy,s:0}); }, 100);
   jUp(x,y);
 }
 function jRel(){
@@ -1248,14 +1258,16 @@ function jRel(){
   if(jInt){ clearInterval(jInt); jInt=null; }
   lastJx=0; lastJy=0;
   knob.style.left='50%'; knob.style.top='50%';
-  wsS({t:'joy',x:0,y:0,s:gStrafe});
-  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:gStrafe}), 60);
-  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:gStrafe}), 120);
+  wsS({t:'joy',x:0,y:0,s:0});
+  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:0}), 60);
+  setTimeout(()=>wsS({t:'joy',x:0,y:0,s:0}), 120);
 }
-function sendStrafe(v){
-  gStrafe=Math.round((parseInt(v,10)-50)/50*100);
-  document.getElementById('strVal').textContent=v+'%';
-  wsS({t:'joy',x:0,y:0,s:gStrafe});
+function sendRotateSpeed(v){
+  window._lastSliderTouch = Date.now();
+  const el=document.getElementById('spdRotSlider');
+  paintSpdTrack(el,v);
+  document.getElementById('spdRotVal').textContent=v+'%';
+  wsS({t:'spdRotate',v:parseInt(v,10)});
 }
 function wsS(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 function sendSpeed(v){
@@ -1369,21 +1381,41 @@ function initSecNav(){
   });
 }
 zone.addEventListener('mousedown',e=>{jStart(e.clientX,e.clientY);});
-zone.addEventListener('mousemove',e=>{if(drag) jUp(e.clientX,e.clientY);});
+window.addEventListener('mousemove',e=>{if(drag) jUp(e.clientX,e.clientY);});
 window.addEventListener('mouseup',jRel);
-zone.addEventListener('mouseleave',jRel);
 zone.addEventListener('touchstart',e=>{e.preventDefault(); jStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-zone.addEventListener('touchmove',e=>{e.preventDefault(); if(drag) jUp(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+window.addEventListener('touchmove',e=>{if(drag){e.preventDefault(); jUp(e.touches[0].clientX,e.touches[0].clientY);}},{passive:false});
 window.addEventListener('touchend',jRel);
 window.addEventListener('touchcancel',jRel);
+
+window.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  let kx=0, ky=0;
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') ky=100;
+  if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') ky=-100;
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') kx=-100;
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') kx=100;
+  if(kx!==0||ky!==0){
+    e.preventDefault();
+    wsS({t:'joy',x:kx,y:ky,s:0});
+  }
+});
+window.addEventListener('keyup',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  const k=e.key;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','W','a','A','s','S','d','D'].includes(k)){
+    wsS({t:'joy',x:0,y:0,s:0});
+  }
+});
 initSecNav();
 buildLayoutGrid();
 buildMotorGrid();
 buildBump();
-(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider');
+(function(){const a=document.getElementById('spdSlider'),b=document.getElementById('spdAutoSlider'),c=document.getElementById('spdSwerveSlider'),r=document.getElementById('spdRotSlider');
   if(a){paintSpdTrack(a,a.value);document.getElementById('spdVal').textContent=a.value+'%';}
   if(b){paintSpdTrack(b,b.value);document.getElementById('spdAutoVal').textContent=b.value+'%';}
-  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}})();
+  if(c){paintSpdTrack(c,c.value);document.getElementById('spdSwerveVal').textContent=c.value+'%';}
+  if(r){paintSpdTrack(r,r.value);document.getElementById('spdRotVal').textContent=r.value+'%';}})();
 connectWS();
 </script>
 </body>

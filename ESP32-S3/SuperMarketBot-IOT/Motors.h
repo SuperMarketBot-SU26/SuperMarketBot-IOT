@@ -203,24 +203,26 @@ inline void botBackward(uint16_t pwm) {
 inline void botRotateCWImmediate(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
-  static uint32_t lastDbg = 0;
-  if (millis() - lastDbg > 1000) {
-    lastDbg = millis();
-    Serial.printf("[Rotate] CW immediate pwm=%u\n", pwm);
-  }
-  const int32_t sp[4] = {(int32_t)pwm, (int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm};
+  static uint32_t s_cwStartMs = 0;
+  static bool s_cwActive = false;
+  uint32_t now = millis();
+  if (!s_cwActive) { s_cwStartMs = now; s_cwActive = true; }
+  uint16_t effPwm = pwm;
+  if (now - s_cwStartMs < 120 && effPwm < 720) effPwm = 720;
+  const int32_t sp[4] = {(int32_t)effPwm, (int32_t)effPwm, -(int32_t)effPwm, -(int32_t)effPwm};
   motorApplyLayoutImmediate(sp);
 }
 
 inline void botRotateCCWImmediate(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
-  static uint32_t lastDbg = 0;
-  if (millis() - lastDbg > 1000) {
-    lastDbg = millis();
-    Serial.printf("[Rotate] CCW immediate pwm=%u\n", pwm);
-  }
-  const int32_t sp[4] = {-(int32_t)pwm, -(int32_t)pwm, (int32_t)pwm, (int32_t)pwm};
+  static uint32_t s_ccwStartMs = 0;
+  static bool s_ccwActive = false;
+  uint32_t now = millis();
+  if (!s_ccwActive) { s_ccwStartMs = now; s_ccwActive = true; }
+  uint16_t effPwm = pwm;
+  if (now - s_ccwStartMs < 120 && effPwm < 720) effPwm = 720;
+  const int32_t sp[4] = {-(int32_t)effPwm, -(int32_t)effPwm, (int32_t)effPwm, (int32_t)effPwm};
   motorApplyLayoutImmediate(sp);
 }
 
@@ -237,7 +239,7 @@ inline void botRotateCCW(uint16_t pwm) { botRotateCCWImmediate(pwm); }
  * @param base 0..PWM_MAX  tốc độ nền tối đa
  *
  * Công thức (differential, không strafe):
- *   left  = (y + x) * base / 100     (sau curve phi tuyến)
+ *   left  = (y + x) * base / 100     (sau curve phi tuyến + kickstart/gyro boost)
  *   right = (y - x) * base / 100
  *   fl = rl = left
  *   fr = rr = right
@@ -250,15 +252,72 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   int32_t xCurve = ((int32_t)x * (int32_t)x * xSign) / 100;
   int32_t yCurve = ((int32_t)y * (int32_t)y * ySign) / 100;
 
+  // Lực xoay tại chỗ (y == 0, x != 0): Trên khung 4WD bánh cao su, ma sát trượt ngang rất lớn.
+  // Blend thêm thành phần tuyến tính để tránh sụt PWM vào deadzone khi xoay nhẹ.
+  const bool isPureRot = (y == 0 && abs(x) > 10);
+  if (isPureRot) {
+    int32_t xAbs = abs(x);
+    xCurve = ((xAbs * xAbs / 100 + xAbs) / 2) * xSign;
+  }
+
   int32_t leftS  = ((yCurve + xCurve) * (int32_t)base) / 100;
   int32_t rightS = ((yCurve - xCurve) * (int32_t)base) / 100;
+
+  // Thuật toán: Xung bứt phá ma sát tĩnh (Kickstart) + Closed-loop Gyro Assist
+  static uint32_t s_manRotStartMs = 0;
+  static bool s_manWasRotating = false;
+  static int32_t s_manGyroBoost = 0;
+  static uint32_t s_lastManBoostMs = 0;
+  const uint32_t nowMs = millis();
+
+  if (isPureRot) {
+    if (!s_manWasRotating) {
+      s_manRotStartMs = nowMs;
+      s_manWasRotating = true;
+      s_manGyroBoost = 0;
+      s_lastManBoostMs = nowMs;
+    }
+
+    // Sau 140ms, nếu IMU báo vận tốc góc thực tế vẫn quá nhỏ (< 0.06 rad/s), xe đang bị kẹt sàn:
+    if (nowMs - s_manRotStartMs > 140 && (nowMs - s_lastManBoostMs >= 40)) {
+      s_lastManBoostMs = nowMs;
+      float actualOmega = fabsf(g_state.currentGyroZ);
+      if (actualOmega < 0.06f) {
+        if (s_manGyroBoost < 250) s_manGyroBoost += 25;
+      } else if (actualOmega >= 0.15f) {
+        if (s_manGyroBoost > 0) s_manGyroBoost -= 10;
+      }
+    }
+
+    // Áp dụng Kickstart 120ms đầu hoặc Gyro Boost
+    if (nowMs - s_manRotStartMs < 120) {
+      constexpr int32_t KICKSTART_MIN_PWM = 700;
+      if (abs(leftS) < KICKSTART_MIN_PWM) {
+        leftS = (leftS >= 0) ? KICKSTART_MIN_PWM : -KICKSTART_MIN_PWM;
+      }
+      if (abs(rightS) < KICKSTART_MIN_PWM) {
+        rightS = (rightS >= 0) ? KICKSTART_MIN_PWM : -KICKSTART_MIN_PWM;
+      }
+    } else if (s_manGyroBoost > 0) {
+      if (leftS > 0) leftS += s_manGyroBoost; else if (leftS < 0) leftS -= s_manGyroBoost;
+      if (rightS > 0) rightS += s_manGyroBoost; else if (rightS < 0) rightS -= s_manGyroBoost;
+    }
+  } else {
+    s_manWasRotating = false;
+    s_manRotStartMs = 0;
+    s_manGyroBoost = 0;
+  }
+
+  leftS = constrain(leftS, -(int32_t)PWM_MAX, (int32_t)PWM_MAX);
+  rightS = constrain(rightS, -(int32_t)PWM_MAX, (int32_t)PWM_MAX);
 
   int32_t fl = leftS, rl = leftS;
   int32_t fr = rightS, rr = rightS;
 
+  int32_t magLimit = isPureRot ? (int32_t)PWM_MAX : (int32_t)base;
   int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
-  if (mag > (int32_t)base && mag > 0) {
-    int32_t scale = (int32_t)base * 100 / mag;
+  if (mag > magLimit && mag > 0) {
+    int32_t scale = magLimit * 100 / mag;
     fl  = fl  * scale / 100;
     rl  = rl  * scale / 100;
     fr  = fr  * scale / 100;

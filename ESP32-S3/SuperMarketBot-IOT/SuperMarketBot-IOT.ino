@@ -170,6 +170,7 @@ RobotState g_state = {
   .waypointBaseSpeed = 0,
   .swerveBaseSpeed = 0,
   .rotateBaseSpeed = 0,
+  .currentGyroZ = 0.f,
   .imuYawScale = 1.0f,
   .mode = MODE_MANUAL,
   .estop = false,
@@ -472,6 +473,7 @@ static void taskControl(void *pvParams) {
       if (!gyroOk) {
         gyroZRaw = 0.f;  // mất IMU → gyro=0, chỉ encoder dẫn heading
       }
+      g_state.currentGyroZ = gyroZRaw; // Chia sẻ vận tốc góc thực tế cho MicroRos & Motors
 
       // 4) updateWheel: imuFusion::step() dùng g_dThetaEncRate (encoder thật)
       //    được compute mỗi ODOM_PERIOD_MS (100ms) bởi odomUpdate().
