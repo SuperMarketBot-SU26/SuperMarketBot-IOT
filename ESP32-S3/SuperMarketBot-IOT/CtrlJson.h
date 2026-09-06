@@ -64,12 +64,14 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     }
     if (g_stateMutex != NULL) xSemaphoreGive(g_stateMutex);
 
-    // In log debug mỗi 500ms khi lái
+    // Tắt in log debug định kỳ khi lái để tránh xung đột chân UART0 TX (GPIO 43) với encoder
+    /*
     static uint32_t lastJoyLog = 0;
     if (millis() - lastJoyLog > 500u) {
       lastJoyLog = millis();
       Serial.printf("[WS-Joy] X:%d, Y:%d, Strafe:%d\n", g_state.cmdX, g_state.cmdY, g_state.cmdStrafe);
     }
+    */
   } else if (strcmp(t, "spd") == 0) {
     uint16_t pct = doc["v"].as<uint16_t>();
     if (pct > 100) pct = 100;

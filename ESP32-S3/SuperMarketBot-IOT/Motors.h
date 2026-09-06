@@ -277,6 +277,8 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
     locSetDriveCmd(0, 0);
   }
 
+  // Tắt in log debug định kỳ khi lái để tránh xung đột chân UART0 TX (GPIO 43) với encoder
+  /*
   static uint32_t lastDbgDrv = 0;
   if (millis() - lastDbgDrv > 500u) {
     lastDbgDrv = millis();
@@ -288,6 +290,7 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
                   g_motorScale[0], g_motorScale[1], g_motorScale[2], g_motorScale[3],
                   (int)g_motInv[0], (int)g_motInv[1], (int)g_motInv[2], (int)g_motInv[3]);
   }
+  */
 
   const int32_t sp[4] = {fl, rl, fr, rr};
   motorApplyLayout(sp);

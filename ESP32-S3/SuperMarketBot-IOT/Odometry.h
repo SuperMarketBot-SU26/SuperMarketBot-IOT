@@ -64,15 +64,17 @@ static volatile int32_t s_encTicksR = 0;   // Encoder bên phải
 // g_encPhyLastPulseMs[] đã được extern trong Config.h:555 — không khai báo lại ở đây.
 static portMUX_TYPE s_encMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Glitch filter: tại max speed 0.4 m/s (1.96 rev/s * 960 PPR = ~1880 Hz), chu kỳ xung thật là ~530us.
-// Bất kỳ xung nào có khoảng cách < 2000us (> 500 Hz) chắc chắn là nhiễu điện từ / PWM crosstalk từ GPIO 40/41/42 kế bên.
+// Glitch filter: Tại tốc độ tối đa của motor TT (~150-200 RPM = ~2.5-3.3 vòng/s),
+// với đĩa 20 khe, tần số xung tối đa là ~50-66 Hz (chu kỳ xung thật ~15-20 ms = 15000-20000 us).
+// Bất kỳ xung nào có khoảng cách < 5000 us (> 200 Hz, tương đương > 600 RPM)
+// chắc chắn là nhiễu điện từ / PWM crosstalk / xung UART từ GPIO 43.
 static volatile uint32_t s_lastEncL_us = 0;
 static volatile uint32_t s_lastEncR_us = 0;
 
 // ISR — gọi trong ngắt ngoài, cần IRAM_ATTR + portENTER_CRITICAL_ISR.
 static inline void IRAM_ATTR isr_enc_left() {
   uint32_t nowUs = (uint32_t)micros();
-  if ((uint32_t)(nowUs - s_lastEncL_us) < 2000u) return; // Bỏ qua xung nhiễu UART0 TX / PWM < 2ms
+  if ((uint32_t)(nowUs - s_lastEncL_us) < 5000u) return; // Lọc nhiễu UART0 TX / PWM < 5ms (>200Hz)
   s_lastEncL_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksL++;
@@ -82,7 +84,7 @@ static inline void IRAM_ATTR isr_enc_left() {
 
 static inline void IRAM_ATTR isr_enc_right() {
   uint32_t nowUs = (uint32_t)micros();
-  if ((uint32_t)(nowUs - s_lastEncR_us) < 2000u) return; // Bỏ qua xung nhiễu UART0 RX / PWM < 2ms
+  if ((uint32_t)(nowUs - s_lastEncR_us) < 5000u) return; // Lọc nhiễu UART0 RX / PWM < 5ms (>200Hz)
   s_lastEncR_us = nowUs;
   portENTER_CRITICAL_ISR(&s_encMux);
   s_encTicksR++;
@@ -158,35 +160,23 @@ inline void odomUpdate() {
   s_lastTicksL = ticksL_now;
   s_lastTicksR = ticksR_now;
 
-  // Sanity clamp: đĩa 20 xung, bánh 65mm. Max speed động cơ TT là ~150-200 RPM (~3 vòng/s).
-  // Trong 100ms, tối đa bánh quay ~0.3 vòng = 6 xung.
-  // Clamp cứng [0, 8] xung mỗi 100ms để triệt tiêu hoàn toàn hiện tượng teleport / runaway speed!
-  int32_t dTicksL = constrain(raw_dTicksL, 0, 8);
-  int32_t dTicksR = constrain(raw_dTicksR, 0, 8);
+  // Sanity clamp cho chu kỳ ODOM_PERIOD_MS = 20ms:
+  // Tại max speed động cơ TT (~150-200 RPM = ~3 vòng/s), trong 20ms chỉ có ~1 xung.
+  // Clamp cứng [0, 2] xung mỗi 20ms (tương đương max ~300 RPM = ~1.0 m/s).
+  // Tuyệt đối không để 8 xung (vốn là clamp của chu kỳ cũ 100ms, tại 20ms sẽ thành 1200 RPM = 4.08 m/s)!
+  int32_t dTicksL = constrain(raw_dTicksL, 0, 2);
+  int32_t dTicksR = constrain(raw_dTicksR, 0, 2);
 
-  // dt = 100ms (mặc định). Nếu taskControl bị delay (rare), clamp.
+  // dt = 20ms (ODOM_PERIOD_MS).
   const float dt = (float)ODOM_PERIOD_MS / 1000.0f;
 
   // ---- 2) Quãng đường mỗi bên (m) ----
-  // v2.4 (2026-07-28): FIX direction-blind encoder.
-  //
   // Hardware chỉ có 1 kênh encoder mỗi bánh (không có quadrature) → chỉ đếm
   // xung, không phân biệt chiều. Encoder ISR chỉ ++, không bao giờ --.
   //
-  // Bug: khi xoay tại chỗ (botRotateCW: trái +pwm, phải -pwm), cả 2 bánh
-  // đều quay → cả 2 encoder đều ++. Công thức cũ:
-  //     ds = (dsL + dsR) / 2  (cộng magnitude)
-  // → nghĩ robot đang TIẾN với vận tốc 2×1 bánh, gây teleport pose 5-15 m
-  // khi chỉ xoay 6s lệnh 0.4 rad/s (user-observed 2026-07-28).
-  //
-  // v2.5 (2026-09-04): FIX ghost encoder pulses when motor power is OFF.
-  //
-  // GPIO 43/44 (encoder) picks up EMI from WiFi, I2C (MPU6050), and PWM
-  // switching even when motors are mechanically stopped (12V power off).
-  // If g_motorDir != 0 (direction set from last cmd) but PWM is below the
-  // dead-zone threshold, any ticks counted are electrical noise. We gate them
-  // out using the actual PWM value stored in g_state.lastMotorSpeed.
-  //
+  // Hướng quay lấy từ lệnh điều khiển g_motorDir (1 = tiến, -1 = lùi).
+  // Gate: Nếu PWM nằm trong deadzone (motor không thể quay vật lý),
+  // xung đếm được là nhiễu điện và bị loại bỏ.
   constexpr int32_t ENC_PWM_DEADZONE = 50; // ticks gated out below this PWM (motor can't spin)
   extern uint8_t g_mapMotSlot[4];
   extern uint8_t g_motInv[4];
@@ -201,15 +191,9 @@ inline void odomUpdate() {
   const bool motorLActive = abs(g_state.lastMotorSpeed[pL]) > ENC_PWM_DEADZONE;
   const bool motorRActive = abs(g_state.lastMotorSpeed[pR]) > ENC_PWM_DEADZONE;
 
-  // Cân bằng khi chạy thẳng: Nếu lệnh phát ra chạy thẳng đều (forward hoặc backward),
-  // ép dTicksL và dTicksR không bị lệch do nhiễu chân UART TX0/RX0 (GPIO 43/44)
-  if (motorLActive && motorRActive && (dirL == dirR) && abs(g_state.lastMotorSpeed[pL] - g_state.lastMotorSpeed[pR]) < 60) {
-    if (abs(dTicksL - dTicksR) > 1) {
-      int32_t avgTicks = (dTicksL + dTicksR) / 2;
-      dTicksL = avgTicks;
-      dTicksR = avgTicks;
-    }
-  }
+  // CHỈ DÙNG DỮ LIỆU XUNG THẬT TỪ CẢM BIẾN:
+  // Không gán ép avgTicks giả lập giữa 2 bánh. Bánh nào có xung thật thì tính,
+  // bánh nào không có xung thì giữ nguyên 0 để phản ánh chính xác trạng thái thực tế.
 
   const float mPerTick = (WHEEL_CIRC_M / ENC_PPR) * ODOM_CALIB_FACTOR;
   const float dsL = (dirL == 0.f || !motorLActive) ? 0.f : dirL * ((float)dTicksL * mPerTick);
@@ -260,58 +244,21 @@ inline void odomUpdate() {
   locUpdate(dsL, dsR, dt);
   (void)s_lastUpdateMs;
 #else
-  // Fallback: PWM simulation
-  constexpr float MAX_TICKS_PER_TICK = (200.0f * (float)ODOM_PERIOD_MS / 60000.0f) * 20.0f;
-  static float s_accTicks[4] = {0, 0, 0, 0};
-
-  int32_t pwm[4] = {
-    abs(g_state.lastMotorSpeed[0]),
-    abs(g_state.lastMotorSpeed[1]),
-    abs(g_state.lastMotorSpeed[2]),
-    abs(g_state.lastMotorSpeed[3])
-  };
-
-  float rpmPhy[4] = {0, 0, 0, 0};
-  for (int i = 0; i < 4; i++) {
-    s_accTicks[i] += ((float)pwm[i] / (float)PWM_MAX) * MAX_TICKS_PER_TICK;
-    uint32_t intTicks = (uint32_t)s_accTicks[i];
-    s_accTicks[i] -= (float)intTicks;
-    rpmPhy[i] = ((float)intTicks / (float)ODOM_PERIOD_MS) * (60000.0f / 20.0f);
-  }
-
-  constexpr float MAX_DIST_PER_TICK = (WHEEL_CIRC_M * 200.0f * (float)ODOM_PERIOD_MS) / 60000.0f;
-  float distPhy[4];
-  for (int i = 0; i < 4; i++) {
-    distPhy[i] = ((float)pwm[i] / (float)PWM_MAX) * MAX_DIST_PER_TICK;
-  }
-
-  g_distFL += distPhy[g_mapEncSlot[SLOT_LF]];
-  g_distRL += distPhy[g_mapEncSlot[SLOT_LR]];
-  g_distFR += distPhy[g_mapEncSlot[SLOT_RF]];
-  g_distRR += distPhy[g_mapEncSlot[SLOT_RR]];
-
-  g_state.rpmFL  = rpmPhy[g_mapEncSlot[SLOT_LF]];
-  g_state.rpmRL  = rpmPhy[g_mapEncSlot[SLOT_LR]];
-  g_state.rpmFR  = rpmPhy[g_mapEncSlot[SLOT_RF]];
-  g_state.rpmRR  = rpmPhy[g_mapEncSlot[SLOT_RR]];
-  g_state.distFL = g_distFL;
-  g_state.distRL = g_distRL;
-  g_state.distFR = g_distFR;
-  g_state.distRR = g_distRR;
+  // KHÔNG DÙNG PHẦN CỨNG ENCODER (USE_ENCODER_HARDWARE == 0):
+  // TUYỆT ĐỐI KHÔNG giả lập xung hay vận tốc từ PWM!
+  // Khi không có cảm biến encoder thật phản hồi, RPM và quãng đường luôn giữ nguyên 0
+  // để tránh tình trạng xe đứng yên mà trong RViz tự động chạy.
+  g_distFL = g_distRL = g_distFR = g_distRR = 0.f;
+  g_state.rpmFL  = 0.f;
+  g_state.rpmRL  = 0.f;
+  g_state.rpmFR  = 0.f;
+  g_state.rpmRR  = 0.f;
+  g_state.distFL = 0.f;
+  g_state.distRL = 0.f;
+  g_state.distFR = 0.f;
+  g_state.distRR = 0.f;
   g_dThetaEncRate = 0.f;
-
-  extern uint8_t g_mapMotSlot[4];
-  extern uint8_t g_motInv[4];
-  uint8_t pL = g_mapMotSlot[0] > 3 ? 0 : g_mapMotSlot[0];
-  uint8_t pR = g_mapMotSlot[2] > 3 ? 2 : g_mapMotSlot[2];
-  float rawDirL = (float)g_motorDir[pL];
-  float rawDirR = (float)g_motorDir[pR];
-  float dirL = g_motInv[0] ? -rawDirL : rawDirL;
-  float dirR = g_motInv[2] ? -rawDirR : rawDirR;
-
-  float dsL_pwm = dirL * distPhy[g_mapEncSlot[SLOT_LF]];
-  float dsR_pwm = dirR * distPhy[g_mapEncSlot[SLOT_RF]];
-  locUpdate(dsL_pwm, dsR_pwm, 0);
+  locUpdate(0.f, 0.f, (float)ODOM_PERIOD_MS / 1000.0f);
 #endif
 }
 

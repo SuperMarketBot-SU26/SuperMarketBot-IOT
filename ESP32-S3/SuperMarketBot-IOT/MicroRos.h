@@ -334,12 +334,12 @@ static void fill_imu_msg() {
         // Stationary zero-clamp: when robot is physically stationary, angular velocity is exactly 0.0
         const bool hasDriveCmd = (g_state.cmd_velMoving || g_state.cmdY != 0 || g_state.cmdX != 0 || g_state.cmdStrafe != 0);
         const bool encoderStill = (fabsf(g_dThetaEncRate) <= 0.05f);
-        const bool gyroStill    = (fabsf(gyroZ) <= 0.05f); // ~2.8 deg/s
+        const bool gyroStill    = (fabsf(gyroZ) <= 0.02f); // ~1.1 deg/s
         const bool robotMoving  = hasDriveCmd || !encoderStill || !gyroStill;
 
         if (!robotMoving) {
             gyroZ = 0.0f; // Absolute zero when stationary — eliminates standstill spin!
-        } else if (fabsf(gyroZ) < 0.015f) {
+        } else if (fabsf(gyroZ) < 0.008f) {
             gyroZ = 0.0f;
         }
     }

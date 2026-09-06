@@ -578,8 +578,6 @@ static void taskControl(void *pvParams) {
               s_tgtH = g_pose.headingRad;
               pidYawReset();
               s_have = true;
-              Serial.printf("[HLK] activated — tgtH=%.3f (IMU enabled=%d)\n",
-                  (double)s_tgtH, g_imuEnabled);
             }
             /* Nếu drift quá 25° → re-lock */
             float dh = wpNormalizeAngle(g_pose.headingRad - s_tgtH);
@@ -588,17 +586,6 @@ static void taskControl(void *pvParams) {
               pidYawReset();
             }
             float steer = constrain(pidYawCompute(s_tgtH, g_pose.headingRad, dt_s), -85.f, 85.f);
-            // DEBUG: log every 2s when heading lock is active
-            {
-              static uint32_t s_lastDebug = 0;
-              uint32_t now = millis();
-              if (now - s_lastDebug > 2000) {
-                float err = wpNormalizeAngle(s_tgtH - g_pose.headingRad);
-                Serial.printf("[HLK] tgt=%.3f cur=%.3f err=%.3f steer=%.1f s_have=%d\n",
-                    (double)s_tgtH, (double)g_pose.headingRad, (double)err, (double)steer, s_have);
-                s_lastDebug = now;
-              }
-            }
             botDrive((int16_t)steer, g_state.cmdY, g_state.baseSpeed);
           } else {
             // Heading lock only active for pure fwd/back. Any turn or stop → reset.

@@ -232,27 +232,10 @@ inline void locUpdate(float dsL, float dsR, float dt) {
 #endif
 }
 
-/**
- * Backward-compat overload (giữ cho code cũ gọi locUpdate() không tham số).
- * Nếu không có encoder, fallback về LOC_PWM_TO_MPS (PWM dead-reckoning).
- */
 inline void locUpdate() {
-  if (!s_locEnabled) return;
-  // Fallback: dùng PWM% cuối (project này chỉ chạy khi USE_ENCODER_HARDWARE=0).
-  static uint32_t s_lastTMs = 0;
-  uint32_t nowMs = millis();
-  uint32_t dtMs;
-  if (s_lastTMs == 0) { s_lastTMs = nowMs; return; }
-  dtMs = nowMs - s_lastTMs;
-  s_lastTMs = nowMs;
-  if (dtMs == 0 || dtMs > 2000) return;
-  const float dt = (float)dtMs * 0.001f;
-
-  const float vL = (float)s_locDriveCmd.leftPct  * LOC_PWM_TO_MPS;
-  const float vR = (float)s_locDriveCmd.rightPct * LOC_PWM_TO_MPS;
-  const float dLeft  = vL * dt;
-  const float dRight = vR * dt;
-  locUpdate(dLeft, dRight, dt);
+  // CRITICAL: Tuyệt đối KHÔNG giả lập vị trí từ PWM dead-reckoning.
+  // Pose chỉ được tích phân duy nhất qua locUpdate(dsL, dsR, dt) từ xung encoder thật.
+  return;
 }
 
 #endif // LOCALIZATION_H
