@@ -170,6 +170,7 @@ static void cmd_vel_callback(const void *msgin) {
         bool isRosPureRot = (fabsf(normRot) > 0.05f && fabsf(normFwd) < 0.12f);
 
         if (isRosPureRot) {
+            ::g_isRotating = true;  // Kích hoạt ramp chậm (120) trong motorDrive
             if (!s_rosWasRotating) {
                 s_rosRotStartMs = nowMs;
                 s_rosWasRotating = true;
@@ -177,47 +178,53 @@ static void cmd_vel_callback(const void *msgin) {
                 s_lastRosBoostMs = nowMs;
             }
 
-            // Closed-loop gyro assist: nếu sau 140ms mà |gyroZ| < 0.06 rad/s (robot bị kẹt sàn nhám/bám)
-            if (nowMs - s_rosRotStartMs > 140 && (nowMs - s_lastRosBoostMs >= 40)) {
+            // Closed-loop gyro assist (sau 160ms): step nhỏ +8/80ms, max 100
+            if (nowMs - s_rosRotStartMs > 160 && (nowMs - s_lastRosBoostMs >= 80)) {
                 s_lastRosBoostMs = nowMs;
                 float actualOmega = fabsf(g_state.currentGyroZ);
                 if (actualOmega < 0.06f) {
-                    if (s_rosGyroBoost < 250) s_rosGyroBoost += 25;
+                    if (s_rosGyroBoost < 100) s_rosGyroBoost += 8;
                 } else if (actualOmega >= 0.15f) {
-                    if (s_rosGyroBoost > 0) s_rosGyroBoost -= 10;
+                    if (s_rosGyroBoost > 0) s_rosGyroBoost -= 8;
                 }
             }
         } else {
+            ::g_isRotating = false;
             s_rosWasRotating = false;
             s_rosRotStartMs = 0;
             s_rosGyroBoost = 0;
         }
 
         // Map normalized value to PWM with separate straight/rotation thresholds
+        // Khi xoay: dùng rotateBaseSpeed làm ceiling (không phải baseSpeed)
+        int32_t rotPwmMax = (g_state.rotateBaseSpeed > 0)
+                            ? (int32_t)g_state.rotateBaseSpeed : ROS2_PWM_MAX;
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
             
             float rotFactor = constrain(fabsf(normRot) * 3.0f, 0.0f, 1.0f);
             int32_t activeMinPwm = ROS2_PWM_MIN + (int32_t)(rotFactor * (ROS2_PWM_ROT - ROS2_PWM_MIN));
+            int32_t activeCeilPwm = isRosPureRot ? rotPwmMax : ROS2_PWM_MAX;
             
-            int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
-            if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
+            int32_t p = (int32_t)(fabsf(norm) * (activeCeilPwm - activeMinPwm) + activeMinPwm);
+            if (p > activeCeilPwm) p = activeCeilPwm;
             return (norm >= 0) ? p : -p;
         };
 
         int32_t targetL = mapPwm(normLeft);
         int32_t targetR = mapPwm(normRight);
 
-        // Áp dụng Stiction Kickstart Pulse mềm mại (120ms) hoặc Gyro Boost cho in-place rotation
+        // Kickstart: min 650 để RL/RR (scale=0.2) vượt deadband (130/0.2=650).
+        // FL/FR (scale=3.0) sẽ bão hoà 1023 nhưng vẫn chạy tốt.
         if (isRosPureRot) {
-            if (nowMs - s_rosRotStartMs < 120) {
-                // Kickstart tỉ lệ với target (tối đa 1.25x hoặc min 400), tránh giật bốc đầu
-                int32_t softKickL = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetL) * 125 / 100);
-                if (softKickL < 400) softKickL = 400;
+            if (nowMs - s_rosRotStartMs < 150) {
+                constexpr int32_t KICK_MIN_4WHEEL = 650;
+                int32_t softKickL = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetL) * 120 / 100);
+                if (softKickL < KICK_MIN_4WHEEL) softKickL = KICK_MIN_4WHEEL;
                 targetL = (targetL >= 0) ? softKickL : -softKickL;
 
-                int32_t softKickR = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetR) * 125 / 100);
-                if (softKickR < 400) softKickR = 400;
+                int32_t softKickR = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetR) * 120 / 100);
+                if (softKickR < KICK_MIN_4WHEEL) softKickR = KICK_MIN_4WHEEL;
                 targetR = (targetR >= 0) ? softKickR : -softKickR;
             } else if (s_rosGyroBoost > 0) {
                 if (targetL > 0) targetL = min((int32_t)ROS2_PWM_MAX, targetL + s_rosGyroBoost);
