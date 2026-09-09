@@ -214,10 +214,20 @@ static void cmd_vel_callback(const void *msgin) {
         int32_t targetL = mapPwm(normLeft);
         int32_t targetR = mapPwm(normRight);
 
-        // Kickstart: min 650 để RL/RR (scale=0.2) vượt deadband (130/0.2=650).
-        // FL/FR (scale=3.0) sẽ bão hoà 1023 nhưng vẫn chạy tốt.
+        // Anti-Stiction Burst: dùng botApplyStictionBurst() bypass scale cho 100ms đầu.
+        // Sau burst, chuyển về EMA smoothed normal operation.
+        if (isRosPureRot && (nowMs - s_rosRotStartMs < STICTION_BURST_MS)) {
+            // Phase 0: Bypass scale — full PWM tất cả 4 motor để phá ma sát tĩnh
+            // normRot > 0 = CCW (ROS2 convention), normRot < 0 = CW
+            bool burstCw = (normRot < 0);
+            ::botApplyStictionBurst(burstCw);
+            locSetDriveCmd(0, 0);
+            return;  // Skip EMA — không smooth trong burst phase
+        }
+
+        // Phase 1+2: Normal kickstart (KICK_MIN 650) hoặc Gyro Boost
         if (isRosPureRot) {
-            if (nowMs - s_rosRotStartMs < 150) {
+            if (nowMs - s_rosRotStartMs < 250) {
                 constexpr int32_t KICK_MIN_4WHEEL = 650;
                 int32_t softKickL = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetL) * 120 / 100);
                 if (softKickL < KICK_MIN_4WHEEL) softKickL = KICK_MIN_4WHEEL;

@@ -214,12 +214,22 @@ static uint32_t s_lastGyroAssistMs = 0;
  *  Set = true bởi botRotateCW/CCW; clear = false bởi botRotationReset/botStop. */
 volatile bool g_isRotating = false;
 
+/** Anti-Stiction: millis() khi kết thúc phase bypass-scale.
+ *  Trong STICTION_BURST_MS đầu tiên, ghi full PWM trực tiếp vào tất cả 4 motor
+ *  (bypass g_motorScale) để phá vỡ lực ma sát tĩnh với sàn. */
+static uint32_t s_stictionEndMs = 0;
+
+/** Thời gian burst phá ma sát tĩnh (ms). 100ms đủ để bánh cao su trên sàn cứng bắt đầu
+ *  trượt, sau đó kinetic friction thấp hơn nhiều nên scale bình thường đủ duy trì. */
+#define STICTION_BURST_MS  100u
+
 inline void botRotationReset() {
   g_isRotating = false;
   s_rotActive = false;
   s_rotStartMs = 0;
   s_rotGyroAssist = 0;
   s_lastGyroAssistMs = 0;
+  s_stictionEndMs = 0;  // Clear stiction burst state
 }
 
 /**
@@ -270,19 +280,85 @@ inline uint16_t botComputeSmoothRotatePwm(uint16_t targetPwm) {
 
 /**
  * Xoay tại chỗ (dùng cho waypoint align).
- * Differential: bên trái +, bên phải - → CW.
+/**
+ * Anti-Stiction Burst Helper — Ghi full PWM trực tiếp vào 4 motor, BYPASS g_motorScale.
+ * Chỉ áp dụng slot→physical mapping và invert. Dùng motorDriveImmediate (no ramp).
+ *
+ * Nguyên lý: Ma sát tĩnh >> Ma sát động. Cần full voltage burst ~100ms để bánh
+ * cao su trên sàn cứng bắt đầu trượt. Sau đó kinetic friction thấp hơn nhiều
+ * → scale 0.2 của RL/RR đủ duy trì xoay mà không cần burn motor.
+ *
+ * @param cw true = CW (FL+,RL+,FR-,RR-), false = CCW (FL-,RL-,FR+,RR+)
+ */
+inline void botApplyStictionBurst(bool cw) {
+  extern uint8_t g_mapMotSlot[4];
+  extern uint8_t g_motInv[4];
+  // Slot 0=FL,1=RL → left side (+CW / -CCW)
+  // Slot 2=FR,3=RR → right side (-CW / +CCW)
+  const int32_t slotDir[4] = {
+    cw ? (int32_t)PWM_MAX : -(int32_t)PWM_MAX,   // FL
+    cw ? (int32_t)PWM_MAX : -(int32_t)PWM_MAX,   // RL
+    cw ? -(int32_t)PWM_MAX : (int32_t)PWM_MAX,   // FR
+    cw ? -(int32_t)PWM_MAX : (int32_t)PWM_MAX    // RR
+  };
+  for (int s = 0; s < 4; s++) {
+    uint8_t p = g_mapMotSlot[s];
+    if (p > 3) p = (uint8_t)s;
+    int32_t sp = slotDir[s];
+    if (g_motInv[s]) sp = -sp;
+    // KHÔNG nhân g_motorScale — bypass hoàn toàn để đảm bảo đủ torque phá ma sát tĩnh.
+    // RL/RR (scale=0.2) sẽ nhận full 1023 PWM thay vì 204 → gấp 5x torque trong burst phase.
+    motorDriveImmediate((MotorId)p, sp);
+  }
+}
+
+/**
+ * Xoay tại chỗ CW (dùng cho waypoint align).
+ * 3-Phase rotation để tối ưu cho robot 4WD nặng trên sàn cứng:
+ *   Phase 0 (0..STICTION_BURST_MS): Full PWM bypass scale → phá ma sát tĩnh
+ *   Phase 1 (100..250ms):           Kickstart 650 với scale → chuyển tiếp mượt
+ *   Phase 2 (250ms+):               rotateBaseSpeed + Gyro Assist → steady state
  */
 inline void botRotateCWImmediate(uint16_t pwm) {
-  g_isRotating = true;  // Kích hoạt ramp chậm (120) để 4 bánh lên tốc đồng đều
-  locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
+  g_isRotating = true;
+  locSetDriveCmd(0, 0);
+  uint32_t now = millis();
+  // Khởi động stiction burst khi bắt đầu xoay mới
+  if (s_stictionEndMs == 0) {
+    s_stictionEndMs = now + STICTION_BURST_MS;
+    // Pre-warm botComputeSmoothRotatePwm để s_rotStartMs được set ngay
+    // (smooth rotate sẽ đo thời gian từ đây)
+    s_rotStartMs = now;
+    s_rotActive = true;
+    s_rotGyroAssist = 0;
+    s_lastGyroAssistMs = now;
+  }
+  if (now < s_stictionEndMs) {
+    // Phase 0: Stiction Burst — bypass scale, full power tất cả 4 motor
+    botApplyStictionBurst(true);
+    return;
+  }
+  // Phase 1 + 2: Normal smooth rotate với scale
   uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
   const int32_t sp[4] = {(int32_t)effPwm, (int32_t)effPwm, -(int32_t)effPwm, -(int32_t)effPwm};
-  motorApplyLayout(sp); // Dùng motorApplyLayout có RAMP để 4 bánh lên đều, không sốc điện
+  motorApplyLayout(sp);
 }
 
 inline void botRotateCCWImmediate(uint16_t pwm) {
-  g_isRotating = true;  // Kích hoạt ramp chậm (120) để 4 bánh lên tốc đồng đều
-  locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
+  g_isRotating = true;
+  locSetDriveCmd(0, 0);
+  uint32_t now = millis();
+  if (s_stictionEndMs == 0) {
+    s_stictionEndMs = now + STICTION_BURST_MS;
+    s_rotStartMs = now;
+    s_rotActive = true;
+    s_rotGyroAssist = 0;
+    s_lastGyroAssistMs = now;
+  }
+  if (now < s_stictionEndMs) {
+    botApplyStictionBurst(false);
+    return;
+  }
   uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
   const int32_t sp[4] = {-(int32_t)effPwm, -(int32_t)effPwm, (int32_t)effPwm, (int32_t)effPwm};
   motorApplyLayout(sp);
@@ -320,10 +396,25 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   int32_t rightS = ((yCurve - xCurve) * (int32_t)base) / 100;
 
   if (isPureRot) {
-    // Dùng đúng rotateBaseSpeed từ slider Xoay Hướng — KHÔNG hardcode nữa.
-    // Slider có tác dụng thật sự: người dùng set 70% → magLimit = 70% PWM_MAX.
-    // Fallback: nếu rotateBaseSpeed chưa set (=0), dùng base từ caller.
     g_isRotating = true;
+    uint32_t now = millis();
+    // Stiction burst cho joystick manual: cùng logic với botRotateCWImmediate
+    if (s_stictionEndMs == 0) {
+      s_stictionEndMs = now + STICTION_BURST_MS;
+      s_rotStartMs = now;
+      s_rotActive = true;
+      s_rotGyroAssist = 0;
+      s_lastGyroAssistMs = now;
+    }
+    if (now < s_stictionEndMs) {
+      // Phase 0: Stiction burst — bypass scale, full PWM vào tất cả 4 motor
+      // x > 0 = CW (phải), x < 0 = CCW (trái)
+      botApplyStictionBurst(x > 0);
+      // Cập nhật localization cmd = 0 (xoay tại chỗ)
+      locSetDriveCmd(0, 0);
+      return;
+    }
+    // Phase 1+2: Normal smooth rotate với scale
     uint16_t rotSpd = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : (uint16_t)base;
     uint16_t baseMag = (uint16_t)min((uint32_t)rotSpd, (uint32_t)PWM_MAX);
     uint16_t smoothPwm = botComputeSmoothRotatePwm(baseMag);
