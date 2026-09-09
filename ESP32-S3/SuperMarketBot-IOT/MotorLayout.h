@@ -63,11 +63,15 @@ inline void motorLayoutLoad(Preferences &prefs) {
     if (inv <= 1) g_motInv[i] = inv;
   }
 
-  // Đọc 4 scale riêng
+  // Đọc 4 scale riêng (tự động reset về 1.0f nếu còn lưu giá trị cũ lệch cực đoan của 4WD như 3.00 hay 0.20)
   for (int i = 0; i < 4; i++) {
     char k[8];
     snprintf(k, sizeof(k), "motSc%d", i);
     float sc = prefs.getFloat(k, 1.0f);
+    if (sc >= 2.2f || sc <= 0.35f) {
+      sc = 1.0f; // Reset về 1.0 chuẩn cân bằng cho 2 bánh động cơ mới
+      prefs.putFloat(k, 1.0f);
+    }
     if (sc >= 0.0f && sc <= 3.0f) {
       g_motorScale[i] = sc;
     }

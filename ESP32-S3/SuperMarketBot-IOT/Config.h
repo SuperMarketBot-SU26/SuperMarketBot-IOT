@@ -149,7 +149,7 @@
  #define ODOM_CALIB_FACTOR  1.0f
  
  /* -------------------- PWM / LEDC ----------------------------------- */
- #define PWM_FREQ      20000 // 20kHz, ngoài ngưỡng nghe
+ #define PWM_FREQ      10000 // 10kHz: giảm điện kháng cảm cuộn dây motor (X_L = 2*pi*f*L) -> tăng torque thực tế dưới tải nặng
  #define PWM_RES_BITS  10    // 0..1023
  #define PWM_MAX       ((1 << PWM_RES_BITS) - 1)
  
@@ -224,18 +224,18 @@
  /** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */
  #define AUTO_LIDAR_BLOCK_USE_REAR 0
  
- /* ---------- Default speeds theo yêu cầu user (30% / 70%) ----------- */
+ /* ---------- Default speeds cho hệ 2WD dẫn động + 2 bánh Caster tự lựa (30% / 50%) ----------- */
  #ifndef ROBOT_DEFAULT_CRUISE_PCT
  #define ROBOT_DEFAULT_CRUISE_PCT     30    // Di chuyển bình thường (30%)
  #endif
  #ifndef ROBOT_DEFAULT_OA_ESCAPE_PCT
- #define ROBOT_DEFAULT_OA_ESCAPE_PCT   70    // Né vật, xoay, align (70%)
+ #define ROBOT_DEFAULT_OA_ESCAPE_PCT   55    // Né vật, swerve (55%)
  #endif
  #ifndef ROBOT_DEFAULT_BACKUP_PCT
- #define ROBOT_DEFAULT_BACKUP_PCT      70    // Backup/lùi (70%)
+ #define ROBOT_DEFAULT_BACKUP_PCT      50    // Backup/lùi (50%)
  #endif
  #ifndef ROBOT_DEFAULT_ALIGN_PCT
- #define ROBOT_DEFAULT_ALIGN_PCT       55    // Xoay align heading chuẩn cân bằng (55%)
+ #define ROBOT_DEFAULT_ALIGN_PCT       50    // Xoay hướng chuẩn êm dịu cho 2WD + 2 Caster (50%)
  #endif
  /** Snap-to-90: khi đến waypoint, nếu bearing-target chênh < ngưỡng, ép về 0/90/180/270 gần nhất */
  #ifndef WP_SNAP_TO_90_ENABLE

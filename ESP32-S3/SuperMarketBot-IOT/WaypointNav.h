@@ -471,7 +471,7 @@ inline void wpNavTick() {
 
         uint16_t spinPwm = (uint16_t)((uint32_t)rotBase * (180u + (uint16_t)(fabsf(alpha) * 15.0f)) / 255u);
         if (spinPwm > PWM_MAX) spinPwm = PWM_MAX;
-        if (spinPwm < 160u) spinPwm = 160u;
+        if (spinPwm < 260u) spinPwm = 260u; // Ngưỡng êm ái cho 2WD + 2 Caster tự lựa
 
         static uint32_t lastSpinLog = 0;
         if (now - lastSpinLog > 500u) {
