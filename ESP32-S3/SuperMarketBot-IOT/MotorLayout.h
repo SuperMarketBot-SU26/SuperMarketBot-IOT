@@ -37,9 +37,13 @@ inline void motorLayoutApplyDefaults() {
   for (int i = 0; i < 4; i++) {
     g_mapMotSlot[i] = (uint8_t)i;
     g_motInv[i] = 0;
-    g_motorScale[i] = 1.0f;
   }
-  // Bỏ wheelMode — hệ thống chỉ dùng differential drive (bánh thường)
+  g_motorScale[0] = 1.0f; // FL (Động cơ Trái)
+  g_motorScale[1] = 0.0f; // RL (Bánh Caster tự do)
+  g_motorScale[2] = 1.0f; // FR (Động cơ Phải)
+  g_motorScale[3] = 0.0f; // RR (Bánh Caster tự do)
+  g_state.leftMotorScale = 1.0f;
+  g_state.rightMotorScale = 1.0f;
 }
 
 inline void motorLayoutLoad(Preferences &prefs) {
@@ -63,23 +67,27 @@ inline void motorLayoutLoad(Preferences &prefs) {
     if (inv <= 1) g_motInv[i] = inv;
   }
 
-  // Đọc 4 scale riêng (tự động reset về 1.0f nếu còn lưu giá trị cũ lệch cực đoan của 4WD như 3.00 hay 0.20)
+  // Đọc scale cho 2 động cơ dẫn động: FL (slot 0) và FR (slot 2)
+  // Tự động reset về 1.0f nếu còn lưu scale lệch cực đoan cũ như 3.00 hay 0.20
   for (int i = 0; i < 4; i++) {
     char k[8];
     snprintf(k, sizeof(k), "motSc%d", i);
     float sc = prefs.getFloat(k, 1.0f);
-    if (sc >= 2.2f || sc <= 0.35f) {
-      sc = 1.0f; // Reset về 1.0 chuẩn cân bằng cho 2 bánh động cơ mới
-      prefs.putFloat(k, 1.0f);
-    }
-    if (sc >= 0.0f && sc <= 3.0f) {
+    if (i == 0 || i == 2) {
+      if (sc > 1.5f || sc < 0.5f) {
+        sc = 1.0f; // Reset về 1.0 chuẩn cân bằng cho 2WD + Caster
+        prefs.putFloat(k, 1.0f);
+      }
       g_motorScale[i] = sc;
+    } else {
+      // Slot 1 (RL) & Slot 3 (RR) là caster bánh xoay
+      g_motorScale[i] = 0.0f;
     }
   }
 
-  // Cập nhật left/right scale từ 4 bánh
-  g_state.leftMotorScale = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
-  g_state.rightMotorScale = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
+  // Cập nhật left/right scale từ 2 động cơ thực tế
+  g_state.leftMotorScale = g_motorScale[0];
+  g_state.rightMotorScale = g_motorScale[2];
 }
 
 inline bool motorLayoutSave(Preferences &prefs) {
@@ -192,17 +200,17 @@ inline uint8_t motorLayoutToggleInvert(uint8_t slot) {
 
 /**
  * Đặt scale cho 1 bánh
- * @param slot   0-3
- * @param scale  0.0-3.0
+ * @param slot   0-3 (Slot 0=FL, Slot 2=FR)
+ * @param scale  0.0-2.0
  */
 inline void motorSetScale(uint8_t slot, float scale) {
   if (slot > 3) return;
-  scale = constrain(scale, 0.0f, 3.0f);
+  scale = constrain(scale, 0.0f, 2.0f);
   g_motorScale[slot] = scale;
   
-  // Cập nhật left/right scale
-  g_state.leftMotorScale = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
-  g_state.rightMotorScale = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
+  // Cập nhật 2WD: FL = Trái, FR = Phải
+  g_state.leftMotorScale = g_motorScale[0];
+  g_state.rightMotorScale = g_motorScale[2];
 }
 
 /**
@@ -214,44 +222,37 @@ inline float motorGetScale(uint8_t slot) {
 }
 
 /**
- * Auto-balance: đặt tất cả scale về trung bình
+ * Auto-balance: cân bằng 2 bánh dẫn động FL & FR về cùng trung bình
  */
 inline void motorAutoBalance() {
-  float avg = (g_motorScale[0] + g_motorScale[1] + g_motorScale[2] + g_motorScale[3]) / 4.0f;
-  for (int i = 0; i < 4; i++) {
-    g_motorScale[i] = avg;
-  }
-  g_state.leftMotorScale = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
-  g_state.rightMotorScale = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
-  Serial.printf("[MotorTrim] Auto-balanced to %.3f\n", avg);
+  float avg = (g_motorScale[0] + g_motorScale[2]) / 2.0f;
+  g_motorScale[0] = avg;
+  g_motorScale[2] = avg;
+  g_motorScale[1] = 0.0f;
+  g_motorScale[3] = 0.0f;
+  g_state.leftMotorScale = g_motorScale[0];
+  g_state.rightMotorScale = g_motorScale[2];
+  Serial.printf("[MotorTrim] 2WD Auto-balanced to %.3f\n", avg);
 }
 
 /**
  * Cân bằng 2 bên: điều chỉnh scale để 2 bên cùng tốc độ
  */
 inline void motorBalanceSides() {
-  float avgLeft = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
-  float avgRight = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
-  float avg = (avgLeft + avgRight) / 2.0f;
-  
-  // Cân bằng lại: set all = average
-  for (int i = 0; i < 4; i++) g_motorScale[i] = avg;
-  
-  g_state.leftMotorScale = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
-  g_state.rightMotorScale = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
-  Serial.printf("[MotorTrim] Balanced sides: L=%.3f R=%.3f\n", 
-                g_state.leftMotorScale, g_state.rightMotorScale);
+  motorAutoBalance();
 }
 
 /**
- * Reset tất cả scale về 1.0
+ * Reset tất cả scale về 1.0 chuẩn cho 2WD
  */
 inline void motorResetScales() {
-  for (int i = 0; i < 4; i++) {
-    g_motorScale[i] = 1.0f;
-  }
-  g_state.leftMotorScale = g_state.rightMotorScale = 1.0f;
-  Serial.println("[MotorTrim] Scales reset to 1.0");
+  g_motorScale[0] = 1.0f;
+  g_motorScale[1] = 0.0f;
+  g_motorScale[2] = 1.0f;
+  g_motorScale[3] = 0.0f;
+  g_state.leftMotorScale = 1.0f;
+  g_state.rightMotorScale = 1.0f;
+  Serial.println("[MotorTrim] 2WD Scales reset to 1.0");
 }
 
 /**

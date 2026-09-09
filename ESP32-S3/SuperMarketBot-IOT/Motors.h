@@ -191,13 +191,13 @@ inline void botStop() {
  */
 inline void botForward(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
-  const int32_t sp[4] = {(int32_t)pwm, (int32_t)pwm, (int32_t)pwm, (int32_t)pwm};
+  const int32_t sp[4] = {(int32_t)pwm, 0, (int32_t)pwm, 0};
   motorApplyLayout(sp);
 }
 
 inline void botBackward(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
-  const int32_t sp[4] = {-(int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm, -(int32_t)pwm};
+  const int32_t sp[4] = {-(int32_t)pwm, 0, -(int32_t)pwm, 0};
   motorApplyLayout(sp);
 }
 
@@ -261,13 +261,13 @@ inline uint16_t botComputeSmoothRotatePwm(uint16_t targetPwm) {
 
 /**
  * Xoay tại chỗ (dùng cho waypoint align & phím xoay).
- * 2WD Differential: bánh trái tiến, bánh phải lùi (hoặc ngược lại). 2 bánh caster tự lựa xoay theo.
+ * 2WD Differential: bánh trái FL tiến, bánh phải FR lùi (hoặc ngược lại). 2 bánh caster tự lựa xoay theo.
  */
 inline void botRotateCWImmediate(uint16_t pwm) {
   g_isRotating = true;
   locSetDriveCmd(0, 0);
   uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
-  const int32_t sp[4] = {(int32_t)effPwm, (int32_t)effPwm, -(int32_t)effPwm, -(int32_t)effPwm};
+  const int32_t sp[4] = {(int32_t)effPwm, 0, -(int32_t)effPwm, 0};
   motorApplyLayout(sp);
 }
 
@@ -275,7 +275,7 @@ inline void botRotateCCWImmediate(uint16_t pwm) {
   g_isRotating = true;
   locSetDriveCmd(0, 0);
   uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
-  const int32_t sp[4] = {-(int32_t)effPwm, -(int32_t)effPwm, (int32_t)effPwm, (int32_t)effPwm};
+  const int32_t sp[4] = {-(int32_t)effPwm, 0, (int32_t)effPwm, 0};
   motorApplyLayout(sp);
 }
 
@@ -286,13 +286,13 @@ inline void botRotateCCW(uint16_t pwm) { botRotateCCWImmediate(pwm); }
  * Lái Arcade Differential Drive chuẩn cho 2WD + 2 Caster.
  * @param x    -100..100 (âm = rẽ trái, dương = rẽ phải)
  * @param y    -100..100 (âm = lùi, dương = tiến)
- * @param base 0..PWM_MAX  tốc độ nền tối đa
+ * @param base 0..PWM_MAX  tốc độ nền tối đa (từ slider Lái tay)
  */
 inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
 
-  // Nhận diện xoay tại chỗ thuần túy (|x| >= 10, |y| <= 20)
-  const bool isPureRot = (abs(x) >= 10 && abs(y) <= 20);
+  // Nhận diện xoay tại chỗ thuần túy (|x| >= 10, |y| <= 15)
+  const bool isPureRot = (abs(x) >= 10 && abs(y) <= 15);
 
   int32_t leftS, rightS;
 
@@ -309,32 +309,31 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
     rightS = (x > 0) ? -(int32_t)smoothPwm : (int32_t)smoothPwm;
   } else {
     botRotationReset();
-    // Cua cong vòng cung (Arc Turn) mượt mà cho 2WD + Caster:
-    // fwdSpeed = tốc độ tiến/lùi, turnSpeed = tốc độ lệch góc cua
+    // Vi sai 2WD + Caster chuẩn:
+    // fwdSpeed và turnSpeed đều tỷ lệ tuyến tính với 'base' (thanh trượt Tốc độ Lái tay)
     int32_t fwdSpeed  = ((int32_t)y * (int32_t)base) / 100;
-    uint16_t rotBase  = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : base;
-    int32_t turnSpeed = ((int32_t)x * (int32_t)rotBase) / 100;
+    int32_t turnSpeed = ((int32_t)x * (int32_t)base) / 100;
 
     leftS  = fwdSpeed + turnSpeed;
     rightS = fwdSpeed - turnSpeed;
 
-    // Giới hạn công suất tối đa theo tốc độ cho phép
+    // Giới hạn công suất tối đa theo 'base' để thanh trượt WebUI kiểm soát 100% tốc độ thực tế
     int32_t maxMag = max(abs(leftS), abs(rightS));
-    int32_t allowedLimit = max((int32_t)base, (int32_t)rotBase);
-    if (maxMag > allowedLimit && maxMag > 0) {
-      leftS  = (leftS  * allowedLimit) / maxMag;
-      rightS = (rightS * allowedLimit) / maxMag;
+    if (maxMag > (int32_t)base && maxMag > 0) {
+      leftS  = (leftS  * (int32_t)base) / maxMag;
+      rightS = (rightS * (int32_t)base) / maxMag;
     }
   }
 
   leftS = constrain(leftS, -(int32_t)PWM_MAX, (int32_t)PWM_MAX);
   rightS = constrain(rightS, -(int32_t)PWM_MAX, (int32_t)PWM_MAX);
 
-  // Phân bổ tín hiệu:
-  // Cả 2 kênh Trái (FL, RL) nhận leftS; cả 2 kênh Phải (FR, RR) nhận rightS.
-  // Đảm bảo cắm 2 motor vào bất kỳ cổng Trái nào và Phải nào trên mạch cũng hoạt động chuẩn xác!
-  int32_t fl = leftS, rl = leftS;
-  int32_t fr = rightS, rr = rightS;
+  // Phân bổ tín hiệu cho 2WD:
+  // FL (slot 0) = leftS (Động cơ Trái)
+  // FR (slot 2) = rightS (Động cơ Phải)
+  // RL (slot 1) & RR (slot 3) = 0 (Bánh Caster)
+  int32_t fl = leftS;
+  int32_t fr = rightS;
 
   // Báo cho Localization biết lệnh drive hiện tại (% so với base)
   if (base > 0) {
@@ -344,7 +343,7 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
     locSetDriveCmd(0, 0);
   }
 
-  const int32_t sp[4] = {fl, rl, fr, rr};
+  const int32_t sp[4] = {fl, 0, fr, 0};
   motorApplyLayout(sp);
 }
 

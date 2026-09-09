@@ -681,41 +681,33 @@ details pre{
         <!-- Motor Scale & Balance Section -->
         <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)">Cân bằng động cơ</span>
-            <span style="font-size:.58rem;color:var(--muted)">0.00 – 3.00</span>
+            <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)">Cân bằng 2WD (FL &amp; FR) + 2 Caster</span>
+            <span style="font-size:.58rem;color:var(--muted)">Chuẩn: 1.00</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px">
             <div class="scale-card">
-              <div class="lbl">FL</div>
+              <div class="lbl">FL (Trái)</div>
               <div class="btn-row">
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',0.05)">+</button>
               </div>
-              <input type="number" id="scaleFL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleFL" step="0.01" min="0.50" max="1.50" value="1.00" inputmode="decimal" class="scale-inp">
+            </div>
+            <div class="scale-card" style="opacity:0.45">
+              <div class="lbl">RL (Caster)</div>
+              <div style="font-size:.65rem;color:var(--muted);text-align:center;padding:12px 0">Tự do 360°</div>
             </div>
             <div class="scale-card">
-              <div class="lbl">RL</div>
-              <div class="btn-row">
-                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',-0.05)">−</button>
-                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',0.05)">+</button>
-              </div>
-              <input type="number" id="scaleRL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
-            </div>
-            <div class="scale-card">
-              <div class="lbl">FR</div>
+              <div class="lbl">FR (Phải)</div>
               <div class="btn-row">
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',0.05)">+</button>
               </div>
-              <input type="number" id="scaleFR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleFR" step="0.01" min="0.50" max="1.50" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
-            <div class="scale-card">
-              <div class="lbl">RR</div>
-              <div class="btn-row">
-                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',-0.05)">−</button>
-                <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',0.05)">+</button>
-              </div>
-              <input type="number" id="scaleRR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+            <div class="scale-card" style="opacity:0.45">
+              <div class="lbl">RR (Caster)</div>
+              <div style="font-size:.65rem;color:var(--muted);text-align:center;padding:12px 0">Tự do 360°</div>
             </div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -723,7 +715,7 @@ details pre{
             <button type="button" class="mode-btn" style="background:#1a2030;font-size:.7rem" onclick="autoBalanceMotors()">Auto Cân</button>
             <button type="button" class="mode-btn" style="background:#2a1520;font-size:.7rem" onclick="resetMotorScales()">Reset 1.0</button>
           </div>
-          <p id="scaleHint" class="hint" style="margin-top:6px;font-size:.62rem;color:var(--muted);transition:color .2s">Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05</p>
+          <p id="scaleHint" class="hint" style="margin-top:6px;font-size:.62rem;color:var(--muted);transition:color .2s">Khuyên dùng 1.00 cho 2 động cơ FL &amp; FR để thanh tốc độ WebUI điều khiển tuyến tính 0–100%.</p>
         </div>
       </div>
     </div>
@@ -847,14 +839,15 @@ function applyMotorPayload(d){
     if(d.motInv&&d.motInv[i]!=null&&si) si.value=String(d.motInv[i]);
   }
   // (wheelMode cố định = bánh thường, không cần đọc dropdown)
-  // Cập nhật scale inputs
-  const scaleIds = ['scaleFL','scaleRL','scaleFR','scaleRR'];
-  for(let i=0;i<4;i++){
-    const el=document.getElementById(scaleIds[i]);
-    if(el && d.motSc && d.motSc[i]!=null){
-      if(document.activeElement !== el) {
-        el.value = Number(d.motSc[i]).toFixed(2);
-      }
+  // Cập nhật scale inputs cho 2WD (FL & FR)
+  if(d.motSc!=null){
+    const elFL = document.getElementById('scaleFL');
+    const elFR = document.getElementById('scaleFR');
+    if(elFL && d.motSc[0]!=null && document.activeElement !== elFL){
+      elFL.value = Number(d.motSc[0]).toFixed(2);
+    }
+    if(elFR && d.motSc[2]!=null && document.activeElement !== elFR){
+      elFR.value = Number(d.motSc[2]).toFixed(2);
     }
   }
 }
@@ -908,40 +901,40 @@ function toggleMotorInvert(slot) {
   console.log('[ToggleInvert] Slot:', slot);
 }
 
-// Motor Scale Functions
+// Motor Scale Functions (2WD: FL & FR, RL & RR là Caster)
 function adjScale(id, delta) {
   const el = document.getElementById(id);
   if (!el) return;
   let val = parseFloat(el.value);
   if (isNaN(val)) val = 1.0;
   val = Math.round((val + delta) * 100) / 100;
-  val = Math.max(0.0, Math.min(3.0, val));
+  val = Math.max(0.5, Math.min(1.5, val));
   el.value = val.toFixed(2);
 }
 
 function applyMotorScale() {
-  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
-  const scales = [];
-  for(let i = 0; i < 4; i++) {
-    let v = parseFloat(document.getElementById(ids[i]).value);
-    if (isNaN(v)) v = 1.0;
-    v = Math.max(0.0, Math.min(3.0, v));
-    v = Math.round(v * 100) / 100;
-    scales.push(v);
-    document.getElementById(ids[i]).value = v.toFixed(2);
-  }
-  // Gửi cả dạng batch lẫn từng bánh để đảm bảo mọi phiên bản firmware đều nhận
+  const scFL = parseFloat(document.getElementById('scaleFL').value) || 1.0;
+  const scFR = parseFloat(document.getElementById('scaleFR').value) || 1.0;
+  const scales = [
+    Math.round(Math.max(0.5, Math.min(1.5, scFL)) * 100) / 100,
+    0.0,
+    Math.round(Math.max(0.5, Math.min(1.5, scFR)) * 100) / 100,
+    0.0
+  ];
+  document.getElementById('scaleFL').value = scales[0].toFixed(2);
+  document.getElementById('scaleFR').value = scales[2].toFixed(2);
+
+  // Gửi lệnh motorScales cập nhật ESP32
   wsS({t:'motorScales', sc: scales});
-  for(let i = 0; i < 4; i++) {
-    wsS({t:'motorScale', payload: i + '_' + scales[i].toFixed(2)});
-  }
-  console.log('[ApplyScale] Applied:', scales);
+  wsS({t:'motorScale', payload: '0_' + scales[0].toFixed(2)});
+  wsS({t:'motorScale', payload: '2_' + scales[2].toFixed(2)});
+  console.log('[ApplyScale] 2WD Applied:', scales);
   const hint = document.getElementById('scaleHint');
   if(hint) {
-    hint.textContent = '✓ Đã lưu: FL=' + scales[0].toFixed(2) + ' RL=' + scales[1].toFixed(2) + ' FR=' + scales[2].toFixed(2) + ' RR=' + scales[3].toFixed(2);
+    hint.textContent = '✓ Đã lưu 2WD: FL=' + scales[0].toFixed(2) + ' FR=' + scales[2].toFixed(2);
     hint.style.color = '#34d399';
     setTimeout(() => {
-      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.textContent = 'Khuyên dùng 1.00 cho 2 động cơ FL & FR để thanh tốc độ WebUI điều khiển tuyến tính 0–100%.';
       hint.style.color = 'var(--muted)';
     }, 3500);
   }
@@ -949,22 +942,18 @@ function applyMotorScale() {
 
 function autoBalanceMotors() {
   wsS({t:'motorBalance'});
-  console.log('[AutoBalance] Balancing all motors...');
-  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
-  let sum = 0;
-  for(let i = 0; i < 4; i++) {
-    sum += (parseFloat(document.getElementById(ids[i]).value) || 1.0);
-  }
-  const avg = (sum / 4.0).toFixed(2);
-  for(let i = 0; i < 4; i++) {
-    document.getElementById(ids[i]).value = avg;
-  }
+  console.log('[AutoBalance] Balancing 2WD motors...');
+  const vFL = parseFloat(document.getElementById('scaleFL').value) || 1.0;
+  const vFR = parseFloat(document.getElementById('scaleFR').value) || 1.0;
+  const avg = ((vFL + vFR) / 2.0).toFixed(2);
+  document.getElementById('scaleFL').value = avg;
+  document.getElementById('scaleFR').value = avg;
   const hint = document.getElementById('scaleHint');
   if(hint) {
-    hint.textContent = '✓ Auto cân tất cả bánh về ' + avg;
+    hint.textContent = '✓ Auto cân FL & FR về ' + avg;
     hint.style.color = '#34d399';
     setTimeout(() => {
-      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.textContent = 'Khuyên dùng 1.00 cho 2 động cơ FL & FR để thanh tốc độ WebUI điều khiển tuyến tính 0–100%.';
       hint.style.color = 'var(--muted)';
     }, 3500);
   }
@@ -972,17 +961,15 @@ function autoBalanceMotors() {
 
 function resetMotorScales() {
   wsS({t:'motorResetScales'});
-  console.log('[ResetScales] Reset to 1.0');
-  const ids = ['scaleFL','scaleRL','scaleFR','scaleRR'];
-  for(let i = 0; i < 4; i++) {
-    document.getElementById(ids[i]).value = '1.00';
-  }
+  console.log('[ResetScales] 2WD Reset to 1.0');
+  document.getElementById('scaleFL').value = '1.00';
+  document.getElementById('scaleFR').value = '1.00';
   const hint = document.getElementById('scaleHint');
   if(hint) {
-    hint.textContent = '✓ Đã reset tất cả bánh về 1.00';
+    hint.textContent = '✓ Đã reset FL & FR về 1.00';
     hint.style.color = '#34d399';
     setTimeout(() => {
-      hint.textContent = 'Gõ số tùy ý (VD: 0.88, 1.15) hoặc bấm −/+ để tinh chỉnh 0.05';
+      hint.textContent = 'Khuyên dùng 1.00 cho 2 động cơ FL & FR để thanh tốc độ WebUI điều khiển tuyến tính 0–100%.';
       hint.style.color = 'var(--muted)';
     }, 3500);
   }
