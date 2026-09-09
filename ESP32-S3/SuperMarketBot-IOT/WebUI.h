@@ -515,14 +515,19 @@ details pre{
           <div class="spd-block spd-block--manual">
             <div class="spd-block__head">
               <div>
-                <div class="spd-block__label">Tốc độ · Xoay hướng</div>
-                <div class="spd-block__hint">Lực xoay tại chỗ (Lái tay / Tự hành) (20–100%)</div>
+                <div class="spd-block__label">Tốc độ · Xoay hướng (4WD)</div>
+                <div class="spd-block__hint">Công suất xoay tại chỗ & căn góc (10–100%)</div>
               </div>
-              <span class="spd-block__badge" id="spdRotVal">70%</span>
+              <span class="spd-block__badge" id="spdRotVal">55%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="spdRotSlider" min="20" max="100" value="70"
+            <input type="range" class="spd-range spd-range--manual" id="spdRotSlider" min="10" max="100" value="55"
               oninput="sendRotateSpeed(this.value)" aria-label="Tốc độ xoay hướng phần trăm"/>
-            <div class="spd-block__ticks"><span>20%</span><span>60%</span><span>100%</span></div>
+            <div class="spd-block__ticks"><span>10%</span><span>55%</span><span>100%</span></div>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(35)">Êm dịu (35%)</button>
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(55)">Chuẩn (55%)</button>
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(75)">Mạnh (75%)</button>
+            </div>
           </div>
           <div class="spd-block spd-block--auto">
             <div class="spd-block__head">
@@ -1218,7 +1223,7 @@ function applyTelemetry(d){
         const sr=document.getElementById('spdRotSlider');
         const touched = window._lastSliderTouch && (Date.now() - window._lastSliderTouch < 3000);
         if(sr && document.activeElement!==sr && !touched){
-          const rv=Math.max(20,Math.min(100,d.spdRotatePct));
+          const rv=Math.max(10,Math.min(100,d.spdRotatePct));
           sr.value=rv;
           paintSpdTrack(sr,rv);
           document.getElementById('spdRotVal').textContent=String(rv)+'%';
@@ -1268,6 +1273,13 @@ function sendRotateSpeed(v){
   paintSpdTrack(el,v);
   document.getElementById('spdRotVal').textContent=v+'%';
   wsS({t:'spdRotate',v:parseInt(v,10)});
+}
+function setRotPreset(val){
+  const el=document.getElementById('spdRotSlider');
+  if(el){
+    el.value=val;
+    sendRotateSpeed(val);
+  }
 }
 function wsS(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 function sendSpeed(v){

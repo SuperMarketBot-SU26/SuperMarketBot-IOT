@@ -235,7 +235,7 @@
  #define ROBOT_DEFAULT_BACKUP_PCT      70    // Backup/lùi (70%)
  #endif
  #ifndef ROBOT_DEFAULT_ALIGN_PCT
- #define ROBOT_DEFAULT_ALIGN_PCT       70    // Xoay align heading (70%)
+ #define ROBOT_DEFAULT_ALIGN_PCT       55    // Xoay align heading chuẩn cân bằng (55%)
  #endif
  /** Snap-to-90: khi đến waypoint, nếu bearing-target chênh < ngưỡng, ép về 0/90/180/270 gần nhất */
  #ifndef WP_SNAP_TO_90_ENABLE

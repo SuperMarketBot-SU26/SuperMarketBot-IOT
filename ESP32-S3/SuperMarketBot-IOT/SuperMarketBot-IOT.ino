@@ -596,12 +596,14 @@ static void taskControl(void *pvParams) {
               s_have = false;
               Serial.println(F("[HLK] deactivated — PID reset"));
             }
-            // Nếu có xoay hướng (cmdX != 0), ưu tiên nâng công suất theo g_state.rotateBaseSpeed (slider Xoay Hướng)
+            // Nếu có xoay hướng (cmdX != 0), áp dụng chuẩn xác g_state.rotateBaseSpeed từ slider WebUI
             uint16_t baseSpd = g_state.baseSpeed;
             uint16_t activeSpeed = baseSpd;
             if (g_state.cmdX != 0) {
               uint16_t rotSpeed = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : baseSpd;
-              activeSpeed = (g_state.cmdY == 0) ? rotSpeed : ((rotSpeed > baseSpd) ? rotSpeed : baseSpd);
+              // Nếu xoay tại chỗ (cmdY == 0): lấy đúng rotSpeed từ thanh trượt
+              // Nếu vừa tiến vừa rẽ: lấy tốc độ phù hợp giữa base và rot
+              activeSpeed = (g_state.cmdY == 0) ? rotSpeed : ((rotSpeed + baseSpd) / 2);
             }
             botDrive(g_state.cmdX, g_state.cmdY, activeSpeed);
           }

@@ -66,7 +66,9 @@ inline void motorDrive(MotorId id, int32_t speed) {
 
   int32_t lastSpd = g_state.lastMotorSpeed[(uint8_t)id];
   int32_t diff = speed - lastSpd;
-  constexpr int32_t MAX_RAMP_STEP = 600;
+  // Giới hạn gia tốc tăng/giảm PWM mỗi chu kỳ 20ms (tương đương max ~440 PWM / 40ms)
+  // giúp 4 bánh tăng tốc đồng bộ, không bị giật khựng do sụt dòng TB6612
+  constexpr int32_t MAX_RAMP_STEP = 220;
   if (diff > MAX_RAMP_STEP) {
     speed = lastSpd + MAX_RAMP_STEP;
   } else if (diff < -MAX_RAMP_STEP) {
@@ -171,11 +173,15 @@ inline void motorApplyLayoutImmediate(const int32_t speedBySlot[4]) {
   }
 }
 
+// Forward declaration để botStop reset cờ xoay
+inline void botRotationReset();
+
 /**
  * Dừng tất cả động cơ (PWM=0, IN1=IN2=HIGH để brake).
  */
 inline void botStop() {
   locSetDriveCmd(0, 0);  // [LOC FIX] Dừng tích phân pose khi brake
+  botRotationReset();
   const int32_t sp[4] = {0, 0, 0, 0};
   motorApplyLayout(sp);
 }
@@ -195,35 +201,76 @@ inline void botBackward(uint16_t pwm) {
   motorApplyLayout(sp);
 }
 
+// Biến quản lý trạng thái xoay mượt mà
+static uint32_t s_rotStartMs = 0;
+static bool     s_rotActive = false;
+static int32_t  s_rotGyroAssist = 0;
+static uint32_t s_lastGyroAssistMs = 0;
+
+inline void botRotationReset() {
+  s_rotActive = false;
+  s_rotStartMs = 0;
+  s_rotGyroAssist = 0;
+  s_lastGyroAssistMs = 0;
+}
+
 /**
- * Xoay tại chỗ (immediate, bỏ slew — dùng cho waypoint align).
+ * Tính toán xung PWM xoay tại chỗ mượt mà (chống sụt áp & đồng bộ 4 bánh).
+ * @param targetPwm Tốc độ xoay mong muốn (từ slider xoay hướng)
+ */
+inline uint16_t botComputeSmoothRotatePwm(uint16_t targetPwm) {
+  if (targetPwm > PWM_MAX) targetPwm = PWM_MAX;
+  uint32_t now = millis();
+  if (!s_rotActive) {
+    s_rotStartMs = now;
+    s_rotActive = true;
+    s_rotGyroAssist = 0;
+    s_lastGyroAssistMs = now;
+  }
+
+  uint16_t eff = targetPwm;
+
+  // 1. Soft-Kickstart thích ứng theo targetPwm trong 120ms đầu:
+  // Nếu targetPwm nhỏ (VD 30%), kickstart chỉ mồi vừa phải (tối đa ~1.25x target hoặc 450)
+  // để bánh không bị giật bắn / bốc đầu / quay lệch bên.
+  if (now - s_rotStartMs < 120) {
+    uint16_t softKick = (uint16_t)min((uint32_t)PWM_MAX, (uint32_t)targetPwm * 125u / 100u);
+    if (softKick < 380) softKick = 380; // Ngưỡng tối thiểu để thắng ma sát tĩnh sàn siêu thị
+    if (softKick > targetPwm) eff = softKick;
+  } else {
+    // 2. Closed-loop Gyro Assist mượt (sau 140ms):
+    // Nếu robot xoay quá chậm so với lệnh (|gyroZ| < 0.08 rad/s), bù thêm PWM nhẹ nhàng
+    if (now - s_rotStartMs > 140 && (now - s_lastGyroAssistMs >= 50)) {
+      s_lastGyroAssistMs = now;
+      float actualOmega = fabsf(g_state.currentGyroZ);
+      if (actualOmega < 0.08f) {
+        if (s_rotGyroAssist < 180) s_rotGyroAssist += 15;
+      } else if (actualOmega >= 0.20f) {
+        if (s_rotGyroAssist > 0) s_rotGyroAssist -= 10;
+      }
+    }
+    eff = (uint16_t)min((uint32_t)PWM_MAX, (uint32_t)eff + (uint32_t)s_rotGyroAssist);
+  }
+
+  return eff;
+}
+
+/**
+ * Xoay tại chỗ (dùng cho waypoint align).
  * Differential: bên trái +, bên phải - → CW.
- * QUAN TRỌNG: Báo Localization dừng tích phân X/Y (robot không tiến trong khi xoay).
  */
 inline void botRotateCWImmediate(uint16_t pwm) {
-  if (pwm > PWM_MAX) pwm = PWM_MAX;
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
-  static uint32_t s_cwStartMs = 0;
-  static bool s_cwActive = false;
-  uint32_t now = millis();
-  if (!s_cwActive) { s_cwStartMs = now; s_cwActive = true; }
-  uint16_t effPwm = pwm;
-  if (now - s_cwStartMs < 120 && effPwm < 720) effPwm = 720;
+  uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
   const int32_t sp[4] = {(int32_t)effPwm, (int32_t)effPwm, -(int32_t)effPwm, -(int32_t)effPwm};
-  motorApplyLayoutImmediate(sp);
+  motorApplyLayout(sp); // Dùng motorApplyLayout có RAMP để 4 bánh lên đều, không sốc điện
 }
 
 inline void botRotateCCWImmediate(uint16_t pwm) {
-  if (pwm > PWM_MAX) pwm = PWM_MAX;
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
-  static uint32_t s_ccwStartMs = 0;
-  static bool s_ccwActive = false;
-  uint32_t now = millis();
-  if (!s_ccwActive) { s_ccwStartMs = now; s_ccwActive = true; }
-  uint16_t effPwm = pwm;
-  if (now - s_ccwStartMs < 120 && effPwm < 720) effPwm = 720;
+  uint16_t effPwm = botComputeSmoothRotatePwm(pwm);
   const int32_t sp[4] = {-(int32_t)effPwm, -(int32_t)effPwm, (int32_t)effPwm, (int32_t)effPwm};
-  motorApplyLayoutImmediate(sp);
+  motorApplyLayout(sp);
 }
 
 /**
@@ -237,12 +284,6 @@ inline void botRotateCCW(uint16_t pwm) { botRotateCCWImmediate(pwm); }
  * @param x    -100..100 (âm = xoay trái/CCW, dương = xoay phải/CW)
  * @param y    -100..100 (âm = lùi, dương = tiến)
  * @param base 0..PWM_MAX  tốc độ nền tối đa
- *
- * Công thức (differential, không strafe):
- *   left  = (y + x) * base / 100     (sau curve phi tuyến + kickstart/gyro boost)
- *   right = (y - x) * base / 100
- *   fl = rl = left
- *   fr = rr = right
  */
 inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   if (base > PWM_MAX) base = PWM_MAX;
@@ -253,59 +294,25 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   int32_t yCurve = ((int32_t)y * (int32_t)y * ySign) / 100;
 
   // Lực xoay tại chỗ (y == 0, x != 0): Trên khung 4WD bánh cao su, ma sát trượt ngang rất lớn.
-  // Blend thêm thành phần tuyến tính để tránh sụt PWM vào deadzone khi xoay nhẹ.
   const bool isPureRot = (y == 0 && abs(x) > 10);
   if (isPureRot) {
     int32_t xAbs = abs(x);
-    xCurve = ((xAbs * xAbs / 100 + xAbs) / 2) * xSign;
+    // Đường cong xoay kết hợp tuyến tính + bậc 2 mượt mà
+    xCurve = ((xAbs * xAbs / 100 + xAbs * 2) / 3) * xSign;
   }
 
   int32_t leftS  = ((yCurve + xCurve) * (int32_t)base) / 100;
   int32_t rightS = ((yCurve - xCurve) * (int32_t)base) / 100;
 
-  // Thuật toán: Xung bứt phá ma sát tĩnh (Kickstart) + Closed-loop Gyro Assist
-  static uint32_t s_manRotStartMs = 0;
-  static bool s_manWasRotating = false;
-  static int32_t s_manGyroBoost = 0;
-  static uint32_t s_lastManBoostMs = 0;
-  const uint32_t nowMs = millis();
-
   if (isPureRot) {
-    if (!s_manWasRotating) {
-      s_manRotStartMs = nowMs;
-      s_manWasRotating = true;
-      s_manGyroBoost = 0;
-      s_lastManBoostMs = nowMs;
-    }
+    // Sử dụng bộ điều tốc xoay mượt mà thống nhất
+    uint16_t baseMag = (uint16_t)max(abs(leftS), abs(rightS));
+    uint16_t smoothPwm = botComputeSmoothRotatePwm(baseMag);
 
-    // Sau 140ms, nếu IMU báo vận tốc góc thực tế vẫn quá nhỏ (< 0.06 rad/s), xe đang bị kẹt sàn:
-    if (nowMs - s_manRotStartMs > 140 && (nowMs - s_lastManBoostMs >= 40)) {
-      s_lastManBoostMs = nowMs;
-      float actualOmega = fabsf(g_state.currentGyroZ);
-      if (actualOmega < 0.06f) {
-        if (s_manGyroBoost < 250) s_manGyroBoost += 25;
-      } else if (actualOmega >= 0.15f) {
-        if (s_manGyroBoost > 0) s_manGyroBoost -= 10;
-      }
-    }
-
-    // Áp dụng Kickstart 120ms đầu hoặc Gyro Boost
-    if (nowMs - s_manRotStartMs < 120) {
-      constexpr int32_t KICKSTART_MIN_PWM = 700;
-      if (abs(leftS) < KICKSTART_MIN_PWM) {
-        leftS = (leftS >= 0) ? KICKSTART_MIN_PWM : -KICKSTART_MIN_PWM;
-      }
-      if (abs(rightS) < KICKSTART_MIN_PWM) {
-        rightS = (rightS >= 0) ? KICKSTART_MIN_PWM : -KICKSTART_MIN_PWM;
-      }
-    } else if (s_manGyroBoost > 0) {
-      if (leftS > 0) leftS += s_manGyroBoost; else if (leftS < 0) leftS -= s_manGyroBoost;
-      if (rightS > 0) rightS += s_manGyroBoost; else if (rightS < 0) rightS -= s_manGyroBoost;
-    }
+    leftS  = (leftS >= 0)  ? (int32_t)smoothPwm : -(int32_t)smoothPwm;
+    rightS = (rightS >= 0) ? (int32_t)smoothPwm : -(int32_t)smoothPwm;
   } else {
-    s_manWasRotating = false;
-    s_manRotStartMs = 0;
-    s_manGyroBoost = 0;
+    botRotationReset();
   }
 
   leftS = constrain(leftS, -(int32_t)PWM_MAX, (int32_t)PWM_MAX);
@@ -314,7 +321,11 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   int32_t fl = leftS, rl = leftS;
   int32_t fr = rightS, rr = rightS;
 
-  int32_t magLimit = isPureRot ? (int32_t)PWM_MAX : (int32_t)base;
+  // Giới hạn công suất tối đa theo base đã chọn trên slider
+  int32_t magLimit = (int32_t)base;
+  if (isPureRot && magLimit < 450) magLimit = 450; // Cho phép biên độ tối thiểu để xoay
+  if (magLimit > (int32_t)PWM_MAX) magLimit = (int32_t)PWM_MAX;
+
   int32_t mag = max(max(abs(fl), abs(rl)), max(abs(fr), abs(rr)));
   if (mag > magLimit && mag > 0) {
     int32_t scale = magLimit * 100 / mag;

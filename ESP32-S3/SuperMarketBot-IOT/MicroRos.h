@@ -208,12 +208,17 @@ static void cmd_vel_callback(const void *msgin) {
         int32_t targetL = mapPwm(normLeft);
         int32_t targetR = mapPwm(normRight);
 
-        // Áp dụng Stiction Kickstart Pulse (120ms) hoặc Gyro Boost cho in-place rotation
+        // Áp dụng Stiction Kickstart Pulse mềm mại (120ms) hoặc Gyro Boost cho in-place rotation
         if (isRosPureRot) {
             if (nowMs - s_rosRotStartMs < 120) {
-                constexpr int32_t KICKSTART_MIN_ROS = 720;
-                if (abs(targetL) < KICKSTART_MIN_ROS) targetL = (targetL >= 0) ? KICKSTART_MIN_ROS : -KICKSTART_MIN_ROS;
-                if (abs(targetR) < KICKSTART_MIN_ROS) targetR = (targetR >= 0) ? KICKSTART_MIN_ROS : -KICKSTART_MIN_ROS;
+                // Kickstart tỉ lệ với target (tối đa 1.25x hoặc min 400), tránh giật bốc đầu
+                int32_t softKickL = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetL) * 125 / 100);
+                if (softKickL < 400) softKickL = 400;
+                targetL = (targetL >= 0) ? softKickL : -softKickL;
+
+                int32_t softKickR = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetR) * 125 / 100);
+                if (softKickR < 400) softKickR = 400;
+                targetR = (targetR >= 0) ? softKickR : -softKickR;
             } else if (s_rosGyroBoost > 0) {
                 if (targetL > 0) targetL = min((int32_t)ROS2_PWM_MAX, targetL + s_rosGyroBoost);
                 else if (targetL < 0) targetL = max(-(int32_t)ROS2_PWM_MAX, targetL - s_rosGyroBoost);
