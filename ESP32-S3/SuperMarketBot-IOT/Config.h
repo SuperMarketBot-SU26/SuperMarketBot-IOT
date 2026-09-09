@@ -147,6 +147,12 @@
 
  // Hệ số hiệu chuẩn quãng đường (giảm < 1.0 nếu đi xa hơn lý thuyết, tăng > 1.0 nếu đi ngắn hơn)
  #define ODOM_CALIB_FACTOR  1.0f
+
+ /* -------------------- HƯỚNG KHUNG XE (OPTION 2: REVERSED CHASSIS) ----
+  * 1 = Đổi chiều xe: 2 bánh Caster thành ĐẦU XE (Front), 2 bánh Motor thành ĐUÔI XE (Rear / RWD).
+  * Lệnh lái (MicroRos/Motors) và Odometry tự động đồng bộ theo chiều mới.
+  */
+ #define REVERSE_CHASSIS_ORIENTATION 1
  
  /* -------------------- PWM / LEDC ----------------------------------- */
  #define PWM_FREQ      10000 // 10kHz: giảm điện kháng cảm cuộn dây motor (X_L = 2*pi*f*L) -> tăng torque thực tế dưới tải nặng

@@ -151,9 +151,17 @@ static void cmd_vel_callback(const void *msgin) {
             }
         }
 
+#if REVERSE_CHASSIS_ORIENTATION
+        // Option 2 (Reversed chassis: Caster = Front, Drive Motors = Rear):
+        // Forward in new frame (towards casters) corresponds to negative PWM for physical motors.
+        // Physical FL is the RIGHT wheel in new frame; Physical FR is the LEFT wheel in new frame.
+        float normLeft  = -normFwd - normRot; // Target for physical FL
+        float normRight = -normFwd + normRot; // Target for physical FR
+#else
         // Arcade drive: differential left/right
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
+#endif
 
         float maxNorm = max(fabsf(normLeft), fabsf(normRight));
         if (maxNorm > 1.0f) {
@@ -602,7 +610,12 @@ inline void spin() {
         s_last_us_ms = now;
         g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
         g_us_front_msg.header.stamp.nanosec = (uint32_t)((now % 1000) * 1000000);
+#if REVERSE_CHASSIS_ORIENTATION
+        // Cảm biến quay về phía trước xe mới (phía Caster) là usBack
+        float dist_m = g_state.usBack / 100.0f;
+#else
         float dist_m = g_state.usFront / 100.0f;
+#endif
         g_us_front_msg.range = dist_m;
         rcl_publish(&g_us_front_pub, &g_us_front_msg, NULL);
 

@@ -203,7 +203,11 @@ inline void locUpdate(float dsL, float dsR, float dt) {
   //   arc = (dsR - dsL); góc = arc / WHEEL_BASE_M
   //   Dùng trực tiếp dTheta này để update heading (không chờ IMU fusion).
   //   ImuFusion.h vẫn EKF fuse sau để giảm noise + correct gyro bias.
+#if REVERSE_CHASSIS_ORIENTATION
+  const float dTheta = (dsL - dsR) / WHEEL_BASE_M;
+#else
   const float dTheta = (dsR - dsL) / WHEEL_BASE_M;
+#endif
 
   // Apply translation (heading dùng IMU đã set ở taskControl).
   const float h = g_pose.headingRad;

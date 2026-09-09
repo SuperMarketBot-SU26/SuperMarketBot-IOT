@@ -184,8 +184,15 @@ inline void odomUpdate() {
   uint8_t pR = g_mapMotSlot[2] > 3 ? 2 : g_mapMotSlot[2];
   float rawDirL = (float)g_motorDir[pL];
   float rawDirR = (float)g_motorDir[pR];
+#if REVERSE_CHASSIS_ORIENTATION
+  // Khi đảo hướng xe (Caster thành trước, Motor thành sau):
+  // Motor quay âm (g_motorDir = -1) đẩy xe tiến về phía Caster (+ds, +RPM)
+  const float dirL = g_motInv[0] ? rawDirL : -rawDirL;
+  const float dirR = g_motInv[2] ? rawDirR : -rawDirR;
+#else
   const float dirL = g_motInv[0] ? -rawDirL : rawDirL;
   const float dirR = g_motInv[2] ? -rawDirR : rawDirR;
+#endif
 
   // Gate: if PWM is in dead-zone, motor isn't spinning → ticks = EMI noise
   const bool motorLActive = abs(g_state.lastMotorSpeed[pL]) > ENC_PWM_DEADZONE;
@@ -224,7 +231,13 @@ inline void odomUpdate() {
   g_state.distRR = g_distRR;
 
   // ---- 6) g_dThetaEncRate cho EKF heading fusion ----
+#if REVERSE_CHASSIS_ORIENTATION
+  // Xe đảo hướng: Bánh FL vật lý (dsL) nằm bên PHẢI xe mới, Bánh FR vật lý (dsR) nằm bên TRÁI xe mới.
+  // Khi xe rẽ trái (CCW, dTheta > 0): bánh phải (dsL) tiến tới (+), bánh trái (dsR) lùi lại (-)
+  const float dThetaWheel = (dsL - dsR) / WHEEL_BASE_M;
+#else
   const float dThetaWheel = (dsR - dsL) / WHEEL_BASE_M;
+#endif
   g_dThetaEncRate = dThetaWheel / (dt > 0.001f ? dt : 0.1f);
 
   // ---- 6b) Wheel-only SE(2) pose for host-side robot_localization ----
