@@ -152,11 +152,12 @@ static void cmd_vel_callback(const void *msgin) {
         }
 
 #if REVERSE_CHASSIS_ORIENTATION
-        // Option 2 (Reversed chassis: Caster = Front, Drive Motors = Rear):
-        // Forward in new frame (towards casters) corresponds to negative PWM for physical motors.
-        // Physical FL is the RIGHT wheel in new frame; Physical FR is the LEFT wheel in new frame.
-        float normLeft  = -normFwd - normRot; // Target for physical FL
-        float normRight = -normFwd + normRot; // Target for physical FR
+        // Option 2 (Reversed chassis: Caster = Front, Drive Motors = Rear) với WebUI "Tiến = như code" (motInv = 0):
+        // Chiều tiến về phía Caster tương ứng với PWM dương.
+        // Bánh FL (Slot 0) là bánh bên PHẢI của xe mới (+normRot khi rẽ trái).
+        // Bánh FR (Slot 2) là bánh bên TRÁI của xe mới (-normRot khi rẽ trái).
+        float normLeft  = normFwd + normRot; // Target for physical FL (bánh phải xe mới)
+        float normRight = normFwd - normRot; // Target for physical FR (bánh trái xe mới)
 #else
         // Arcade drive: differential left/right
         float normLeft  = normFwd - normRot;

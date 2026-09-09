@@ -191,21 +191,13 @@ inline void botStop() {
  */
 inline void botForward(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
-#if REVERSE_CHASSIS_ORIENTATION
-  const int32_t sp[4] = {-(int32_t)pwm, 0, -(int32_t)pwm, 0};
-#else
   const int32_t sp[4] = {(int32_t)pwm, 0, (int32_t)pwm, 0};
-#endif
   motorApplyLayout(sp);
 }
 
 inline void botBackward(uint16_t pwm) {
   if (pwm > PWM_MAX) pwm = PWM_MAX;
-#if REVERSE_CHASSIS_ORIENTATION
-  const int32_t sp[4] = {(int32_t)pwm, 0, (int32_t)pwm, 0};
-#else
   const int32_t sp[4] = {-(int32_t)pwm, 0, -(int32_t)pwm, 0};
-#endif
   motorApplyLayout(sp);
 }
 
@@ -341,11 +333,11 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   // FR (slot 2) = rightS (Động cơ Phải)
   // RL (slot 1) & RR (slot 3) = 0 (Bánh Caster)
 #if REVERSE_CHASSIS_ORIENTATION
-  // Khi đảo hướng xe (Caster thành trước, Motor thành sau):
-  // Bánh bên TRÁI mới là motor FR cũ, bánh bên PHẢI mới là motor FL cũ.
-  // Chiều tiến mới tương ứng với PWM âm của motor vật lý.
-  int32_t fl = -rightS;
-  int32_t fr = -leftS;
+  // Khi giữ WebUI "Tiến = như code" (motInv = 0):
+  // Bánh bên TRÁI xe mới là motor FR cũ (leftS).
+  // Bánh bên PHẢI xe mới là motor FL cũ (rightS).
+  int32_t fl = rightS;
+  int32_t fr = leftS;
 #else
   int32_t fl = leftS;
   int32_t fr = rightS;

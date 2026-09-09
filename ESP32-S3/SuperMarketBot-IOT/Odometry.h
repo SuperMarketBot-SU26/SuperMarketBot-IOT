@@ -185,10 +185,10 @@ inline void odomUpdate() {
   float rawDirL = (float)g_motorDir[pL];
   float rawDirR = (float)g_motorDir[pR];
 #if REVERSE_CHASSIS_ORIENTATION
-  // Khi đảo hướng xe (Caster thành trước, Motor thành sau):
-  // Motor quay âm (g_motorDir = -1) đẩy xe tiến về phía Caster (+ds, +RPM)
-  const float dirL = g_motInv[0] ? rawDirL : -rawDirL;
-  const float dirR = g_motInv[2] ? rawDirR : -rawDirR;
+  // Khi giữ WebUI "Tiến = như code" (motInv = 0):
+  // Motor quay dương (g_motorDir = 1) đẩy xe tiến về phía Caster (+ds, +RPM)
+  const float dirL = g_motInv[0] ? -rawDirL : rawDirL;
+  const float dirR = g_motInv[2] ? -rawDirR : rawDirR;
 #else
   const float dirL = g_motInv[0] ? -rawDirL : rawDirL;
   const float dirR = g_motInv[2] ? -rawDirR : rawDirR;
