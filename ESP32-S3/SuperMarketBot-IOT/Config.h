@@ -365,6 +365,8 @@
   *         Vadc = Vbat * R2/(R1+R2)  (đặt BAT_DIV_* khớp R thật của bạn)
   *  Bật BAT_MONITOR_ENABLE 1 và đặt BAT_ADC_PIN trùng chân còn trống + hỗ trợ ADC. */
  #define BAT_MONITOR_ENABLE  1
+/** 1 = Mô phỏng pin thông minh theo tải và nhiệm vụ (Hướng A an toàn, không cần hàn trở); 0 = Đọc ADC vật lý. */
+#define BAT_SIMULATION_MODE 1
  /** Mặc định tắt. Bật BAT thì đặt chân ADC trống (không trùng enc/LiDAR/UART). */
  #define BAT_ADC_PIN         15
  #define BAT_DIV_R1_KOHM     68.0f
