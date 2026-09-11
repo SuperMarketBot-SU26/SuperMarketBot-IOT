@@ -37,53 +37,11 @@ inline int computeHealthLevel(float tempC, uint32_t heapIntFree) {
 }
 
 #if BAT_MONITOR_ENABLE
-#ifndef BAT_SIMULATION_MODE
-#define BAT_SIMULATION_MODE 1
-#endif
-
-static float s_simBatPct = 96.0f; // Bắt đầu ở mức 96%
-static uint32_t s_lastBatUpdateMs = 0;
-
 inline void batteryMonitorInit() {
-#if !BAT_SIMULATION_MODE
   pinMode(BAT_ADC_PIN, INPUT);
   analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
-#endif
 }
 inline void batteryRead(float &voltsOut, int &pctOut) {
-#if BAT_SIMULATION_MODE
-  const uint32_t now = millis();
-  if (s_lastBatUpdateMs == 0) s_lastBatUpdateMs = now;
-  uint32_t elapsed = now - s_lastBatUpdateMs;
-  if (elapsed >= 1000) {
-    s_lastBatUpdateMs = now;
-    
-    // Kiểm tra xem robot có đang ở trạm sạc không (Node 10023 / DOCK_NODE_ID)
-    bool isAtDock = (g_state.lastNodeId == 10023 || g_state.lastNodeId == (uint32_t)DOCK_NODE_ID 
-                     || (g_wpStatus != nullptr && strstr((const char *)g_wpStatus, "charge") != nullptr));
-                     
-    if (isAtDock) {
-      // Sạc phục hồi: tăng ~0.8% mỗi giây (sạc đầy trong ~1.5 - 2 phút để demo trực tiếp)
-      s_simBatPct += 0.8f;
-      if (s_simBatPct > 100.0f) s_simBatPct = 100.0f;
-    } else {
-      // Kiểm tra chuyển động / tải mission
-      bool isMoving = (abs((int)g_state.cmdX) > 5 || abs((int)g_state.cmdY) > 5 || abs((int)g_state.cmdStrafe) > 5 
-                       || g_state.mode == MODE_WAYPOINT || g_state.mode == MODE_AUTO_EXPLORE);
-      if (isMoving) {
-        // Đang chạy motor / làm mission: sụt ~1% mỗi 45 giây (tương đương ~0.022% / giây)
-        s_simBatPct -= 0.022f;
-      } else {
-        // Đứng yên idle: sụt rất chậm ~1% mỗi 5 phút (~0.0033% / giây)
-        s_simBatPct -= 0.0033f;
-      }
-      if (s_simBatPct < 5.0f) s_simBatPct = 5.0f;
-    }
-  }
-  
-  pctOut = (int)s_simBatPct;
-  voltsOut = BAT_V_EMPTY + (s_simBatPct / 100.0f) * (BAT_V_FULL - BAT_V_EMPTY);
-#else
   const float ratio = (BAT_DIV_R1_KOHM + BAT_DIV_R2_KOHM) / BAT_DIV_R2_KOHM;
   uint32_t sum = 0;
   const int n = 8;
@@ -100,7 +58,6 @@ inline void batteryRead(float &voltsOut, int &pctOut) {
   if (p < 0) p = 0;
   if (p > 100) p = 100;
   pctOut = p;
-#endif
 }
 #else
 inline void batteryMonitorInit() {}
