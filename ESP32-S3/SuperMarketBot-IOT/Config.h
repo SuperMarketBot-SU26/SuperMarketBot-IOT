@@ -453,8 +453,6 @@
     *  Chia sẻ giữa taskControl (Core 1) và taskWebIO (Core 0) nên KHÔNG dùng static cục bộ. */
    volatile int32_t lastMotorSpeed[4];
  
-   /** ID node cuối cùng đã đi qua (tăng dần, do Android/Backend/Waypoint gán). */
-   volatile uint32_t lastNodeId;
    /** Khoảng cách gần đúng tới node tiếp theo (m), -1 nếu không có. */
    volatile float    distToNextNode_m;
    /** Timestamp lần cuối cập nhật line sensor. */
