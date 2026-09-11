@@ -402,6 +402,9 @@ inline void wpNavTick() {
     if (dist < WP_ARRIVE_THRESH_M) {
       Serial.printf("[WP] WP[%d] reached (%.2f,%.2f) dist=%.3fm\n",
                     (int)s_wpIndex, tx, ty, dist);
+      if (s_wpRoute[s_wpIndex].nodeId > 0) {
+        g_state.lastNodeId = (uint32_t)s_wpRoute[s_wpIndex].nodeId;
+      }
       s_wpIndex++;
       oaReset(s_wpOa);
       s_wpT0 = now;

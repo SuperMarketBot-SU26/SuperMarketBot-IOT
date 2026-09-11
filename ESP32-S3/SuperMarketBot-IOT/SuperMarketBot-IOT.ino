@@ -186,7 +186,8 @@ RobotState g_state = {
   .yawKi = 0.0f,
   .yawKd = 2.0f,
   .leftMotorScale = LEFT_MOTOR_SCALE_DEFAULT,
-  .rightMotorScale = RIGHT_MOTOR_SCALE_DEFAULT
+  .rightMotorScale = RIGHT_MOTOR_SCALE_DEFAULT,
+  .lastNodeId = 0
 };
 
 // ── Mutex bảo vệ g_state khi đọc/ghi từ 2 core ─────────────────────
