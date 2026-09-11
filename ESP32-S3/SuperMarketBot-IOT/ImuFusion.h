@@ -321,7 +321,9 @@ inline float step(float gyroZRad, float dt, bool gyroOk) {
   // và nuốt hết micro-correction vào bias. Giờ kết hợp check thêm trạng thái lái.
   const bool hasDriveCmd = (g_state.cmd_velMoving || g_state.cmdY != 0 || g_state.cmdX != 0 || g_state.cmdStrafe != 0);
   const bool encoderStill = (fabsf(g_dThetaEncRate) <= 0.05f); // 0.05 rad/s ~ 2.8 deg/s
-  const bool gyroStill    = (fabsf(gyroZRad)      <= 0.05f); // 0.05 rad/s ~ 2.8 deg/s
+  // Check gyro rate after subtracting estimated bias (avoid raw gyro bias > 0.05 rad/s permanently blocking ZUPT)
+  const float uncompensatedRate = fabsf(gyroZRad - s.bias);
+  const bool gyroStill    = (uncompensatedRate <= 0.10f);      // 0.10 rad/s ~ 5.7 deg/s
   const bool robotMoving  = hasDriveCmd || !encoderStill || !gyroStill;
 
   if (robotMoving) {
