@@ -306,6 +306,59 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     g_state.mode = MODE_MANUAL;
     robotForceManualStop();
 
+  } else if (strcmp(cmd, "MANUAL_TELEOP") == 0 || strcmp(cmd, "joy") == 0 || strcmp(cmd, "teleop") == 0) {
+    int x = 0, y = 0, s = 0;
+    bool parsed = false;
+
+    // Format 1: Root JSON doc contains x, y
+    if (doc.containsKey("x") || doc.containsKey("y")) {
+      x = doc["x"] | 0;
+      y = doc["y"] | 0;
+      s = doc["s"] | 0;
+      parsed = true;
+    }
+    // Format 2: Nested JSON object in payload
+    else if (doc["payload"].is<JsonObject>()) {
+      JsonObject pObj = doc["payload"].as<JsonObject>();
+      x = pObj["x"] | 0;
+      y = pObj["y"] | 0;
+      s = pObj["s"] | 0;
+      parsed = true;
+    }
+    // Format 3: JSON stringified payload
+    else if (doc["payload"].is<const char*>()) {
+      const char *pStr = doc["payload"].as<const char*>();
+      StaticJsonDocument<256> pDoc;
+      if (deserializeJson(pDoc, pStr) == DeserializationError::Ok) {
+        x = pDoc["x"] | 0;
+        y = pDoc["y"] | 0;
+        s = pDoc["s"] | 0;
+        parsed = true;
+      }
+    }
+
+    if (parsed) {
+      if (g_stateMutex != NULL) xSemaphoreTake(g_stateMutex, portMAX_DELAY);
+      if (g_state.mode != MODE_MANUAL) {
+        wpNavCancel();
+        g_state.mode = MODE_MANUAL;
+      }
+      g_state.cmd_velMoving = false; // Ưu tiên lái tay trực tiếp từ ESP32, không qua ROS2
+      if (g_state.baseSpeed == 0) {
+        g_state.baseSpeed = (uint16_t)((uint32_t)PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT / 100u);
+      }
+      g_state.cmdX = (int16_t)constrain(x, -100, 100);
+      g_state.cmdY = (int16_t)constrain(y, -100, 100);
+      g_state.cmdStrafe = (int16_t)constrain(s, -100, 100);
+      if (g_state.cmdX != 0 || g_state.cmdY != 0 || g_state.cmdStrafe != 0) {
+        g_state.joyLastMs = millis();
+      } else {
+        botStop();
+      }
+      if (g_stateMutex != NULL) xSemaphoreGive(g_stateMutex);
+      Serial.printf(">>> LỆNH: LÁI TAY (MANUAL_TELEOP): X=%d, Y=%d, S=%d\n", x, y, s);
+    }
+
   } else {
     Serial.printf("[MQTT WARNING] Lệnh không xác định: %s\n", cmd);
   }
@@ -346,7 +399,9 @@ static void mqttReconnect() {
 
   if (ok) {
     g_mqttClient.subscribe(MQTT_TOPIC_COMMAND);
-    Serial.printf(" OK. Subscribed to topic: %s\n", MQTT_TOPIC_COMMAND);
+    g_mqttClient.subscribe("smartmarketbot/robot/RB001/command");
+    g_mqttClient.subscribe("smartmarketbot/robot/RB0001/command");
+    Serial.printf(" OK. Subscribed to topic: %s (and RB001/RB0001 aliases)\n", MQTT_TOPIC_COMMAND);
     Serial.println(F("\n======================================================="));
     Serial.println(F("[MQTT] >>> ĐÃ KẾT NỐI VỚI BACKEND THÀNH CÔNG! <<<"));
     Serial.println(F("[MQTT] Sẵn sàng nhận lệnh từ: https://interiorly-pinnatisect-adalyn.ngrok-free.dev/"));
