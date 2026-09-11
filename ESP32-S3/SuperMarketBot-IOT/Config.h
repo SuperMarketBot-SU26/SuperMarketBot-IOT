@@ -453,6 +453,8 @@
     *  Chia sẻ giữa taskControl (Core 1) và taskWebIO (Core 0) nên KHÔNG dùng static cục bộ. */
    volatile int32_t lastMotorSpeed[4];
  
+   /** ID node cuối cùng đã đi qua (tăng dần, do Android/Backend/Waypoint gán). */
+   volatile uint32_t lastNodeId;
    /** Khoảng cách gần đúng tới node tiếp theo (m), -1 nếu không có. */
    volatile float    distToNextNode_m;
    /** Timestamp lần cuối cập nhật line sensor. */
@@ -471,9 +473,6 @@
    /** Motor trim scales (NV1a). Volatile vì WebUI/MQTT có thể cập nhật runtime. */
    volatile float leftMotorScale;       // 0.80..1.20, mặc định 1.00
    volatile float rightMotorScale;      // 0.80..1.20, mặc định 1.00
- 
-   /** ID node cuối cùng đã đi qua (tăng dần, do Android/Backend/Waypoint gán). */
-   volatile uint32_t lastNodeId;
  };
  
  /** FSM tự hành (AN_*) — hiển thị trên Web/MQTT khi không cắm USB Serial. */
