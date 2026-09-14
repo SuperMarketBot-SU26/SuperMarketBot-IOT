@@ -268,7 +268,7 @@ inline void robotApplyControlJson(JsonDocument &doc) {
     int slot = -1;
     float scale = 1.0f;
     if (sscanf(payloadStr, "%d_%f", &slot, &scale) == 2) {
-      if (slot >= 0 && slot < 4 && scale >= 0.0f && scale <= 3.0f) {
+      if (slot >= 0 && slot < 4 && scale >= 0.0f && scale <= MOTOR_SCALE_MAX) {
         extern void motorSetScale(uint8_t slot, float scale);
         motorSetScale((uint8_t)slot, scale);
         motorLayoutSaveCurrent(g_prefs);

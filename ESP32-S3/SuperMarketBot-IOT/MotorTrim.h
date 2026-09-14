@@ -70,6 +70,11 @@ inline void motorTrimInit(Preferences &prefs) {
   auto loadScale = [&](const char *key, float defVal) -> float {
     if (!prefs.isKey(key)) return defVal;
     float v = prefs.getFloat(key, defVal);
+    // Tự động khôi phục nếu bánh xe bị tắt (<= 0.05f) từ lúc thử nghiệm 2WD
+    if (v <= 0.05f) {
+      prefs.putFloat(key, defVal);
+      return defVal;
+    }
     if (!(v >= MOTOR_SCALE_MIN && v <= MOTOR_SCALE_MAX)) {
       Serial.printf("[Trim] NVS %s=%.3f out of range -> reset\n", key, v);
       return defVal;

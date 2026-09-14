@@ -1618,6 +1618,13 @@ inline void webUIInit() {
   motorLayoutLoad(g_prefs);
   motorTrimInit(g_prefs);   // NV1c — Load motor trim scale từ NVS
 
+  // Đảm bảo cả 4 bánh đều bật (scale >= 0.1f) cho hệ 4WD
+  for (int i = 0; i < 4; i++) {
+    if (g_motorScale[i] < 0.1f) g_motorScale[i] = 1.0f;
+  }
+  g_state.leftMotorScale = (g_motorScale[0] + g_motorScale[1]) / 2.0f;
+  g_state.rightMotorScale = (g_motorScale[2] + g_motorScale[3]) / 2.0f;
+
   g_state.alignThresholdDeg = g_prefs.getFloat("cfgAlign", 10.0f);
   g_state.rotateSpeedMinPct = g_prefs.getUInt("cfgMinRot", 10);
   g_state.usStopCm = g_prefs.getUInt("cfgStop", 30);

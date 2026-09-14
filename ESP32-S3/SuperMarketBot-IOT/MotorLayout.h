@@ -68,6 +68,12 @@ inline void motorLayoutLoad(Preferences &prefs) {
     char k[8];
     snprintf(k, sizeof(k), "motSc%d", i);
     float sc = prefs.getFloat(k, 1.0f);
+    // Tự động khôi phục về 1.00 nếu bánh xe đang bị tắt (scale <= 0.05 từ lúc thử nghiệm 2WD caster)
+    if (sc <= 0.05f) {
+      sc = 1.0f;
+      prefs.putFloat(k, 1.0f);
+      Serial.printf("[MotorLayout] Banh %d dang bi tat (scale=0) -> Tu dong khoi phuc ve 1.00 cho 4WD\n", i);
+    }
     if (sc >= 0.0f && sc <= MOTOR_SCALE_MAX) {
       g_motorScale[i] = sc;
     }
