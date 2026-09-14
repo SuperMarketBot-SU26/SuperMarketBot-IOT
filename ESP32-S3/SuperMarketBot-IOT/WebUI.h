@@ -506,9 +506,9 @@ details pre{
                 <div class="spd-block__label">Tốc độ · Lái tay</div>
                 <div class="spd-block__hint">Áp dụng khi kéo joystick</div>
               </div>
-              <span class="spd-block__badge" id="spdVal">60%</span>
+              <span class="spd-block__badge" id="spdVal">45%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="50"
+            <input type="range" class="spd-range spd-range--manual" id="spdSlider" min="0" max="100" value="45"
               oninput="sendSpeed(this.value)" aria-label="Tốc độ lái tay phần trăm"/>
             <div class="spd-block__ticks"><span>0%</span><span>50%</span><span>100%</span></div>
           </div>
@@ -518,15 +518,15 @@ details pre{
                 <div class="spd-block__label">Tốc độ · Xoay hướng (4WD)</div>
                 <div class="spd-block__hint">Công suất xoay tại chỗ & căn góc (10–100%)</div>
               </div>
-              <span class="spd-block__badge" id="spdRotVal">55%</span>
+              <span class="spd-block__badge" id="spdRotVal">80%</span>
             </div>
-            <input type="range" class="spd-range spd-range--manual" id="spdRotSlider" min="10" max="100" value="55"
+            <input type="range" class="spd-range spd-range--manual" id="spdRotSlider" min="10" max="100" value="80"
               oninput="sendRotateSpeed(this.value)" aria-label="Tốc độ xoay hướng phần trăm"/>
             <div class="spd-block__ticks"><span>10%</span><span>55%</span><span>100%</span></div>
             <div style="display:flex;gap:6px;margin-top:8px">
-              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(35)">Êm dịu (35%)</button>
-              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(55)">Chuẩn (55%)</button>
-              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(75)">Mạnh (75%)</button>
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(50)">Êm dịu (50%)</button>
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(80)">Chuẩn (80%)</button>
+              <button type="button" class="btn-ghost" style="flex:1;padding:4px 6px;font-size:.65rem;border-radius:6px" onclick="setRotPreset(100)">Mạnh (100%)</button>
             </div>
           </div>
           <div class="spd-block spd-block--auto">
@@ -682,7 +682,7 @@ details pre{
         <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)">Cân bằng động cơ</span>
-            <span style="font-size:.58rem;color:var(--muted)">0.00 – 3.00</span>
+            <span style="font-size:.58rem;color:var(--muted)">0.00 – 5.00</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px">
             <div class="scale-card">
@@ -691,7 +691,7 @@ details pre{
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFL',0.05)">+</button>
               </div>
-              <input type="number" id="scaleFL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleFL" step="0.01" min="0.00" max="5.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
             <div class="scale-card">
               <div class="lbl">RL</div>
@@ -699,7 +699,7 @@ details pre{
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleRL',0.05)">+</button>
               </div>
-              <input type="number" id="scaleRL" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleRL" step="0.01" min="0.00" max="5.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
             <div class="scale-card">
               <div class="lbl">FR</div>
@@ -707,7 +707,7 @@ details pre{
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleFR',0.05)">+</button>
               </div>
-              <input type="number" id="scaleFR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleFR" step="0.01" min="0.00" max="5.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
             <div class="scale-card">
               <div class="lbl">RR</div>
@@ -715,7 +715,7 @@ details pre{
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',-0.05)">−</button>
                 <button type="button" class="scale-step-btn" onclick="adjScale('scaleRR',0.05)">+</button>
               </div>
-              <input type="number" id="scaleRR" step="0.01" min="0.00" max="3.00" value="1.00" inputmode="decimal" class="scale-inp">
+              <input type="number" id="scaleRR" step="0.01" min="0.00" max="5.00" value="1.00" inputmode="decimal" class="scale-inp">
             </div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -915,7 +915,7 @@ function adjScale(id, delta) {
   let val = parseFloat(el.value);
   if (isNaN(val)) val = 1.0;
   val = Math.round((val + delta) * 100) / 100;
-  val = Math.max(0.0, Math.min(3.0, val));
+  val = Math.max(0.0, Math.min(5.0, val));
   el.value = val.toFixed(2);
 }
 
@@ -925,7 +925,7 @@ function applyMotorScale() {
   for(let i = 0; i < 4; i++) {
     let v = parseFloat(document.getElementById(ids[i]).value);
     if (isNaN(v)) v = 1.0;
-    v = Math.max(0.0, Math.min(3.0, v));
+    v = Math.max(0.0, Math.min(5.0, v));
     v = Math.round(v * 100) / 100;
     scales.push(v);
     document.getElementById(ids[i]).value = v.toFixed(2);
@@ -1589,12 +1589,24 @@ inline void webUIBroadcast() {
 }
 inline void webUIInit() {
   g_prefs.begin(NVS_NAMESPACE, true);
-  // Default speeds theo yêu cầu user: di chuyển = 30%, xoay/né vật = 70%
-  g_state.baseSpeed       = g_prefs.getUInt("baseSpeed",      PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT   / 100);
-  g_state.autoBaseSpeed   = g_prefs.getUInt("autoBaseSpeed",  PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT   / 100);
-  g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT  / 100);
-  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed",    PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100);
-  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed",    PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT    / 100);
+  // Default speeds tăng 50% sức mạnh cho 4WD: di chuyển = 45%, xoay/align = 80%, né vật = 85%
+  uint32_t defBase = PWM_MAX * ROBOT_DEFAULT_CRUISE_PCT / 100;
+  g_state.baseSpeed = g_prefs.getUInt("baseSpeed", defBase);
+  if (g_state.baseSpeed < defBase) g_state.baseSpeed = defBase;
+
+  g_state.autoBaseSpeed = g_prefs.getUInt("autoBaseSpeed", defBase);
+  if (g_state.autoBaseSpeed < defBase) g_state.autoBaseSpeed = defBase;
+
+  g_state.waypointBaseSpeed = g_prefs.getUInt("waypointSpeed", defBase);
+  if (g_state.waypointBaseSpeed < defBase) g_state.waypointBaseSpeed = defBase;
+
+  uint32_t defSwerve = PWM_MAX * ROBOT_DEFAULT_OA_ESCAPE_PCT / 100;
+  g_state.swerveBaseSpeed = g_prefs.getUInt("swerveSpeed", defSwerve);
+  if (g_state.swerveBaseSpeed < defSwerve) g_state.swerveBaseSpeed = defSwerve;
+
+  uint32_t defRot = PWM_MAX * ROBOT_DEFAULT_ALIGN_PCT / 100;
+  g_state.rotateBaseSpeed = g_prefs.getUInt("rotateSpeed", defRot);
+  if (g_state.rotateBaseSpeed < defRot) g_state.rotateBaseSpeed = defRot;
 
   uint32_t savedYawScale = g_prefs.getUInt("yawScale", 100);
   if (savedYawScale != 100) {

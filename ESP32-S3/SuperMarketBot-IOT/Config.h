@@ -167,9 +167,9 @@
   * -------------------------------------------------------------------- */
  #define LEFT_MOTOR_SCALE_DEFAULT   1.00f   // Scale bánh Trái (FL+RL) — tắt trim tạm, để 1.00
  #define RIGHT_MOTOR_SCALE_DEFAULT  1.00f   // Scale bánh Phải (FR+RR)
- /** Scale range cho phép cân bằng động cơ tự do (0.00 = tắt bánh, 1.00 = chuẩn, lên tới 3.00) */
+ /** Scale range cho phép cân bằng động cơ tự do (0.00 = tắt bánh, 1.00 = chuẩn, lên tới 5.00) */
  #define MOTOR_SCALE_MIN            0.00f
- #define MOTOR_SCALE_MAX            3.00f
+ #define MOTOR_SCALE_MAX            5.00f
  /** NVS keys (lưu vào flash, giữ qua reboot) */
  #define NVS_KEY_SCALE_L            "motScL"
  #define NVS_KEY_SCALE_R            "motScR"
@@ -215,28 +215,28 @@
  #define AUTO_LIDAR_CLEAR_CM     PATH_CLEAR_MIN_CM
  #define ROBOT_HEAVY_LOAD        1
  #if ROBOT_HEAVY_LOAD
- #define AUTO_CRUISE_SPEED_PCT   30     // Default di chuyển thẳng/lùi = 30% (đã set theo yêu cầu)
+ #define AUTO_CRUISE_SPEED_PCT   45     // Default di chuyển thẳng/lùi = 45% (tăng 50% cho 4WD)
  #define AUTO_MIN_PWM_FRAC       22
  #else
- #define AUTO_CRUISE_SPEED_PCT   30     // Default di chuyển thẳng/lùi = 30%
+ #define AUTO_CRUISE_SPEED_PCT   45     // Default di chuyển thẳng/lùi = 45%
  #define AUTO_MIN_PWM_FRAC       12
  #endif
  /** 0 = chỉ LiDAR trước (khuyến nghị chạy sàn — sau hay đọc sàn → dừng liên tục). 1 = cả sau. */
  #define AUTO_LIDAR_BLOCK_USE_REAR 0
  
- /* ---------- Default speeds theo yêu cầu user (30% / 70%) ----------- */
- #ifndef ROBOT_DEFAULT_CRUISE_PCT
- #define ROBOT_DEFAULT_CRUISE_PCT     30    // Di chuyển bình thường (30%)
- #endif
- #ifndef ROBOT_DEFAULT_OA_ESCAPE_PCT
- #define ROBOT_DEFAULT_OA_ESCAPE_PCT   70    // Né vật, xoay, align (70%)
- #endif
- #ifndef ROBOT_DEFAULT_BACKUP_PCT
- #define ROBOT_DEFAULT_BACKUP_PCT      70    // Backup/lùi (70%)
- #endif
- #ifndef ROBOT_DEFAULT_ALIGN_PCT
- #define ROBOT_DEFAULT_ALIGN_PCT       55    // Xoay align heading chuẩn cân bằng (55%)
- #endif
+ /* ---------- Default speeds tăng 50% sức mạnh cho 4WD (45% / 80% / 85%) ----------- */
+#ifndef ROBOT_DEFAULT_CRUISE_PCT
+#define ROBOT_DEFAULT_CRUISE_PCT     45    // Di chuyển bình thường (tăng 50%: 30% -> 45%)
+#endif
+#ifndef ROBOT_DEFAULT_OA_ESCAPE_PCT
+#define ROBOT_DEFAULT_OA_ESCAPE_PCT   85    // Né vật, xoay, align (85%)
+#endif
+#ifndef ROBOT_DEFAULT_BACKUP_PCT
+#define ROBOT_DEFAULT_BACKUP_PCT      85    // Backup/lùi (85%)
+#endif
+#ifndef ROBOT_DEFAULT_ALIGN_PCT
+#define ROBOT_DEFAULT_ALIGN_PCT       80    // Xoay align heading 4 bánh (tăng 50%: 55% -> 80%)
+#endif
  /** Snap-to-90: khi đến waypoint, nếu bearing-target chênh < ngưỡng, ép về 0/90/180/270 gần nhất */
  #ifndef WP_SNAP_TO_90_ENABLE
  #define WP_SNAP_TO_90_ENABLE    1
