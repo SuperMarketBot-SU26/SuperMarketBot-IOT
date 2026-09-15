@@ -43,7 +43,7 @@ extern volatile char g_mqttPendingStatus[32];
 extern void usFilterReset();
 
 /* ==================== Tham số điều hướng =========================== */
-#define WP_ARRIVE_THRESH_M    0.12f   // Ngưỡng "đến nơi" (m)
+#define WP_ARRIVE_THRESH_M    0.08f   // Ngưỡng "đến nơi" (m) - hạ xuống 8cm theo yêu cầu
 #define WP_STEER_K            55.f    // Hệ số steer Pure Pursuit
 #define WP_CRUISE_SPEED_PCT   (ROBOT_HEAVY_LOAD ? 50 : 40)
 
