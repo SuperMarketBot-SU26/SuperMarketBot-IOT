@@ -189,10 +189,10 @@ inline void sensorsCommitPhyToState(const int16_t phy[4]) {
   g_state.usRF = usSlot[2]; // Port 2 đại diện cho Left
   g_state.usRR = usSlot[3]; // Port 3 đại diện cho Right
 
-  g_state.usFront = g_state.usLF;
-  g_state.usBack  = g_state.usLR;
-  g_state.usLeft  = g_state.usRF;
-  g_state.usRight = g_state.usRR;
+  g_state.usFront = g_state.usLR;   // physical back sensor → now logical front (robot direction reversed)
+  g_state.usBack  = g_state.usLF;   // physical front sensor → now logical back
+  g_state.usLeft  = g_state.usRR;   // physical right sensor → now logical left (robot direction reversed)
+  g_state.usRight = g_state.usRF;   // physical left sensor → now logical right
   g_state.usLastUpdateMs = millis();
 }
 
