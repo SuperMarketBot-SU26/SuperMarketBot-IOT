@@ -588,7 +588,7 @@ static void taskControl(void *pvParams) {
               pidYawReset();
             }
             float steer = constrain(pidYawCompute(s_tgtH, g_pose.headingRad, dt_s), -85.f, 85.f);
-            botDrive((int16_t)steer, g_state.cmdY, g_state.baseSpeed);
+            botDrive((int16_t)(-steer), g_state.cmdY, g_state.baseSpeed);
           } else {
             // Heading lock only active for pure fwd/back. Any turn or stop → reset.
             if (s_have) {

@@ -452,15 +452,14 @@ inline void wpNavTick() {
       if (fabsf(alpha) > 0.349f) {   // > 20° → cần xoay trước khi tiến
         // ──── Khóa chiều xoay ĐÚNG ngay từ đầu, KHÔNG bao giờ đổi lại ────
         // Đã xác nhận từ log: botRotateCWImmediate → heading TĂNG
-        //                     botRotateCCWImmediate → heading GIẢM
         // alpha = segmentHeading - headingRad (normalized -π..π)
-        //   alpha > 0 → cần TĂNG heading → CW  (dir = -1)
-        //   alpha < 0 → cần GIẢM heading → CCW (dir = +1)
+        //   alpha > 0 → cần TĂNG heading → CCW (dir = +1)
+        //   alpha < 0 → cần GIẢM heading → CW  (dir = -1)
         if (s_wpSpinStart == 0) {
           s_wpSpinStart = now;
-          s_wpSpinDir = (alpha > 0.f) ? -1 : +1;  // ĐÚNG: không flip sau khi set
+          s_wpSpinDir = (alpha > 0.f) ? 1 : -1;
           Serial.printf("[WP SPIN START] alpha=%.2f rad → dir=%s (shortest path)\n",
-                        alpha, s_wpSpinDir < 0 ? "CW(+hdg)" : "CCW(-hdg)");
+                        alpha, s_wpSpinDir > 0 ? "CCW(+hdg)" : "CW(-hdg)");
         }
         // KHÔNG update s_wpSpinDir nữa — khóa hoàn toàn cho đến khi alpha < 20°
 
@@ -478,10 +477,10 @@ inline void wpNavTick() {
           lastSpinLog = now;
           Serial.printf("[WP SPIN] alpha=%.2f rad (%.0f deg) dir=%s pwm=%u t=%ums\n",
                         alpha, alpha*180.f/(float)M_PI,
-                        s_wpSpinDir < 0 ? "CW" : "CCW", spinPwm, now - s_wpSpinStart);
+                        s_wpSpinDir > 0 ? "CCW" : "CW", spinPwm, now - s_wpSpinStart);
         }
-        if (s_wpSpinDir < 0) botRotateCWImmediate(spinPwm);
-        else                 botRotateCCWImmediate(spinPwm);
+        if (s_wpSpinDir > 0) botRotateCCWImmediate(spinPwm);
+        else                 botRotateCWImmediate(spinPwm);
 
         // Timeout 6s → ép heading để thoát spin (phòng IMU drift / motor stall)
         if (now - s_wpSpinStart > 6000u) {
@@ -522,7 +521,7 @@ inline void wpNavTick() {
       targetHeading = atan2f(ty - g_pose.y, tx - g_pose.x);
     }
     float yawOut = pidYawCompute(targetHeading, g_pose.headingRad, dt_s);
-    steer = (int16_t)constrain(yawOut, -100, 100);
+    steer = (int16_t)constrain(-yawOut, -100, 100);
     strafeCmd = 0;
 
     uint16_t cruiseSpd = g_state.waypointBaseSpeed;   // Ưu tiên slider Waypoint riêng

@@ -556,7 +556,7 @@ inline bool oaCruiseForward(OaContext &ctx, int16_t frontCm, uint16_t cruisePwm)
   extern bool g_imuEnabled;
   if (g_imuEnabled) {
     float yawOut = pidYawCompute(ctx.headingBefore, g_pose.headingRad, dt_s);
-    steer = (int16_t)constrain(yawOut, -100, 100);
+    steer = (int16_t)constrain(-yawOut, -100, 100);
   }
 #endif
   

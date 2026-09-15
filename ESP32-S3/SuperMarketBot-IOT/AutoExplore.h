@@ -314,9 +314,9 @@ inline void tick() {
 
       // 3) Bám tường: nếu quá gần → rẽ phải nhẹ, nếu quá xa → rẽ trái nhẹ
       float wallErr = (float)rightMm - (float)AUTO_EXPLORE_MIN_WALL_DIST_MM;
-      // wallErr > 0: quá xa (rẽ trái → steer âm với wall ở bên phải)
-      // wallErr < 0: quá gần (rẽ phải → steer dương)
-      float steer = -wallErr / 100.0f;        // scale: 100mm = 1.0 steer
+      // wallErr > 0: quá xa tường phải → rẽ phải (steer > 0) để lại gần
+      // wallErr < 0: quá gần tường phải → rẽ trái (steer < 0) để dãn ra
+      float steer = wallErr / 100.0f;        // scale: 100mm = 1.0 steer
       steer = constrain(steer, -40.0f, 40.0f);
 
       uint16_t spd = g_state.waypointBaseSpeed;
@@ -358,7 +358,7 @@ inline void tick() {
           s.hasWallTarget = true;
           Serial.println(F("[AUTO-EXPLORE] → CRUISE (đã xoay đến hướng trống)"));
         } else {
-          int sign = (dh > 0) ? 1 : -1;
+          int sign = (dh > 0) ? -1 : 1;
           botDriveSmoothNormal((int16_t)(sign * 50), 0, spd);
         }
         // Timeout phase 2: 5s

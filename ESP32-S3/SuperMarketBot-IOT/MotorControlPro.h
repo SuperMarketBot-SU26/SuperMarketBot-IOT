@@ -306,10 +306,23 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
     //    fl=rl=left, fr=rr=right
     constexpr int32_t FWD_GAIN  = 115;
     constexpr int32_t TURN_GAIN = 135;
-    int32_t leftS  = (fwdScaled  * FWD_GAIN  + turnScaled * TURN_GAIN) / 100;
-    int32_t rightS = (fwdScaled  * FWD_GAIN  - turnScaled * TURN_GAIN) / 100;
+    // Đồng bộ chiều rẽ với botDrive: turn > 0 -> rẽ phải, turn < 0 -> rẽ trái
+    int32_t leftS  = (fwdScaled  * FWD_GAIN  - turnScaled * TURN_GAIN) / 100;
+    int32_t rightS = (fwdScaled  * FWD_GAIN  + turnScaled * TURN_GAIN) / 100;
     int32_t fl = leftS, rl = leftS;
     int32_t fr = rightS, rr = rightS;
+
+    // Giảm ma sát giằng xé 2 trục (Tire Scrub Relief)
+    if (abs(turnF) > 5) {
+        int32_t followerRatio = 82 + (min((int32_t)abs(fwdF), 50) * 18) / 50;
+        if (fwdF >= 0) {
+            rl = (leftS  * followerRatio) / 100;
+            rr = (rightS * followerRatio) / 100;
+        } else {
+            fl = (leftS  * followerRatio) / 100;
+            fr = (rightS * followerRatio) / 100;
+        }
+    }
 
     // 6) Normalize để không saturate motor.
     int32_t maxAllowedSpd = max((int32_t)base, (int32_t)rotBase);
@@ -332,16 +345,9 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
         locSetDriveCmd(0, 0);
     }
 
-    // 8) Apply to motors (smooth or immediate).
-    if (smooth) {
-        motorDriveSmooth(MID_FL, fl);
-        motorDriveSmooth(MID_RL, rl);
-        motorDriveSmooth(MID_FR, fr);
-        motorDriveSmooth(MID_RR, rr);
-    } else {
-        const int32_t sp[4] = {fl, rl, fr, rr};
-        motorApplyLayout(sp);
-    }
+    // 8) Áp dụng layout và scale đầy đủ
+    const int32_t sp[4] = {fl, rl, fr, rr};
+    motorApplyLayout(sp);
 }
 
 #endif // MOTOR_CONTROL_PRO_H
