@@ -96,9 +96,9 @@ static void cmd_vel_callback(const void *msgin) {
 
     constexpr float ROS2_ANG_MIN = 0.02f;
     constexpr float ROS2_LIN_MIN = 0.005f;
-    constexpr float ROS2_LIN_MAX = 0.40f;
+    constexpr float ROS2_LIN_MAX = 0.20f;  // Reduced from 0.40 to 0.20 so 0.10m/s maps to 50% norm (736 PWM)
     constexpr float ROS2_ANG_MAX_FWD = 2.00f;
-    constexpr int32_t ROS2_PWM_MIN = 450;
+    constexpr int32_t ROS2_PWM_MIN = 500;  // Raised from 450 to 500 to overcome 4WD static friction
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
     g_state.cmd_velLastMs = nowMs;
@@ -500,7 +500,8 @@ inline void spin() {
         s_last_us_ms = now;
         g_us_front_msg.header.stamp.sec = (int32_t)(now / 1000);
         g_us_front_msg.header.stamp.nanosec = (uint32_t)((now % 1000) * 1000000);
-        float dist_m = g_state.usFront / 100.0f;
+        // If usFront is <= 0 (sensor timeout / no echo), report 2.0m (clear path) instead of 0.0m
+        float dist_m = (g_state.usFront > 0) ? ((float)g_state.usFront / 100.0f) : 2.0f;
         g_us_front_msg.range = dist_m;
         rcl_publish(&g_us_front_pub, &g_us_front_msg, NULL);
 
