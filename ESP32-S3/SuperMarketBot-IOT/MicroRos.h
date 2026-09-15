@@ -109,8 +109,10 @@ static void cmd_vel_callback(const void *msgin) {
         float normFwd = lin / ROS2_LIN_MAX;
         float normRot = ang / ROS2_ANG_MAX_FWD;
 
-        float normLeft  = normFwd - normRot;
-        float normRight = normFwd + normRot;
+        // Sửa chiều xoay chuẩn ROS 2 (REP-103: ang > 0 là quay TRÁI / CCW):
+        // Trên cơ cấu phần cứng thực tế của xe: Bên trái (+), bên phải (-) -> xe quay TRÁI.
+        float normLeft  = normFwd + normRot;
+        float normRight = normFwd - normRot;
 
         float maxNorm = max(fabsf(normLeft), fabsf(normRight));
         if (maxNorm > 1.0f) {
@@ -132,7 +134,22 @@ static void cmd_vel_callback(const void *msgin) {
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
         
-        const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
+        // 4WD ICR Scrub Relief: Trục trước dẫn hướng 100%, trục sau bám mềm 82% khi xoay tại chỗ
+        int32_t fl = leftPwm,  rl = leftPwm;
+        int32_t fr = rightPwm, rr = rightPwm;
+        if (fabsf(normRot) > 0.05f) {
+            float fwdRatio = fabsf(normFwd);
+            if (fwdRatio > 0.50f) fwdRatio = 0.50f;
+            int32_t followerRatio = 82 + (int32_t)(fwdRatio * 18.0f / 0.50f); // 82% -> 100%
+            if (normFwd >= 0.0f) {
+                rl = (leftPwm  * followerRatio) / 100;
+                rr = (rightPwm * followerRatio) / 100;
+            } else {
+                fl = (leftPwm  * followerRatio) / 100;
+                fr = (rightPwm * followerRatio) / 100;
+            }
+        }
+        const int32_t sp[4] = {fl, rl, fr, rr};
         ::motorApplyLayout(sp);
     } else {
         ::botStop();
