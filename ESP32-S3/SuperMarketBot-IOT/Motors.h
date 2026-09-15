@@ -271,7 +271,8 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
 
   if (xAbs > 5) {
     // Tỉ lệ trục phụ mềm hơn: từ 82% (khi xoay tại chỗ y=0) tăng mượt lên 100% (khi chạy thẳng y>=50)
-    int32_t followerRatio = 82 + (min(yAbs, (int32_t)50) * 18) / 50; // 82% -> 100%
+    int32_t clampedY = (yAbs > 50) ? 50 : yAbs;
+    int32_t followerRatio = 82 + (clampedY * 18) / 50; // 82% -> 100%
     if (y >= 0) {
       // Tiến hoặc xoay tại chỗ: Trục trước dẫn hướng, trục sau bám mềm
       rl = (leftS  * followerRatio) / 100;

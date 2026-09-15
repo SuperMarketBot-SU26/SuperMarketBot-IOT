@@ -314,7 +314,9 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
 
     // Giảm ma sát giằng xé 2 trục (Tire Scrub Relief)
     if (abs(turnF) > 5) {
-        int32_t followerRatio = 82 + (min((int32_t)abs(fwdF), 50) * 18) / 50;
+        int32_t fwdAbs = abs((int32_t)fwdF);
+        int32_t clampedFwd = (fwdAbs > 50) ? 50 : fwdAbs;
+        int32_t followerRatio = 82 + (clampedFwd * 18) / 50;
         if (fwdF >= 0) {
             rl = (leftS  * followerRatio) / 100;
             rr = (rightS * followerRatio) / 100;
