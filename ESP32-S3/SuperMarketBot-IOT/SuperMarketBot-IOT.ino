@@ -601,9 +601,8 @@ static void taskControl(void *pvParams) {
             uint16_t activeSpeed = baseSpd;
             if (g_state.cmdX != 0) {
               uint16_t rotSpeed = (g_state.rotateBaseSpeed > 0) ? g_state.rotateBaseSpeed : baseSpd;
-              // Nếu xoay tại chỗ (cmdY == 0): lấy đúng rotSpeed từ thanh trượt
-              // Nếu vừa tiến vừa rẽ: lấy tốc độ phù hợp giữa base và rot
-              activeSpeed = (g_state.cmdY == 0) ? rotSpeed : ((rotSpeed + baseSpd) / 2);
+              // Nếu có xoay hướng (cmdX != 0), ưu tiên nâng công suất theo g_state.rotateBaseSpeed (slider Xoay Hướng)
+              activeSpeed = (g_state.cmdY == 0) ? rotSpeed : ((rotSpeed > baseSpd) ? rotSpeed : baseSpd);
             }
             botDrive(g_state.cmdX, g_state.cmdY, activeSpeed);
           }

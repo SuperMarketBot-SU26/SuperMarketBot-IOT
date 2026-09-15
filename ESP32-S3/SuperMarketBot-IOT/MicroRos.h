@@ -96,62 +96,19 @@ static void cmd_vel_callback(const void *msgin) {
 
     constexpr float ROS2_ANG_MIN = 0.02f;
     constexpr float ROS2_LIN_MIN = 0.005f;
-    // *** CRITICAL FIX: Reduced from 0.40 to 0.05 ***
-    // At desired_linear_vel=0.04, normFwd=0.04/0.10=0.40 → good PWM resolution with headroom
-    constexpr float ROS2_LIN_MAX = 0.10f;
-    constexpr float ROS2_ANG_MAX_FWD = 1.00f;  // Reduced from 2.0: tighter angular mapping for precision
-    constexpr int32_t ROS2_PWM_MIN = 300;       // Straight-line minimum PWM
-    constexpr int32_t ROS2_PWM_ROT = 520;       // Rotation minimum PWM (4WD skid-steer needs more torque)
+    constexpr float ROS2_LIN_MAX = 0.40f;
+    constexpr float ROS2_ANG_MAX_FWD = 2.00f;
+    constexpr int32_t ROS2_PWM_MIN = 450;
     constexpr int32_t ROS2_PWM_MAX = (int32_t)PWM_MAX;
 
-    // *** SMOOTHING FILTER STATE (persistent across calls) ***
-    // Exponential Moving Average (EMA) eliminates sudden PWM jumps that cause
-    // encoder jitter → bad odometry → SLAM map drift.
-    // alpha=0.3: each cmd_vel moves PWM 30% toward target. At 10-15 Hz cmd_vel,
-    // settling time ≈ 200-300ms → smooth ramp, no motor stutter.
-    static int32_t s_smoothL = 0;
-    static int32_t s_smoothR = 0;
-    constexpr float SMOOTH_ALPHA = 0.3f;
-
     g_state.cmd_velLastMs = nowMs;
+    g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
 
-    if (fabsf(lin) > ROS2_LIN_MIN || fabsf(ang) > ROS2_ANG_MIN) {
-        g_state.cmd_velMoving = true;
-        // Normalize velocity to [-1, 1] range
-        float normFwd = constrain(lin / ROS2_LIN_MAX, -1.0f, 1.0f);
-        float normRot = constrain(ang / ROS2_ANG_MAX_FWD, -1.0f, 1.0f);
+    if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
+        // Continuous Arcade Drive (No stepping/pausing needed for USB Serial)
+        float normFwd = lin / ROS2_LIN_MAX;
+        float normRot = ang / ROS2_ANG_MAX_FWD;
 
-        // Heading Lock for straight driving: if no rotation is commanded (pure straight driving),
-        // apply PID correction using IMU heading to keep the physical robot moving dead straight!
-        static float s_rosTgtH = 0.f;
-        static bool  s_rosHaveH = false;
-        static uint32_t s_rosLastH_ms = 0;
-        uint32_t nowH = millis();
-        float dt_h = (s_rosLastH_ms > 0) ? (float)(nowH - s_rosLastH_ms) * 0.001f : 0.02f;
-        s_rosLastH_ms = nowH;
-
-        if (g_imuEnabled && fabsf(normRot) < 0.02f && fabsf(normFwd) > 0.02f) {
-            if (!s_rosHaveH) {
-                s_rosTgtH = g_pose.headingRad;
-                pidYawReset();
-                s_rosHaveH = true;
-            }
-            float dh = wpNormalizeAngle(g_pose.headingRad - s_rosTgtH);
-            if (fabsf(dh) > 0.436f) {
-                s_rosTgtH = g_pose.headingRad;
-                pidYawReset();
-            }
-            float steer = constrain(pidYawCompute(s_rosTgtH, g_pose.headingRad, dt_h), -25.f, 25.f);
-            float steerNorm = steer / 100.0f;
-            normRot = steerNorm;
-        } else {
-            if (s_rosHaveH) {
-                pidYawReset();
-                s_rosHaveH = false;
-            }
-        }
-
-        // Arcade drive: differential left/right
         float normLeft  = normFwd - normRot;
         float normRight = normFwd + normRot;
 
@@ -161,111 +118,24 @@ static void cmd_vel_callback(const void *msgin) {
             normRight /= maxNorm;
         }
 
-        // Detect in-place rotation for Kickstart and Gyro Assist
-        static uint32_t s_rosRotStartMs = 0;
-        static bool s_rosWasRotating = false;
-        static int32_t s_rosGyroBoost = 0;
-        static uint32_t s_lastRosBoostMs = 0;
-
-        bool isRosPureRot = (fabsf(normRot) > 0.05f && fabsf(normFwd) < 0.12f);
-
-        if (isRosPureRot) {
-            ::g_isRotating = true;  // Kích hoạt ramp chậm (120) trong motorDrive
-            if (!s_rosWasRotating) {
-                s_rosRotStartMs = nowMs;
-                s_rosWasRotating = true;
-                s_rosGyroBoost = 0;
-                s_lastRosBoostMs = nowMs;
-            }
-
-            // Closed-loop gyro assist (sau 160ms): step nhỏ +8/80ms, max 100
-            if (nowMs - s_rosRotStartMs > 160 && (nowMs - s_lastRosBoostMs >= 80)) {
-                s_lastRosBoostMs = nowMs;
-                float actualOmega = fabsf(g_state.currentGyroZ);
-                if (actualOmega < 0.06f) {
-                    if (s_rosGyroBoost < 100) s_rosGyroBoost += 8;
-                } else if (actualOmega >= 0.15f) {
-                    if (s_rosGyroBoost > 0) s_rosGyroBoost -= 8;
-                }
-            }
-        } else {
-            ::g_isRotating = false;
-            s_rosWasRotating = false;
-            s_rosRotStartMs = 0;
-            s_rosGyroBoost = 0;
-        }
-
-        // Map normalized value to PWM with separate straight/rotation thresholds
-        // Khi xoay: dùng rotateBaseSpeed làm ceiling (không phải baseSpeed)
-        int32_t rotPwmMax = (g_state.rotateBaseSpeed > 0)
-                            ? (int32_t)g_state.rotateBaseSpeed : ROS2_PWM_MAX;
         auto mapPwm = [&](float norm) -> int32_t {
             if (fabsf(norm) < 0.01f) return 0;
-            
-            float rotFactor = constrain(fabsf(normRot) * 3.0f, 0.0f, 1.0f);
-            int32_t activeMinPwm = ROS2_PWM_MIN + (int32_t)(rotFactor * (ROS2_PWM_ROT - ROS2_PWM_MIN));
-            int32_t activeCeilPwm = isRosPureRot ? rotPwmMax : ROS2_PWM_MAX;
-            
-            int32_t p = (int32_t)(fabsf(norm) * (activeCeilPwm - activeMinPwm) + activeMinPwm);
-            if (p > activeCeilPwm) p = activeCeilPwm;
+            int32_t activeMinPwm = (fabsf(normRot) > 0.05f) ? 550 : ROS2_PWM_MIN;
+            int32_t p = (int32_t)(fabsf(norm) * (ROS2_PWM_MAX - activeMinPwm) + activeMinPwm);
+            if (p > ROS2_PWM_MAX) p = ROS2_PWM_MAX;
             return (norm >= 0) ? p : -p;
         };
 
-        int32_t targetL = mapPwm(normLeft);
-        int32_t targetR = mapPwm(normRight);
-
-        // Anti-Stiction Burst: dùng botApplyStictionBurst() bypass scale cho 100ms đầu.
-        // Sau burst, chuyển về EMA smoothed normal operation.
-        if (isRosPureRot && (nowMs - s_rosRotStartMs < STICTION_BURST_MS)) {
-            // Phase 0: Bypass scale — full PWM tất cả 4 motor để phá ma sát tĩnh
-            // normRot > 0 = CCW (ROS2 convention), normRot < 0 = CW
-            bool burstCw = (normRot < 0);
-            ::botApplyStictionBurst(burstCw);
-            locSetDriveCmd(0, 0);
-            return;  // Skip EMA — không smooth trong burst phase
-        }
-
-        // Phase 1+2: Normal kickstart (KICK_MIN 650) hoặc Gyro Boost
-        if (isRosPureRot) {
-            if (nowMs - s_rosRotStartMs < 250) {
-                constexpr int32_t KICK_MIN_4WHEEL = 650;
-                int32_t softKickL = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetL) * 120 / 100);
-                if (softKickL < KICK_MIN_4WHEEL) softKickL = KICK_MIN_4WHEEL;
-                targetL = (targetL >= 0) ? softKickL : -softKickL;
-
-                int32_t softKickR = (int32_t)min((int32_t)ROS2_PWM_MAX, (int32_t)abs(targetR) * 120 / 100);
-                if (softKickR < KICK_MIN_4WHEEL) softKickR = KICK_MIN_4WHEEL;
-                targetR = (targetR >= 0) ? softKickR : -softKickR;
-            } else if (s_rosGyroBoost > 0) {
-                if (targetL > 0) targetL = min((int32_t)ROS2_PWM_MAX, targetL + s_rosGyroBoost);
-                else if (targetL < 0) targetL = max(-(int32_t)ROS2_PWM_MAX, targetL - s_rosGyroBoost);
-                if (targetR > 0) targetR = min((int32_t)ROS2_PWM_MAX, targetR + s_rosGyroBoost);
-                else if (targetR < 0) targetR = max(-(int32_t)ROS2_PWM_MAX, targetR - s_rosGyroBoost);
-            }
-        }
-
-        // *** APPLY SMOOTHING FILTER ***
-        // EMA low-pass: smooth_pwm = α * target + (1-α) * smooth_pwm
-        s_smoothL = (int32_t)(SMOOTH_ALPHA * (float)targetL + (1.0f - SMOOTH_ALPHA) * (float)s_smoothL);
-        s_smoothR = (int32_t)(SMOOTH_ALPHA * (float)targetR + (1.0f - SMOOTH_ALPHA) * (float)s_smoothR);
-
+        int32_t leftPwm  = mapPwm(normLeft);
+        int32_t rightPwm = mapPwm(normRight);
         locSetDriveCmd(
-            (int16_t)constrain((int)(s_smoothL * 100L / ROS2_PWM_MAX), -100, 100),
-            (int16_t)constrain((int)(s_smoothR * 100L / ROS2_PWM_MAX), -100, 100));
+            (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
+            (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
         
-        const int32_t sp[4] = {s_smoothL, s_smoothL, s_smoothR, s_smoothR};
+        const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
         ::motorApplyLayout(sp);
     } else {
-        // Smooth stop: ramp down instead of instant brake
-        s_smoothL = (int32_t)((1.0f - SMOOTH_ALPHA) * (float)s_smoothL);
-        s_smoothR = (int32_t)((1.0f - SMOOTH_ALPHA) * (float)s_smoothR);
-        if (abs(s_smoothL) < 20 && abs(s_smoothR) < 20) {
-            s_smoothL = 0; s_smoothR = 0;
-            ::botStop();
-        } else {
-            const int32_t sp[4] = {s_smoothL, s_smoothL, s_smoothR, s_smoothR};
-            ::motorApplyLayout(sp);
-        }
+        ::botStop();
     }
 }
 
