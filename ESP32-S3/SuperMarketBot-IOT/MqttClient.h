@@ -25,12 +25,12 @@
  *    MQTT_BROKER_PORT  1883
  *    MQTT_USER / MQTT_PASS  ""
  *
- *  ── CHẾ ĐỘ CLOUD (HiveMQ Cloud Free) ─────────────────────────────
+ *  ── CHẾ ĐỘ CLOUD (EMQX Cloud Serverless - Singapore) ───────────
  *    MQTT_USE_TLS  1
- *    MQTT_BROKER_HOST  "xxxxxxxx.s2.eu.hivemq.cloud"
+ *    MQTT_BROKER_HOST  "l07702d7.ala.asia-southeast1.emqxsl.com"
  *    MQTT_BROKER_PORT  8883
- *    MQTT_USER  "username_tren_hivemq"
- *    MQTT_PASS  "password_tren_hivemq"
+ *    MQTT_USER  "Smartmarketbot"
+ *    MQTT_PASS  "Passsep490"
  *
  *  Đổi MQTT_USE_TLS = 0/1 để chọn chế độ rồi nạp lại.
  * ================================================================= */
@@ -368,8 +368,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 /* ==================== INIT ========================================= */
 static void mqttInit() {
 #if MQTT_USE_TLS
-  /* HiveMQ Cloud dùng cert CA chính thống (Let's Encrypt) — setInsecure() đủ cho demo.
-   * Nếu muốn verify đúng: g_wifiClient.setCACert(HIVEMQ_ROOT_CA_PEM); */
+  /* EMQX Cloud dùng TLS chuẩn (Let's Encrypt CA) — setInsecure() tiện lợi và tối ưu RAM cho ESP32. */
   g_wifiClient.setInsecure();
   Serial.println(F("[MQTT] TLS mode: WiFiClientSecure (setInsecure for demo)"));
 #endif

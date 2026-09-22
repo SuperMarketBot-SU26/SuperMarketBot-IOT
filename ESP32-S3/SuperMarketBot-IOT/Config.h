@@ -317,7 +317,7 @@
  #define VISION_HTTPS_ENABLE     0
  /** Sau boot: ép MANUAL + không nhận Auto/Waypoint/MQTT navigate (ms). */
  #define BOOT_GUARD_MS           12000u
- /** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (HiveMQ Cloud hoặc local broker). */
+ /** 0 = chỉ SoftAP (web mượt). 1 = thêm STA + MQTT (EMQX Cloud hoặc local broker). */
  #define WIFI_STA_ENABLE         1
  /** 0 = Blocking: đợi WiFi kết nối xong mới tiếp tục boot (10s+ chờ).
   *  1 = Non-blocking: WiFi + micro-ROS init chạy background trong task riêng.
