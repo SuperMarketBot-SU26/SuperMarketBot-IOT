@@ -34,8 +34,8 @@
  *
  *  Đổi MQTT_USE_TLS = 0/1 để chọn chế độ rồi nạp lại.
  * ================================================================= */
-#define MQTT_USE_TLS       1           // 0 = local Mosquitto | 1 = HiveMQ Cloud TLS
-#define MQTT_BROKER_HOST   "60922debd474446a84747b871c4a8182.s1.eu.hivemq.cloud"
+#define MQTT_USE_TLS       1           // 0 = local Mosquitto | 1 = EMQX Cloud TLS
+#define MQTT_BROKER_HOST   "l07702d7.ala.asia-southeast1.emqxsl.com"
 #define MQTT_BROKER_PORT   8883
 /** Mã robot — dùng làm client ID và tên topic */
 #define MQTT_CLIENT_ID     "RB001"
