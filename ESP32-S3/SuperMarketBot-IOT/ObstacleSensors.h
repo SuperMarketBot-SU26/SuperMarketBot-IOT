@@ -44,10 +44,7 @@ inline bool obsRearBlocked() {
 }
 
 inline bool obsAnyCornerBlocked() {
-  return (obsCmValid(g_state.usLF) && g_state.usLF < (int16_t)g_state.usStopCm)
-      || (obsCmValid(g_state.usLR) && g_state.usLR < (int16_t)g_state.usStopCm)
-      || (obsCmValid(g_state.usRF) && g_state.usRF < (int16_t)g_state.usStopCm)
-      || (obsCmValid(g_state.usRR) && g_state.usRR < (int16_t)g_state.usStopCm);
+  return obsFrontBlocked() || obsRearBlocked();
 }
 
 inline bool obsOaTriggered(int16_t frontCm) {

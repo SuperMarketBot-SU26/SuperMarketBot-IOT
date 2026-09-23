@@ -149,11 +149,9 @@ inline void sensorsInit() {
 #if USE_HC_SR04_HARDWARE
   pinMode(US_TRIG, OUTPUT);
   digitalWrite(US_TRIG, LOW);
-  pinMode(US_ECHO_LF, INPUT_PULLDOWN);
-  pinMode(US_ECHO_RL, INPUT_PULLDOWN);
-  pinMode(US_ECHO_RF, INPUT_PULLDOWN);
-  pinMode(US_ECHO_RR, INPUT_PULLDOWN);
-  Serial.println(F("[US] HC-SR04 x4 (LF/RL/RF/RR) — stop <30cm, OA tu 42cm."));
+  pinMode(US_ECHO_LF, INPUT_PULLDOWN); // Cảm biến TRƯỚC (Pin 13)
+  pinMode(US_ECHO_RL, INPUT_PULLDOWN); // Cảm biến SAU (Pin 12)
+  Serial.println(F("[US] HC-SR04 x2 (Front/Back) — stop <35cm."));
 #endif
 
 #if USE_LIDAR_HARDWARE
@@ -175,24 +173,17 @@ inline void sensorsInit() {
 #endif
 }
 
-/** Gán 4 khoảng cách vật lý (F,B,L,R) → góc xe + usFront/Back/Left/Right. */
+/** Gán 2 khoảng cách siêu âm thật (Trước, Sau) vào g_state, 2 bên sườn gán giá trị max an toàn. */
 inline void sensorsCommitPhyToState(const int16_t phy[4]) {
-  int16_t usSlot[4];
-  for (int s = 0; s < 4; s++) {
-    uint8_t p = g_mapUsSlot[s];
-    if (p > 3) p = (uint8_t)s;
-    usSlot[s] = phy[p];
-  }
-  // Gán 4 cổng vật lý trực tiếp cho 4 hướng logic: F (0), B (1), L (2), R (3)
-  g_state.usLF = usSlot[0]; // Port 0 đại diện cho Front
-  g_state.usLR = usSlot[1]; // Port 1 đại diện cho Back
-  g_state.usRF = usSlot[2]; // Port 2 đại diện cho Left
-  g_state.usRR = usSlot[3]; // Port 3 đại diện cho Right
+  g_state.usLF = phy[US_PHY_F];
+  g_state.usLR = phy[US_PHY_B];
+  g_state.usRF = (int16_t)US_PING_MAX_CM;
+  g_state.usRR = (int16_t)US_PING_MAX_CM;
 
-  g_state.usFront = g_state.usLR;   // physical back sensor → now logical front (robot direction reversed)
-  g_state.usBack  = g_state.usLF;   // physical front sensor → now logical back
-  g_state.usLeft  = g_state.usRR;   // physical right sensor → now logical left (robot direction reversed)
-  g_state.usRight = g_state.usRF;   // physical left sensor → now logical right
+  g_state.usFront = phy[US_PHY_F];   // Cảm biến phía TRƯỚC (Pin 13)
+  g_state.usBack  = phy[US_PHY_B];   // Cảm biến phía SAU (Pin 12)
+  g_state.usLeft  = (int16_t)US_PING_MAX_CM;
+  g_state.usRight = (int16_t)US_PING_MAX_CM;
   g_state.usLastUpdateMs = millis();
 }
 
@@ -237,31 +228,21 @@ inline void sensorsPollUS() {
   static uint8_t currentSensorIdx = 0;
   int16_t r = 0;
   
-  switch (currentSensorIdx) {
-    case US_PHY_F: // LF (Trái trước)
-      r = readCustomSonar(US_TRIG, US_ECHO_LF);
-      phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
-      g_usPhyLastEchoMs[US_PHY_F] = millis();
-      break;
-    case US_PHY_B: // RL (Trái sau)
-      r = readCustomSonar(US_TRIG, US_ECHO_RL);
-      phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
-      g_usPhyLastEchoMs[US_PHY_B] = millis();
-      break;
-    case US_PHY_L: // RF (Phải trước)
-      r = readCustomSonar(US_TRIG, US_ECHO_RF);
-      phy[US_PHY_L] = usFilterSample(US_PHY_L, r);
-      g_usPhyLastEchoMs[US_PHY_L] = millis();
-      break;
-    case US_PHY_R: // RR (Phải sau)
-      r = readCustomSonar(US_TRIG, US_ECHO_RR);
-      phy[US_PHY_R] = usFilterSample(US_PHY_R, r);
-      g_usPhyLastEchoMs[US_PHY_R] = millis();
-      break;
+  if (currentSensorIdx == 0) {
+    // 1. Cảm biến TRƯỚC (US_ECHO_LF - Pin 13)
+    r = readCustomSonar(US_TRIG, US_ECHO_LF);
+    phy[US_PHY_F] = usFilterSample(US_PHY_F, r);
+    g_usPhyLastEchoMs[US_PHY_F] = millis();
+    currentSensorIdx = 1;
+  } else {
+    // 2. Cảm biến SAU (US_ECHO_RL - Pin 12)
+    r = readCustomSonar(US_TRIG, US_ECHO_RL);
+    phy[US_PHY_B] = usFilterSample(US_PHY_B, r);
+    g_usPhyLastEchoMs[US_PHY_B] = millis();
+    currentSensorIdx = 0;
   }
 
   sensorsCommitPhyToState(phy);
-  currentSensorIdx = (currentSensorIdx + 1) % 4;
 #else
   int16_t phy[4];
   phy[US_PHY_F] = g_state.lidarFront;

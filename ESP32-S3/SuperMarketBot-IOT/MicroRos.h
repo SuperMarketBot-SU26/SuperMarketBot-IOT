@@ -105,14 +105,35 @@ static void cmd_vel_callback(const void *msgin) {
     g_state.cmd_velMoving = (fabs(lin) > ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN);
 
     if (fabs(lin) >= ROS2_LIN_MIN || fabs(ang) > ROS2_ANG_MIN) {
-        // Continuous Arcade Drive (No stepping/pausing needed for USB Serial)
+        // [SAFETY HARDSTOP] Phản xạ khẩn cấp bảo vệ phần cứng:
+        // Nếu đang tiến (lin > 0) mà phát hiện vật cản phía trước sát nút (< US_STOP_CM)
+        // -> Khóa tiến (lin = 0), chỉ cho phép quay (ang) để tìm đường thoát!
+        if (lin > 0.0f && obsFrontBlocked()) {
+            lin = 0.0f;
+            static uint32_t s_lastFrontBlockLog = 0;
+            if (nowMs - s_lastFrontBlockLog > 1000u) {
+                s_lastFrontBlockLog = nowMs;
+                Serial.printf("[SAFETY HARDSTOP] Vật cản trước mặt (%d cm)! Khóa tiến.\n", (int)obsFrontCm());
+            }
+        }
+        // Nếu đang lùi (lin < 0) mà phát hiện vật cản phía sau
+        if (lin < 0.0f && obsRearBlocked()) {
+            lin = 0.0f;
+            static uint32_t s_lastRearBlockLog = 0;
+            if (nowMs - s_lastRearBlockLog > 1000u) {
+                s_lastRearBlockLog = nowMs;
+                Serial.printf("[SAFETY HARDSTOP] Vật cản phía sau (%d cm)! Khóa lùi.\n", (int)obsBackCm());
+            }
+        }
+
+        // Continuous Arcade Drive
         float normFwd = lin / ROS2_LIN_MAX;
         float normRot = ang / ROS2_ANG_MAX_FWD;
 
-        // Sửa chiều xoay chuẩn ROS 2 (REP-103: ang > 0 là quay TRÁI / CCW):
-        // Trên cơ cấu phần cứng thực tế của xe: Bên trái (+), bên phải (-) -> xe quay TRÁI.
-        float normLeft  = normFwd + normRot;
-        float normRight = normFwd - normRot;
+        // Chuẩn vi sai ROS 2 (REP-103: ang > 0 là quay TRÁI / CCW):
+        // Quay TRÁI: bánh trái chậm/lùi (-), bánh phải nhanh/tiến (+)
+        float normLeft  = normFwd - normRot;
+        float normRight = normFwd + normRot;
 
         float maxNorm = max(fabsf(normLeft), fabsf(normRight));
         if (maxNorm > 1.0f) {

@@ -19,6 +19,7 @@
 #include "Config.h"
 #include "MotorLayout.h"
 #include "Localization.h"   // locSetDriveCmd() cho pose estimate dùng PWM
+#include "ObstacleSensors.h"
 
 enum MotorId : uint8_t { MID_FL = 0, MID_RL = 1, MID_FR = 2, MID_RR = 3 };
 
@@ -214,7 +215,8 @@ inline void botRotateCWImmediate(uint16_t pwm) {
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
   int32_t fPwm = (int32_t)pwm;
   int32_t rPwm = (fPwm * 82) / 100;
-  const int32_t sp[4] = {-fPwm, -rPwm, fPwm, rPwm};
+  // CW = Quay Phải -> Bánh Trái TIẾN (+), Bánh Phải LÙI (-)
+  const int32_t sp[4] = {fPwm, rPwm, -fPwm, -rPwm};
   motorApplyLayoutImmediate(sp);
 }
 
@@ -223,7 +225,8 @@ inline void botRotateCCWImmediate(uint16_t pwm) {
   locSetDriveCmd(0, 0);  // [LOC FIX] Tắt dead-reckoning khi xoay tại chỗ — tránh drift pose!
   int32_t fPwm = (int32_t)pwm;
   int32_t rPwm = (fPwm * 82) / 100;
-  const int32_t sp[4] = {fPwm, rPwm, -fPwm, -rPwm};
+  // CCW = Quay Trái -> Bánh Trái LÙI (-), Bánh Phải TIẾN (+)
+  const int32_t sp[4] = {-fPwm, -rPwm, fPwm, rPwm};
   motorApplyLayoutImmediate(sp);
 }
 
@@ -240,11 +243,10 @@ inline void botRotateCCW(uint16_t pwm) { botRotateCCWImmediate(pwm); }
  * @param base 0..PWM_MAX  tốc độ nền tối đa
  *
  * Cải tiến công nghệ 4WD Skid-Steer cho bánh cao su độ bám cao:
- *  1. Sửa lỗi đảo chiều trái/phải: x > 0 (rẽ phải), x < 0 (rẽ trái).
+ *  1. Vi sai chuẩn: x > 0 (rẽ phải), x < 0 (rẽ trái).
  *  2. Đường cong lái S-curve phi tuyến mượt mà (35% linear + 65% quadratic).
  *  3. Giảm xung đột ma sát 2 trục (Tire Scrub & Axle Fight Relief):
  *     Phân bổ lực trục trước 100%, trục sau bám mềm ~82% khi xoay tại chỗ.
- *     Nhờ đó dời tâm quay tức thời (ICR) về gần trục sau, giảm 40% lực cản ma sát giằng xé.
  *  4. Tự động chuyển đổi mượt về 100% khi xe chạy thẳng hoặc bo cua tốc độ cao.
  */
 inline void botDrive(int16_t x, int16_t y, uint16_t base) {
@@ -259,11 +261,19 @@ inline void botDrive(int16_t x, int16_t y, uint16_t base) {
   int32_t xCurve = (xSign * (35 * xAbs + (65 * xAbs * xAbs) / 100)) / 100;
   int32_t yCurve = (ySign * (30 * yAbs + (70 * yAbs * yAbs) / 100)) / 100;
 
-  // 2. Vi sai arcade chuẩn xác theo cơ cấu thực tế:
-  //    x > 0 (gạt phải) -> leftS âm, rightS dương -> xe quay PHẢI
-  //    x < 0 (gạt trái) -> leftS dương, rightS âm -> xe quay TRÁI
-  int32_t leftS  = ((yCurve - xCurve) * (int32_t)base) / 100;
-  int32_t rightS = ((yCurve + xCurve) * (int32_t)base) / 100;
+  // [SAFETY HARDSTOP] Nếu đang tiến mà có vật cản trước mặt -> triệt tiêu lệnh tiến
+  if (y > 0 && obsFrontBlocked()) {
+    yCurve = 0;
+  }
+  if (y < 0 && obsRearBlocked()) {
+    yCurve = 0;
+  }
+
+  // 2. Vi sai arcade chuẩn xác:
+  //    x > 0 (rẽ phải) -> leftS tăng (+), rightS giảm (-) -> xe quay PHẢI (CW)
+  //    x < 0 (rẽ trái) -> leftS giảm (-), rightS tăng (+) -> xe quay TRÁI (CCW)
+  int32_t leftS  = ((yCurve + xCurve) * (int32_t)base) / 100;
+  int32_t rightS = ((yCurve - xCurve) * (int32_t)base) / 100;
 
   // 3. Giải pháp chống rít bánh 4WD (Tire Scrubbing & Axle Fight Relief):
   int32_t fl = leftS, rl = leftS;

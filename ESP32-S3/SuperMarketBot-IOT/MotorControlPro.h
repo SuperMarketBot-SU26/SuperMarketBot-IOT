@@ -300,6 +300,14 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
     int32_t fwdScaled  = (int32_t)(fwdCurve  * (int32_t)base   / 100);
     int32_t turnScaled = (int32_t)(turnCurve * (int32_t)rotBase / 100);
 
+    // [SAFETY HARDSTOP] Ngắt lệnh tiến/lùi nếu có vật cản phía trước/sau
+    if (fwdF > 0 && obsFrontBlocked()) {
+        fwdScaled = 0;
+    }
+    if (fwdF < 0 && obsRearBlocked()) {
+        fwdScaled = 0;
+    }
+
     // 5) Differential drive (không strafe):
     //    left  = fwd + turn
     //    right = fwd - turn
@@ -307,8 +315,8 @@ inline void botDriveSmoothNormal(int16_t turn, int16_t fwd, uint16_t base, bool 
     constexpr int32_t FWD_GAIN  = 115;
     constexpr int32_t TURN_GAIN = 135;
     // Đồng bộ chiều rẽ với botDrive: turn > 0 -> rẽ phải, turn < 0 -> rẽ trái
-    int32_t leftS  = (fwdScaled  * FWD_GAIN  - turnScaled * TURN_GAIN) / 100;
-    int32_t rightS = (fwdScaled  * FWD_GAIN  + turnScaled * TURN_GAIN) / 100;
+    int32_t leftS  = (fwdScaled  * FWD_GAIN  + turnScaled * TURN_GAIN) / 100;
+    int32_t rightS = (fwdScaled  * FWD_GAIN  - turnScaled * TURN_GAIN) / 100;
     int32_t fl = leftS, rl = leftS;
     int32_t fr = rightS, rr = rightS;
 
