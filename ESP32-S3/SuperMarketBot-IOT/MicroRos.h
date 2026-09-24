@@ -134,22 +134,8 @@ static void cmd_vel_callback(const void *msgin) {
             (int16_t)constrain((int)(leftPwm  * 100L / ROS2_PWM_MAX), -100, 100),
             (int16_t)constrain((int)(rightPwm * 100L / ROS2_PWM_MAX), -100, 100));
         
-        // 4WD ICR Scrub Relief: Trục trước dẫn hướng 100%, trục sau bám mềm 82% khi xoay tại chỗ
-        int32_t fl = leftPwm,  rl = leftPwm;
-        int32_t fr = rightPwm, rr = rightPwm;
-        if (fabsf(normRot) > 0.05f) {
-            float fwdRatio = fabsf(normFwd);
-            if (fwdRatio > 0.50f) fwdRatio = 0.50f;
-            int32_t followerRatio = 82 + (int32_t)(fwdRatio * 18.0f / 0.50f); // 82% -> 100%
-            if (normFwd >= 0.0f) {
-                rl = (leftPwm  * followerRatio) / 100;
-                rr = (rightPwm * followerRatio) / 100;
-            } else {
-                fl = (leftPwm  * followerRatio) / 100;
-                fr = (rightPwm * followerRatio) / 100;
-            }
-        }
-        const int32_t sp[4] = {fl, rl, fr, rr};
+        // 100% công suất cho cả 4 bánh trên ROS 2 (không giảm lực trục sau khi xoay)
+        const int32_t sp[4] = {leftPwm, leftPwm, rightPwm, rightPwm};
         ::motorApplyLayout(sp);
     } else {
         ::botStop();
