@@ -279,7 +279,7 @@
  #define OA_FALLBACK_WAIT_MS     10000u
  /* -------------------- AUTO-DOCKING (Phase 3.5) --------------------- */
  /** Node ID trạm sạc trong database (phải khớp seed data) */
- #define DOCK_NODE_ID            2
+ #define DOCK_NODE_ID            7
  /** Ngưỡng pin yếu kích hoạt auto-dock (%) */
  #define DOCK_LOW_BAT_PCT        20
  /** Ngưỡng pin đầy để reset dock flag (%) */
